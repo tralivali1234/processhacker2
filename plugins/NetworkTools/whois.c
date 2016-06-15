@@ -333,10 +333,6 @@ BOOLEAN WhoisQueryLookup(
     return TRUE;
 }
 
-
-
-
-
 NTSTATUS NetworkWhoisThreadStart(
     _In_ PVOID Parameter
 )

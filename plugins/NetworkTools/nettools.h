@@ -74,7 +74,7 @@ extern PPH_PLUGIN PluginInstance;
 
 typedef enum _PH_NETWORK_ACTION
 {
-    NETWORK_ACTION_PING,
+    NETWORK_ACTION_PING = 1,
     NETWORK_ACTION_TRACEROUTE,
     NETWORK_ACTION_WHOIS,
     NETWORK_ACTION_FINISH,
@@ -101,7 +101,6 @@ typedef struct _NETWORK_OUTPUT_CONTEXT
     HFONT FontHandle;
     HICON IconHandle;
 
-    ULONG PingSize;
     ULONG CurrentPingMs;
     ULONG MaxPingTimeout;
     ULONG HashFailCount;
@@ -168,6 +167,5 @@ VOID PerformTracertAction(
     _In_ PH_NETWORK_ACTION Action,
     _In_ PH_IP_ENDPOINT RemoteEndpoint
     );
-
 
 #endif

@@ -50,6 +50,7 @@ NTSTATUS NetworkPingThreadStart(
     ULONG icmpReplyLength = 0;
     PVOID icmpReplyBuffer = NULL;
     PPH_BYTES icmpEchoBuffer = NULL;
+    PPH_STRING icmpRandString = NULL;
     IP_OPTION_INFORMATION pingOptions =
     {
         255,         // Time To Live
@@ -61,35 +62,29 @@ NTSTATUS NetworkPingThreadStart(
 
     PNETWORK_OUTPUT_CONTEXT context = (PNETWORK_OUTPUT_CONTEXT)Parameter;
 
+
+    // Create ICMP echo buffer.
+    if (icmpRandString = PhCreateStringEx(NULL, PhGetIntegerSetting(SETTING_NAME_PING_SIZE) * 2 + 2))
+    {
+        // Create a random string to fill the buffer.
+        PhGenerateRandomAlphaString(icmpRandString->Buffer, (ULONG)icmpRandString->Length / sizeof(WCHAR));
+
+        icmpEchoBuffer = PhConvertUtf16ToMultiByte(icmpRandString->Buffer);
+        PhDereferenceObject(icmpRandString);
+    }
+    //PPH_STRING version;
+
+    //// We're using a default length, query the PH version and use the previous buffer format.
+    //version = PhGetPhVersion();
+
+    //if (version)
+    //{
+    //    icmpEchoBuffer = FormatAnsiString("processhacker_%S_0x0D06F00D_x1", version->Buffer);
+    //    PhDereferenceObject(version);
+    //}
+
     __try
     {
-        // Create ICMP echo buffer.
-        if (context->PingSize > 0 && context->PingSize != 32)
-        {
-            PPH_STRING randString;
-
-            randString = PhCreateStringEx(NULL, context->PingSize * 2 + 2);
-
-            // Create a random string to fill the buffer.
-            PhGenerateRandomAlphaString(randString->Buffer, (ULONG)randString->Length / sizeof(WCHAR));
-
-            icmpEchoBuffer = PhConvertUtf16ToMultiByte(randString->Buffer);
-            PhDereferenceObject(randString);
-        }
-        else
-        {
-            PPH_STRING version;
-
-            // We're using a default length, query the PH version and use the previous buffer format.
-            version = PhGetPhVersion();
-
-            if (version)
-            {
-                icmpEchoBuffer = FormatAnsiString("processhacker_%S_0x0D06F00D_x1", version->Buffer);
-                PhDereferenceObject(version);
-            }
-        }
-
         if (context->RemoteEndpoint.Address.Type == PH_IPV6_NETWORK_TYPE)
         {
             SOCKADDR_IN6 icmp6LocalAddr = { 0 };
@@ -132,6 +127,7 @@ NTSTATUS NetworkPingThreadStart(
                 );
 
             icmp6ReplyStruct = (PICMPV6_ECHO_REPLY2)icmpReplyBuffer;
+
             if (icmpReplyCount > 0 && icmp6ReplyStruct)
             {
                 BOOLEAN icmpPacketSignature = FALSE;
@@ -332,7 +328,6 @@ INT_PTR CALLBACK NetworkPingWndProc(
             context->WindowHandle = hwndDlg;
             context->StatusHandle = GetDlgItem(hwndDlg, IDC_MAINTEXT);
             context->MaxPingTimeout = PhGetIntegerSetting(SETTING_NAME_PING_MINIMUM_SCALING);
-            context->PingSize = PhGetIntegerSetting(SETTING_NAME_PING_SIZE);
 
             windowRectangle.Position = PhGetIntegerPairSetting(SETTING_NAME_PING_WINDOW_POSITION);
             windowRectangle.Size = PhGetScalableIntegerPairSetting(SETTING_NAME_PING_WINDOW_SIZE, TRUE).Pair;
@@ -383,7 +378,7 @@ INT_PTR CALLBACK NetworkPingWndProc(
             PhAddLayoutItem(&context->LayoutManager, GetDlgItem(hwndDlg, IDC_PINGS_LOST), NULL, PH_ANCHOR_BOTTOM | PH_ANCHOR_LEFT);
             PhAddLayoutItem(&context->LayoutManager, GetDlgItem(hwndDlg, IDC_BAD_HASH), NULL, PH_ANCHOR_BOTTOM | PH_ANCHOR_LEFT);
             PhAddLayoutItem(&context->LayoutManager, GetDlgItem(hwndDlg, IDC_ANON_ADDR), NULL, PH_ANCHOR_BOTTOM | PH_ANCHOR_LEFT);
-            PhAddLayoutItem(&context->LayoutManager, GetDlgItem(hwndDlg, IDOK), NULL, PH_ANCHOR_BOTTOM | PH_ANCHOR_RIGHT);
+            //PhAddLayoutItem(&context->LayoutManager, GetDlgItem(hwndDlg, IDOK), NULL, PH_ANCHOR_BOTTOM | PH_ANCHOR_RIGHT);
             panelItem = PhAddLayoutItem(&context->LayoutManager, GetDlgItem(hwndDlg, IDC_PING_LAYOUT), NULL, PH_ANCHOR_ALL);
             PhAddLayoutItemEx(&context->LayoutManager, context->PingGraphHandle, NULL, PH_ANCHOR_ALL, panelItem->Margin);
 
@@ -409,7 +404,7 @@ INT_PTR CALLBACK NetworkPingWndProc(
             }
 
             SetWindowText(hwndDlg, PhaFormatString(L"Ping %s", context->IpAddressString)->Buffer);
-            SetWindowText(context->StatusHandle, PhaFormatString(L"Pinging %s with %lu bytes of data:", context->IpAddressString, context->PingSize)->Buffer);
+            SetWindowText(context->StatusHandle, PhaFormatString(L"Pinging %s with %lu bytes of data...", context->IpAddressString, PhGetIntegerSetting(SETTING_NAME_PING_SIZE))->Buffer);
 
             PhRegisterCallback(
                 &PhProcessesUpdatedEvent,
@@ -468,35 +463,14 @@ INT_PTR CALLBACK NetworkPingWndProc(
     case WM_SIZING:
         PhResizingMinimumSize((PRECT)lParam, wParam, 420, 250);
         break;
-    case WM_CTLCOLORBTN:
-    case WM_CTLCOLORDLG:
-    case WM_CTLCOLORSTATIC:
-        {
-            HDC hDC = (HDC)wParam;
-            HWND hwndChild = (HWND)lParam;
-
-            // Check for our static label and change the color.
-            if (GetDlgCtrlID(hwndChild) == IDC_MAINTEXT)
-            {
-                SetTextColor(hDC, RGB(19, 112, 171));
-            }
-
-            // Set a transparent background for the control backcolor.
-            SetBkMode(hDC, TRANSPARENT);
-
-            // set window background color.
-            return (INT_PTR)GetSysColorBrush(COLOR_WINDOW);
-        }
-        break;
     case WM_PING_UPDATE:
         {
-            ULONG i = 0;
             ULONG maxGraphHeight = 0;
             ULONG pingAvgValue = 0;
 
             NetworkPingUpdateGraph(context);
 
-            for (i = 0; i < context->PingHistory.Count; i++)
+            for (ULONG i = 0; i < context->PingHistory.Count; i++)
             {
                 maxGraphHeight = maxGraphHeight + PhGetItemCircularBuffer_ULONG(&context->PingHistory, i);
                 pingAvgValue = maxGraphHeight / context->PingHistory.Count;
@@ -513,8 +487,7 @@ INT_PTR CALLBACK NetworkPingWndProc(
                 L"Pings sent: %lu", context->PingSentCount)->Buffer);
             SetDlgItemText(hwndDlg, IDC_PINGS_LOST, PhaFormatString(
                 L"Pings lost: %lu (%.0f%%)", context->PingLossCount,
-                ((FLOAT)context->PingLossCount / context->PingSentCount * 100)
-                )->Buffer);
+                ((FLOAT)context->PingLossCount / context->PingSentCount * 100))->Buffer);
 
             SetDlgItemText(hwndDlg, IDC_BAD_HASH, PhaFormatString(
                 L"Bad hashes: %lu", context->HashFailCount)->Buffer);
