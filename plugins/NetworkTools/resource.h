@@ -18,11 +18,14 @@
 #define IDC_ICMP_AVG                    1015
 #define IDC_MAINTEXT                    1016
 #define IDC_ANON_ADDR                   1017
+#define IDC_DISTANCE                    1018
+#define IDC_DISTEXT                     1018
 #define IDC_MORE_INFO                   1019
 #define IDC_PINGS_SENT                  1020
 #define IDC_PING_LAYOUT                 1021
 #define IDC_BAD_HASH                    1022
 #define IDC_STATUS                      1023
+#define IDC_SPEEDTEXT                   1023
 #define ID_NETWORK_PING                 22465
 #define ID_NETWORK_TRACEROUTE           22466
 #define ID_NETWORK_WHOIS                22467

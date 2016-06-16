@@ -60,6 +60,9 @@
 //       + space for an IO_STATUS_BLOCK structure.
 #define ICMP_BUFFER_SIZE(EchoReplyLength, Buffer) (ULONG)(((EchoReplyLength) + (Buffer)->Length) + 8 + sizeof(IO_STATUS_BLOCK) + MAX_OPT_SIZE)
 
+#define BITS_IN_ONE_BYTE 8
+#define NDIS_UNIT_OF_MEASUREMENT 100
+
 // The ICMPV6_ECHO_REPLY struct doesn't have a field to access the reply data,
 // so copy the struct and add an additional Data field.
 typedef struct _ICMPV6_ECHO_REPLY2

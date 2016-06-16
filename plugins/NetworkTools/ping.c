@@ -22,15 +22,166 @@
 
 #include "nettools.h"
 #include <commonutil.h>
+#include <winhttp.h>
+#include <math.h>
 
+PSTR CdnUserLat;
+PSTR CdnUserLong;
 #define WM_PING_UPDATE (WM_APP + 151)
 
 static RECT NormalGraphTextMargin = { 5, 5, 5, 5 };
 static RECT NormalGraphTextPadding = { 3, 3, 3, 3 };
 
+BOOLEAN ReadRequestString(
+    _In_ HINTERNET Handle,
+    _Out_ _Deref_post_z_cap_(*DataLength) PSTR *Data,
+    _Out_ ULONG *DataLength)
+{
+    PSTR data;
+    ULONG allocatedLength;
+    ULONG dataLength;
+    ULONG returnLength;
+    BYTE buffer[PAGE_SIZE];
+
+    allocatedLength = sizeof(buffer);
+    data = (PSTR)PhAllocate(allocatedLength);
+    dataLength = 0;
+
+    // Zero the buffer
+    memset(buffer, 0, PAGE_SIZE);
+
+    while (WinHttpReadData(Handle, buffer, PAGE_SIZE, &returnLength))
+    {
+        if (returnLength == 0)
+            break;
+
+        if (allocatedLength < dataLength + returnLength)
+        {
+            allocatedLength *= 2;
+            data = (PSTR)PhReAllocate(data, allocatedLength);
+        }
+
+        // Copy the returned buffer into our pointer
+        memcpy(data + dataLength, buffer, returnLength);
+        // Zero the returned buffer for the next loop
+        //memset(buffer, 0, returnLength);
+
+        dataLength += returnLength;
+    }
+
+    if (allocatedLength < dataLength + 1)
+    {
+        allocatedLength++;
+        data = (PSTR)PhReAllocate(data, allocatedLength);
+    }
+
+    // Ensure that the buffer is null-terminated.
+    data[dataLength] = 0;
+
+    *DataLength = dataLength;
+    *Data = data;
+
+    return TRUE;
+}
+
+static PSTR XmlParseGeoToken(
+    _In_ PSTR XmlString,
+    _In_ PSTR XmlTokenName,
+    _In_ PSTR XmlAttrName)
+{
+    PSTR xmlTokenNext = NULL;
+    PSTR xmlStringData = _strdup(XmlString);
+    PSTR xmlTokenString = strtok_s(
+        xmlStringData,
+        "< >",
+        &xmlTokenNext);
+
+    __try
+    {
+        while (xmlTokenString)
+        {
+            if (_stricmp(xmlTokenString, XmlTokenName) == 0)
+            {
+                while (xmlTokenString)
+                {
+                    if (_stricmp(xmlTokenString, XmlAttrName) == 0)
+                    {
+                        xmlTokenString = strtok_s(NULL, "\n<>", &xmlTokenNext);
+                        __leave;
+                    }
+
+                    xmlTokenString = strtok_s(NULL, "\n<>", &xmlTokenNext);
+                }
+            }
+
+            xmlTokenString = strtok_s(NULL, "<>", &xmlTokenNext);
+        }
+    }
+    __finally
+    {
+
+    }
+
+    if (xmlTokenString)
+    {
+        PSTR xmlStringDup = _strdup(xmlTokenString);
+        free(xmlStringData);
+        return xmlStringDup;
+    }
+
+    free(xmlStringData);
+    return NULL;
+}
+
+static PSTR XmlParseAttrToken(
+    __in PSTR XmlString,
+    __in PSTR XmlTokenName,
+    __in PSTR XmlAttrName)
+{
+    PSTR xmlTokenNext = NULL;
+    PSTR xmlStringData = _strdup(XmlString);
+    PSTR xmlTokenString = strtok_s(
+        xmlStringData,
+        "< >",
+        &xmlTokenNext);
+
+    while (xmlTokenString)
+    {
+        if (!_stricmp(xmlTokenString, XmlTokenName))
+        {
+            // We found the value.
+            while (xmlTokenString)
+            {
+                if (!_stricmp(xmlTokenString, XmlAttrName))
+                {
+                    // We found the Attribute.
+                    xmlTokenString = strtok_s(NULL, "\"", &xmlTokenNext);
+                    break;
+                }
+
+                xmlTokenString = strtok_s(NULL, "= \"", &xmlTokenNext);
+            }
+
+            if (xmlTokenString)
+                break;
+        }
+
+        xmlTokenString = strtok_s(NULL, "< >", &xmlTokenNext);
+    }
+
+    if (xmlTokenString)
+    {
+        PSTR xmlStringDup = _strdup(xmlTokenString);
+        free(xmlStringData);
+        return xmlStringDup;
+    }
+
+    free(xmlStringData);
+    return NULL;
+}
+
 VOID NetworkPingUpdateGraph(
-    _In_ PNETWORK_OUTPUT_CONTEXT Context
-    )
+    _In_ PNETWORK_OUTPUT_CONTEXT Context)
 {
     Context->PingGraphState.Valid = FALSE;
     Context->PingGraphState.TooltipIndex = -1;
@@ -38,6 +189,316 @@ VOID NetworkPingUpdateGraph(
     Graph_Draw(Context->PingGraphHandle);
     Graph_UpdateTooltip(Context->PingGraphHandle);
     InvalidateRect(Context->PingGraphHandle, NULL, FALSE);
+}
+
+
+
+
+/*  Definitions:                                                           */
+/*    South latitudes are negative, east longitudes are positive           */
+/*                                                                         */
+/*  Passed to function:                                                    */
+/*    lat1, lon1 = Latitude and Longitude of point 1 (in decimal degrees)  */
+/*    lat2, lon2 = Latitude and Longitude of point 2 (in decimal degrees)  */
+/*    unit = the unit you desire for results                               */
+/*           where: 'M' is statute miles                                   */
+/*                  'K' is kilometers (default)                            */
+/*                  'N' is nautical miles   (distance = distance * 0.8684) */
+#define pi 3.14159265358979323846
+
+/* decimal degrees to radians */
+static __inline double deg2rad(double deg)
+{
+    return (deg * pi / 180);
+}
+
+/* radians to decimal degrees */
+static __inline double rad2deg(double rad)
+{
+    return (rad * 180 / pi);
+}
+
+
+DOUBLE GeoDistance(
+    __in DOUBLE Latitude,
+    __in DOUBLE Longitude,
+    __in DOUBLE CompareLatitude,
+    __in DOUBLE CompareLongitude)
+{
+    DOUBLE theta = 0;
+    DOUBLE distance = 0;
+
+    theta = Longitude - CompareLongitude;
+    distance = sin(deg2rad(Latitude)) * sin(deg2rad(CompareLatitude)) + cos(deg2rad(Latitude)) * cos(deg2rad(CompareLatitude)) * cos(deg2rad(theta));
+    distance = acos(distance);
+    distance = rad2deg(distance);
+    distance = distance * 60 * 1.1515;
+
+    //if (!LocaleIsMetric())
+    {
+        distance = distance * 1.609344;
+
+       // WriteStringFormatFileStream(_T("Minimum distance estimation: "));
+        //StringFormatColor(FOREGROUND_GREEN | FOREGROUND_INTENSITY, _T("%.3fkm\n"), distance);
+    }
+    //else
+    {
+       // WriteStringFormatFileStream(_T("Minimum distance estimation: "));
+        //StringFormatColor(FOREGROUND_GREEN | FOREGROUND_INTENSITY, _T("%.3fmi\n"), distance);
+    }
+
+    return distance;
+}
+
+
+
+
+VOID LookupSpeedTestConfig(
+    _In_ PNETWORK_OUTPUT_CONTEXT Context,
+    _In_ IPAddr ipv4_Addr)
+{
+    HINTERNET httpSessionHandle = NULL;
+    HINTERNET httpConnectionHandle = NULL;
+    HINTERNET httpRequestHandle = NULL;
+    WINHTTP_CURRENT_USER_IE_PROXY_CONFIG proxyConfig = { 0 };
+
+    WinHttpGetIEProxyConfigForCurrentUser(&proxyConfig);
+
+    __try
+    {
+        if (!(httpSessionHandle = WinHttpOpen(
+            L"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/51.0.2704.84 Safari/537.36",
+            proxyConfig.lpszProxy != NULL ? WINHTTP_ACCESS_TYPE_NAMED_PROXY : WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
+            proxyConfig.lpszProxy,
+            proxyConfig.lpszProxyBypass,
+            0)))
+        {
+            __leave;
+        }
+
+        if (WindowsVersion >= WINDOWS_8_1)
+        {
+            // Enable GZIP and DEFLATE support on Windows 8.1 and above using undocumented flags.
+            ULONG httpFlags = WINHTTP_DECOMPRESSION_FLAG_GZIP | WINHTTP_DECOMPRESSION_FLAG_DEFLATE;
+
+            WinHttpSetOption(
+                httpSessionHandle,
+                WINHTTP_OPTION_DECOMPRESSION,
+                &httpFlags,
+                sizeof(ULONG));
+        }
+
+        if (!(httpConnectionHandle = WinHttpConnect(
+            httpSessionHandle,
+            L"www.speedtest.net",
+            INTERNET_DEFAULT_HTTP_PORT,
+            0)))
+        {
+            __leave;
+        }
+
+        if (!(httpRequestHandle = WinHttpOpenRequest(
+            httpConnectionHandle,
+            NULL,
+            L"/speedtest-config.php",
+            NULL,
+            WINHTTP_NO_REFERER,
+            WINHTTP_DEFAULT_ACCEPT_TYPES,
+            WINHTTP_FLAG_REFRESH)))
+        {
+             __leave;
+        }
+
+        WinHttpAddRequestHeaders(
+            httpRequestHandle,
+            L"Accept: text/html,application/xhtml+xml,application/xml",
+            -1,
+            WINHTTP_ADDREQ_FLAG_ADD);
+
+        //if (WindowsVersion >= WINDOWS_7)
+        //{
+        //    ULONG keepAlive = WINHTTP_DISABLE_KEEP_ALIVE;
+        //    WinHttpSetOption(httpRequestHandle, WINHTTP_OPTION_DISABLE_FEATURE, &keepAlive, sizeof(ULONG));
+        //}
+
+        if (!WinHttpSendRequest(
+            httpRequestHandle,
+            WINHTTP_NO_ADDITIONAL_HEADERS,
+            0,
+            WINHTTP_NO_REQUEST_DATA,
+            0,
+            WINHTTP_IGNORE_REQUEST_TOTAL_LENGTH,
+            0))
+        {
+            __leave;
+        }
+
+        if (WinHttpReceiveResponse(httpRequestHandle, NULL))
+        {
+            ULONG xmlStringBufferLength = 0;
+            PSTR xmlStringBuffer = NULL;
+
+            if (!ReadRequestString(httpRequestHandle, &xmlStringBuffer, &xmlStringBufferLength))
+            {
+                __leave;
+            }
+
+            // Check the buffer for valid data.
+            if (xmlStringBuffer == NULL || xmlStringBuffer[0] == '\0')
+            {
+                __leave;
+            }
+
+            // dlAvgString = StringFormatSize(_atoi64(this->CdnUserDlAverageISP) * 1000);
+            // ulAvgString = StringFormatSize(_atoi64(this->CdnUserUlAverageISP) * 1000);
+
+            PSTR CdnUserIpAddress = XmlParseAttrToken(xmlStringBuffer, "client", "ip");
+            PSTR CdnUserISP = XmlParseAttrToken(xmlStringBuffer, "client", "isp");
+            PSTR CdnUserDlAverageISP = XmlParseAttrToken(xmlStringBuffer, "client", "ispdlavg");
+            PSTR CdnUserUlAverageISP = XmlParseAttrToken(xmlStringBuffer, "client", "ispulavg");
+
+            CdnUserLat = XmlParseAttrToken(xmlStringBuffer, "client", "lat");
+            CdnUserLong = XmlParseAttrToken(xmlStringBuffer, "client", "lon");
+        }
+    }
+    __finally
+    {
+        if (httpRequestHandle)
+        {
+            WinHttpCloseHandle(httpRequestHandle);
+        }
+
+        WinHttpCloseHandle(httpConnectionHandle);
+        WinHttpCloseHandle(httpSessionHandle);
+    }
+}
+
+VOID QueryServerGeoLocation(
+    _In_ PNETWORK_OUTPUT_CONTEXT Context,
+    IPAddr ipv4_Addr)
+{
+    HINTERNET httpSessionHandle = NULL;
+    HINTERNET httpConnectionHandle = NULL;
+    HINTERNET httpRequestHandle = NULL;
+    WINHTTP_CURRENT_USER_IE_PROXY_CONFIG proxyConfig = { 0 };
+
+    // Query the current system proxy
+    WinHttpGetIEProxyConfigForCurrentUser(&proxyConfig);
+
+    __try
+    {
+        // Open the HTTP session with the system proxy configuration if available
+        if (!(httpSessionHandle = WinHttpOpen(
+            L"",
+            proxyConfig.lpszProxy != NULL ? WINHTTP_ACCESS_TYPE_NAMED_PROXY : WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
+            proxyConfig.lpszProxy,
+            proxyConfig.lpszProxyBypass,
+            0)))
+        {
+            __leave;
+        }
+
+        if (WindowsVersion >= WINDOWS_8_1)
+        {
+            // Enable GZIP and DEFLATE support on Windows 8.1 and above using undocumented flags.
+            ULONG httpFlags = WINHTTP_DECOMPRESSION_FLAG_GZIP | WINHTTP_DECOMPRESSION_FLAG_DEFLATE;
+
+            WinHttpSetOption(
+                httpSessionHandle,
+                WINHTTP_OPTION_DECOMPRESSION,
+                &httpFlags,
+                sizeof(ULONG));
+        }
+
+        if (!(httpConnectionHandle = WinHttpConnect(
+            httpSessionHandle,
+            L"geoip.prototypeapp.com",
+            INTERNET_DEFAULT_HTTP_PORT,
+            0)))
+        {
+            __leave;
+        }
+
+        PPH_STRING ipAddrString = PhFormatString(L"/api/locate?format=xml&ip=%d.%d.%d.%d",
+            (ipv4_Addr >> 0) & 255,
+            (ipv4_Addr >> 8) & 255,
+            (ipv4_Addr >> 16) & 255,
+            (ipv4_Addr >> 24) & 255);
+
+        if (!(httpRequestHandle = WinHttpOpenRequest(
+            httpConnectionHandle,
+            NULL,
+            ipAddrString->Buffer,
+            NULL,
+            WINHTTP_NO_REFERER,
+            WINHTTP_DEFAULT_ACCEPT_TYPES,
+            WINHTTP_FLAG_REFRESH)))
+        {
+             __leave;
+        }
+
+        //if (WindowsVersion >= WINDOWS_7)
+        //{
+        //    ULONG keepAlive = WINHTTP_DISABLE_KEEP_ALIVE;
+        //    WinHttpSetOption(httpRequestHandle, WINHTTP_OPTION_DISABLE_FEATURE, &keepAlive, sizeof(ULONG));
+        //}
+
+        if (!WinHttpSendRequest(
+            httpRequestHandle,
+            WINHTTP_NO_ADDITIONAL_HEADERS,
+            0,
+            WINHTTP_NO_REQUEST_DATA,
+            0,
+            WINHTTP_IGNORE_REQUEST_TOTAL_LENGTH,
+            0))
+        {
+            __leave;
+        }
+
+        if (WinHttpReceiveResponse(httpRequestHandle, NULL))
+        {
+            ULONG xmlStringBufferLength = 0;
+            PSTR xmlStringBuffer = NULL;
+            PSTR serverLatitude = NULL;
+            PSTR serverLongitude = NULL;
+
+            if (!ReadRequestString(httpRequestHandle, &xmlStringBuffer, &xmlStringBufferLength))
+            {
+                __leave;
+            }
+
+            // Check the buffer for valid data.
+            if (xmlStringBuffer == NULL || xmlStringBuffer[0] == '\0')
+            {
+                __leave;
+            }
+
+            if (!(serverLatitude = XmlParseGeoToken(xmlStringBuffer, "coords", "latitude")))
+            {
+                __leave;
+            }
+
+            if (!(serverLongitude = XmlParseGeoToken(xmlStringBuffer, "coords", "longitude")))
+            {
+                  __leave;
+            }
+
+            // Print the server distance.
+            double dist = GeoDistance(atof(CdnUserLat), atof(CdnUserLong), atof(serverLatitude), atof(serverLongitude));
+
+            SetDlgItemText(Context->WindowHandle, IDC_DISTANCE, PhFormatString(L"Distance (Est): %.3fkm", dist)->Buffer);
+        }
+    }
+    __finally
+    {
+        if (httpRequestHandle)
+        {
+            WinHttpCloseHandle(httpRequestHandle);
+        }
+
+        WinHttpCloseHandle(httpConnectionHandle);
+        WinHttpCloseHandle(httpSessionHandle);
+    }
 }
 
 NTSTATUS NetworkPingThreadStart(
@@ -60,28 +521,20 @@ NTSTATUS NetworkPingThreadStart(
     };
     //pingOptions.Flags |= IP_FLAG_REVERSE;
 
+    ULONG pingFirstMs = 0;
+    ULONG pingSecondMs = 0;
+    ULONG pingTotalMs = 0;
+    ULONG pingCount = 0;
+    ULONG pingSpeed = 0;
     PNETWORK_OUTPUT_CONTEXT context = (PNETWORK_OUTPUT_CONTEXT)Parameter;
 
-
-    // Create ICMP echo buffer.
     if (icmpRandString = PhCreateStringEx(NULL, PhGetIntegerSetting(SETTING_NAME_PING_SIZE) * 2 + 2))
     {
-        // Create a random string to fill the buffer.
         PhGenerateRandomAlphaString(icmpRandString->Buffer, (ULONG)icmpRandString->Length / sizeof(WCHAR));
 
         icmpEchoBuffer = PhConvertUtf16ToMultiByte(icmpRandString->Buffer);
         PhDereferenceObject(icmpRandString);
     }
-    //PPH_STRING version;
-
-    //// We're using a default length, query the PH version and use the previous buffer format.
-    //version = PhGetPhVersion();
-
-    //if (version)
-    //{
-    //    icmpEchoBuffer = FormatAnsiString("processhacker_%S_0x0D06F00D_x1", version->Buffer);
-    //    PhDereferenceObject(version);
-    //}
 
     __try
     {
@@ -168,6 +621,7 @@ NTSTATUS NetworkPingThreadStart(
         {
             IPAddr icmpLocalAddr = 0;
             IPAddr icmpRemoteAddr = 0;
+            BOOLEAN icmpPacketSignature = FALSE;
             PICMP_ECHO_REPLY icmpReplyStruct = NULL;
 
             // Create ICMPv4 handle.
@@ -187,7 +641,57 @@ NTSTATUS NetworkPingThreadStart(
 
             InterlockedIncrement(&context->PingSentCount);
 
+            // First ping with no data...
             // Send ICMPv4 ping...
+            icmpReplyCount = IcmpSendEcho2Ex(
+                icmpHandle,
+                NULL,
+                NULL,
+                NULL,
+                icmpLocalAddr,
+                icmpRemoteAddr,
+                NULL,
+                0,
+                &pingOptions,
+                icmpReplyBuffer,
+                icmpReplyLength,
+                context->MaxPingTimeout);
+
+            icmpReplyStruct = (PICMP_ECHO_REPLY)icmpReplyBuffer;
+
+            if (icmpReplyStruct->Status != IP_SUCCESS)
+            {
+                InterlockedIncrement(&context->PingLossCount);
+            }
+
+            if (icmpReplyStruct->Address != context->RemoteEndpoint.Address.InAddr.s_addr)
+            {
+                InterlockedIncrement(&context->UnknownAddrCount);
+            }
+
+            if (icmpReplyStruct->DataSize == icmpEchoBuffer->Length)
+            {
+                icmpPacketSignature = RtlEqualMemory(
+                    icmpEchoBuffer->Buffer,
+                    icmpReplyStruct->Data,
+                    icmpReplyStruct->DataSize);
+            }
+
+            if (!icmpPacketSignature)
+            {
+                InterlockedIncrement(&context->HashFailCount);
+            }
+
+            if (icmpReplyStruct->Status == IP_SUCCESS)
+            {
+                icmpCurrentPingMs = icmpReplyStruct->RoundTripTime;
+                pingFirstMs = icmpReplyStruct->RoundTripTime;
+
+                LookupSpeedTestConfig(context, icmpReplyStruct->Address);
+                QueryServerGeoLocation(context, icmpReplyStruct->Address);
+            }
+
+            // Second ping with dwReplySize data...
             icmpReplyCount = IcmpSendEcho2Ex(
                 icmpHandle,
                 NULL,
@@ -200,44 +704,48 @@ NTSTATUS NetworkPingThreadStart(
                 &pingOptions,
                 icmpReplyBuffer,
                 icmpReplyLength,
-                context->MaxPingTimeout
-                );
+                context->MaxPingTimeout);
 
             icmpReplyStruct = (PICMP_ECHO_REPLY)icmpReplyBuffer;
 
-            if (icmpReplyStruct && icmpReplyCount > 0)
+            if (icmpReplyLength == 0)
             {
-                BOOLEAN icmpPacketSignature = FALSE;
+                //WriteStringFormatFileStream(_T("Failed: %d\n"), GetLastError());
+            }
 
-                if (icmpReplyStruct->Status != IP_SUCCESS)
-                {
-                    InterlockedIncrement(&context->PingLossCount);
-                }
+            if (icmpReplyStruct->Status == IP_SUCCESS)
+            {
+                pingSecondMs = icmpReplyStruct->RoundTripTime;
+            }
 
-                if (icmpReplyStruct->Address != context->RemoteEndpoint.Address.InAddr.s_addr)
-                {
-                    InterlockedIncrement(&context->UnknownAddrCount);
-                }
-
-                if (icmpReplyStruct->DataSize == icmpEchoBuffer->Length)
-                {
-                    icmpPacketSignature = _memicmp(
-                        icmpEchoBuffer->Buffer,
-                        icmpReplyStruct->Data,
-                        icmpReplyStruct->DataSize
-                        ) == 0;
-                }
-
-                icmpCurrentPingMs = icmpReplyStruct->RoundTripTime;
-
-                if (!icmpPacketSignature)
-                {
-                    InterlockedIncrement(&context->HashFailCount);
-                }
+            if (pingFirstMs > pingSecondMs)
+            {
+                //break;
+            }
+            else if (pingFirstMs == pingSecondMs)
+            {
+                //break;
             }
             else
             {
-                InterlockedIncrement(&context->PingLossCount);
+                pingTotalMs += (pingSecondMs - pingFirstMs);
+                pingCount++;
+
+                if (pingTotalMs > 0)
+                {
+                    pingTotalMs = (pingTotalMs / pingCount);
+                    pingSpeed = ((((icmpReplyLength * 2) * 1000) / pingTotalMs) * BITS_IN_ONE_BYTE); // 8 Kb (kilobits) in every KB (kilobyte)
+                                                                                                 // [%d Kbps] = (pingSpeed / 1024)
+                    if (pingSpeed)
+                    {
+                        PPH_STRING speed = PhFormatSize(pingSpeed, -1);
+
+                        SetDlgItemText(context->WindowHandle, IDC_SPEEDTEXT,
+                            PhaFormatString(L"Speed (Est): %s/s", speed->Buffer)->Buffer);
+
+                        PhDereferenceObject(speed);
+                    }
+                }
             }
         }
 
@@ -378,7 +886,10 @@ INT_PTR CALLBACK NetworkPingWndProc(
             PhAddLayoutItem(&context->LayoutManager, GetDlgItem(hwndDlg, IDC_PINGS_LOST), NULL, PH_ANCHOR_BOTTOM | PH_ANCHOR_LEFT);
             PhAddLayoutItem(&context->LayoutManager, GetDlgItem(hwndDlg, IDC_BAD_HASH), NULL, PH_ANCHOR_BOTTOM | PH_ANCHOR_LEFT);
             PhAddLayoutItem(&context->LayoutManager, GetDlgItem(hwndDlg, IDC_ANON_ADDR), NULL, PH_ANCHOR_BOTTOM | PH_ANCHOR_LEFT);
-            //PhAddLayoutItem(&context->LayoutManager, GetDlgItem(hwndDlg, IDOK), NULL, PH_ANCHOR_BOTTOM | PH_ANCHOR_RIGHT);
+            PhAddLayoutItem(&context->LayoutManager, GetDlgItem(hwndDlg, IDC_SPEEDTEXT), NULL, PH_ANCHOR_BOTTOM | PH_ANCHOR_LEFT);
+            PhAddLayoutItem(&context->LayoutManager, GetDlgItem(hwndDlg, IDC_DISTEXT), NULL, PH_ANCHOR_BOTTOM | PH_ANCHOR_LEFT);
+           
+
             panelItem = PhAddLayoutItem(&context->LayoutManager, GetDlgItem(hwndDlg, IDC_PING_LAYOUT), NULL, PH_ANCHOR_ALL);
             PhAddLayoutItemEx(&context->LayoutManager, context->PingGraphHandle, NULL, PH_ANCHOR_ALL, panelItem->Margin);
 
@@ -489,8 +1000,8 @@ INT_PTR CALLBACK NetworkPingWndProc(
                 L"Pings lost: %lu (%.0f%%)", context->PingLossCount,
                 ((FLOAT)context->PingLossCount / context->PingSentCount * 100))->Buffer);
 
-            SetDlgItemText(hwndDlg, IDC_BAD_HASH, PhaFormatString(
-                L"Bad hashes: %lu", context->HashFailCount)->Buffer);
+            //SetDlgItemText(hwndDlg, IDC_BAD_HASH, PhaFormatString(
+            //    L"Bad hashes: %lu", context->HashFailCount)->Buffer);
             SetDlgItemText(hwndDlg, IDC_ANON_ADDR, PhaFormatString(
                 L"Anon replies: %lu", context->UnknownAddrCount)->Buffer);
         }

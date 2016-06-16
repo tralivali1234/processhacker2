@@ -23,7 +23,7 @@
 #include "nettools.h"
 #include <commonutil.h>
 
-#define MAX_PINGS  5
+#define MAX_PINGS  4
 #define IP_ADDRESS_COLUMN (MAX_PINGS + 1)
 #define HOSTNAME_COLUMN (MAX_PINGS + 2)
 
@@ -82,197 +82,6 @@ static VOID TracertUpdateTime(
         PhSetListViewSubItem(Context->OutputHandle, Index, SubIndex, PhFormatString(L"<1 ms", RoundTripTime)->Buffer);
     } 
 } 
-
-
-VOID CheckServerLatency(
-    VOID
-)
-{
-    //PDNS_RECORD dnsRecordPtr = NULL;
-    LPBYTE replyBufferPtr = NULL;
-    HANDLE icmpHandle = INVALID_HANDLE_VALUE;
-    SOCKADDR_IN sockaddr = { 0 };
-    IP_OPTION_INFORMATION pingOptions = { 0 };
-    ULONG pingFirstMs = 0;
-    ULONG pingSecondMs = 0;
-    ULONG pingTotalMs = 0;
-    ULONG pingCount = 0;
-    ULONG pingSpeed = 0;
-
-    const ULONG PING_BUFFER_SIZE = 32;
-
-    ULONG replyLength = 32;// PING_BUFFER_SIZE + sizeof(ICMP_ECHO_REPLY) + 8;
-    BYTE SendBuffer[32];
-
-    // Initialize ping buffer with data.
-    memset(SendBuffer, 'd06', PING_BUFFER_SIZE);
-
-    //StringFormatColor(FOREGROUND_GREEN | FOREGROUND_INTENSITY, _T("\nChecking Connection Speed..."));
-
-    //dnsRecordPtr = this->HostDnsRecords;
-
-    //while (dnsRecordPtr)
-    {
-        /*if (dnsRecordPtr->wType != DNS_TYPE_A)
-        {
-            dnsRecordPtr = dnsRecordPtr->pNext;
-            continue;
-        }*/
-
-        icmpHandle = IcmpCreateFile();
-        sockaddr.sin_family = AF_INET;
-        //sockaddr.sin_addr.s_addr = dnsRecordPtr->Data.A.IpAddress;
-        //sockaddr.sin_port = htons(80);
-
-        //pingOptions.Flags = IP_FLAG_DF;
-        //pingOptions.Ttl = 128;
-
-        //print_ip_addr(&sockaddr);
-
-        for (ULONG i = 0; i < 4; i++)
-        {
-            PICMP_ECHO_REPLY icmpReplyStruct = NULL;
-            ULONG icmpReplyLength = 0;
-
-            icmpReplyStruct = (PICMP_ECHO_REPLY)realloc(icmpReplyStruct, replyLength);
-            memset(icmpReplyStruct, 0, replyLength);
-
-            __try
-            {
-                // First ping with no data...
-                icmpReplyLength = IcmpSendEcho(
-                    icmpHandle,
-                    sockaddr.sin_addr.s_addr,
-                    NULL,
-                    0,
-                    &pingOptions,
-                    icmpReplyStruct,
-                    replyLength,
-                    5000
-                );
-
-                if (icmpReplyLength == 0)
-                {
-                    //WriteStringFormatFileStream(_T("Failed: %d\n"), GetLastError());
-                    __leave;
-                }
-
-                if (icmpReplyStruct->Status != IP_SUCCESS)
-                {
-                    //WriteStringFormatFileStream(_T("Failed: %d\n"), icmpReplyStruct->Status);
-                    __leave;
-                }
-
-                pingFirstMs = icmpReplyStruct->RoundTripTime;
-
-                // Second ping with dwReplySize data...
-                icmpReplyLength = IcmpSendEcho(
-                    icmpHandle,
-                    sockaddr.sin_addr.s_addr,
-                    SendBuffer,
-                    32,
-                    &pingOptions,
-                    icmpReplyStruct,
-                    replyLength,
-                    5000);
-
-                if (icmpReplyLength == 0)
-                {
-                    //WriteStringFormatFileStream(_T("Failed: %d\n"), GetLastError());
-                    __leave;
-                }
-
-                if (icmpReplyStruct->Status != IP_SUCCESS)
-                {
-                    //WriteStringFormatFileStream(_T("Failed: %d\n"), icmpReplyStruct->Status);
-                    __leave;
-                }
-
-                pingSecondMs = icmpReplyStruct->RoundTripTime;
-
-                if (pingFirstMs > pingSecondMs)
-                {
-                    break;
-                }
-                else if (pingFirstMs == pingSecondMs)
-                {
-                    break;
-                }
-
-                //if (pingFirstMs)
-                //WriteStringFormatFileStream(_T(TRACERT_TIME), pingFirstMs);
-                //if (pingSecondMs)
-                //WriteStringFormatFileStream(_T(TRACERT_TIME), pingFirstMs);
-
-                pingTotalMs += (pingSecondMs - pingFirstMs);
-                pingCount++;
-            }
-            __finally
-            {
-                if (icmpReplyStruct)
-                {
-                    free(icmpReplyStruct);
-                }
-            }
-        }
-
-        //  Notes: For fast connections (eg: LAN), it isn't possible to get accurate transfer rates
-        //         since the response time from the computer is less than 10ms.
-        //
-        //  This function will ping the computer 3 times with no data and 3 times with 4K of data.
-        //
-        //  If the response time from any of the pings is less than 10ms,
-        //   the function assumes this is a fast link (eg: LAN) and returns with ulSpeed set to 0.
-        //
-        //  If the pings respond in a time greater than 10ms,
-        //   the time of the second ping is subtracked from the time of the first ping to determine the amount
-        //   of time it takes to move just the data.
-        //
-        //  This is repeated for the 3 sets of pings.
-        //
-        //  Then the average time is computed from the 3 sets of pings.
-        //  From the average time, the kbps is calculated.
-
-        if (pingTotalMs > 0)
-        {
-            pingTotalMs = (pingTotalMs / pingCount);
-            pingSpeed = ((((PING_BUFFER_SIZE * 2) * 1000) / __max(pingTotalMs, 1)) * 8); // 8 Kb (kilobits) in every KB (kilobyte)
-                                                                                         // [%d Kbps] = (pingSpeed / 1024)
-            if (pingSpeed)
-            {
-                //PT_STR speedString = StringFormatSize(pingSpeed);
-
-                //WriteStringFormatFileStream(_T("Estimated Speed: "));
-                //StringFormatColor(FOREGROUND_GREEN | FOREGROUND_INTENSITY, _T("%s/s"), speedString->Buffer);
-                //WriteStringFormatFileStream(_T("\n"));
-
-                //delete speedString;
-            }
-            else
-            {
-                //StringFormatColor(FOREGROUND_RED | FOREGROUND_INTENSITY, _T("Failed: No speed.\n"));
-            }
-        }
-        else
-        {
-            //StringFormatColor(FOREGROUND_RED | FOREGROUND_INTENSITY, _T("Failed: No total.\n"));
-        }
-
-        //dnsRecordPtr = dnsRecordPtr->pNext;
-    }
-
-    if (icmpHandle)
-    {
-        IcmpCloseHandle(icmpHandle);
-    }
-
-    if (replyBufferPtr)
-    {
-        //delete replyBufferPtr;
-    }
-}
-
-
 
 static NTSTATUS TracertHostnameLookupCallback(
     _In_ PVOID Parameter
@@ -354,7 +163,7 @@ static NTSTATUS TracertHostnameLookupCallback(
     return STATUS_SUCCESS;
 }
 
-VOID TracertShowIpAddress(
+static VOID TracertShowIpAddress(
     _In_ PNETWORK_OUTPUT_CONTEXT Context,
     _In_ INT LvItemIndex,
     _In_ PVOID IpAddr
@@ -453,16 +262,17 @@ static BOOLEAN RunTraceRoute(
         IP_FLAG_DF,
         0
     };
+
+    if (icmpRandString = PhCreateStringEx(NULL, PhGetIntegerSetting(SETTING_NAME_PING_SIZE) * 2 + 2))
+    {
+        PhGenerateRandomAlphaString(icmpRandString->Buffer, (ULONG)icmpRandString->Length / sizeof(WCHAR));
+
+        icmpEchoBuffer = PhConvertUtf16ToMultiByte(icmpRandString->Buffer);
+        PhDereferenceObject(icmpRandString);
+    }
+
     __try
     {
-        if (icmpRandString = PhCreateStringEx(NULL, PhGetIntegerSetting(SETTING_NAME_PING_SIZE) * 2 + 2))
-        {
-            PhGenerateRandomAlphaString(icmpRandString->Buffer, (ULONG)icmpRandString->Length / sizeof(WCHAR));
-
-            icmpEchoBuffer = PhConvertUtf16ToMultiByte(icmpRandString->Buffer);
-            PhDereferenceObject(icmpRandString);
-        }
-
         switch (Context->RemoteEndpoint.Address.Type)
         {
         case PH_IPV4_NETWORK_TYPE:
@@ -475,8 +285,7 @@ static BOOLEAN RunTraceRoute(
 
         if (IcmpHandle == INVALID_HANDLE_VALUE)
         {
-            PostMessage(Context->WindowHandle, NTM_RECEIVEDFINISH, 0, 0);
-            return FALSE;
+            __leave;
         }
 
         if (Context->RemoteEndpoint.Address.Type == PH_IPV4_NETWORK_TYPE)
@@ -754,6 +563,7 @@ INT_PTR CALLBACK TracertDlgProc(
     case WM_INITDIALOG:
         {
             PH_RECTANGLE windowRectangle;
+            HANDLE dialogThread;
 
             context->WindowHandle = hwndDlg;
             context->OutputHandle = GetDlgItem(hwndDlg, IDC_NETOUTPUTEDIT);
@@ -810,13 +620,12 @@ INT_PTR CALLBACK TracertDlgProc(
                 PhLoadWindowPlacementFromSetting(SETTING_NAME_PING_WINDOW_POSITION, SETTING_NAME_PING_WINDOW_SIZE, hwndDlg);
             }
 
-            HANDLE dialogThread = INVALID_HANDLE_VALUE;
 
             Static_SetText(context->WindowHandle,
-                PhaFormatString(L"Tracing route to %s...", context->IpAddressString)->Buffer
+                PhaFormatString(L"Tracing  %s...", context->IpAddressString)->Buffer
                 );
             Static_SetText(GetDlgItem(hwndDlg, IDC_STATUS),
-                PhaFormatString(L"Tracing route to %s...", context->IpAddressString)->Buffer
+                PhaFormatString(L"Tracing route to %s with %lu bytes of data...", context->IpAddressString, PhGetIntegerSetting(SETTING_NAME_PING_SIZE))->Buffer
                 );
 
             if (dialogThread = PhCreateThread(0, NetworkTracertThreadStart, (PVOID)context))

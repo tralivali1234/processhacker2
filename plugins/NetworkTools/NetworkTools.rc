@@ -109,22 +109,24 @@ BEGIN
     EDITTEXT        IDC_MINSCALING,99,17,79,14,ES_AUTOHSCROLL | ES_NUMBER
 END
 
-IDD_PINGDIALOG DIALOGEX 0, 0, 267, 151
+IDD_PINGDIALOG DIALOGEX 0, 0, 329, 151
 STYLE DS_SETFONT | DS_FIXEDSYS | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME
 EXSTYLE WS_EX_APPWINDOW
 CAPTION "Dialog"
 FONT 8, "MS Shell Dlg", 400, 0, 0x1
 BEGIN
-    LTEXT           "Pinging X with X bytes of data:",IDC_MAINTEXT,7,7,253,16
-    LTEXT           "PingGraphLayout",IDC_PING_LAYOUT,7,26,253,66,NOT WS_VISIBLE | WS_BORDER
-    GROUPBOX        "Ping statistics",IDC_ICMP_PANEL,7,92,254,52,0,WS_EX_TRANSPARENT
+    LTEXT           "Pinging X with X bytes of data:",IDC_MAINTEXT,7,7,315,16
+    LTEXT           "PingGraphLayout",IDC_PING_LAYOUT,7,26,315,66,NOT WS_VISIBLE | WS_BORDER
+    GROUPBOX        "Ping statistics",IDC_ICMP_PANEL,7,92,315,52,0,WS_EX_TRANSPARENT
     LTEXT           "Average: 0ms",IDC_ICMP_AVG,13,105,73,8
-    LTEXT           "Pings sent: 0",IDC_PINGS_SENT,92,105,88,8
-    LTEXT           "Bad replies: 0",IDC_BAD_HASH,186,105,72,8
-    LTEXT           "Minimum: 0ms",IDC_ICMP_MIN,13,118,73,8
-    LTEXT           "Pings lost: 0 (0%)",IDC_PINGS_LOST,92,118,88,8
-    LTEXT           "Anon replies: 0",IDC_ANON_ADDR,186,118,72,8
-    LTEXT           "Maximum: 0ms",IDC_ICMP_MAX,13,129,73,8
+    LTEXT           "Pings sent: 0",IDC_PINGS_SENT,91,99,88,8
+    LTEXT           "Bad replies: 0",IDC_BAD_HASH,91,123,90,8
+    LTEXT           "Minimum: 0ms",IDC_ICMP_MIN,13,117,73,8
+    LTEXT           "Pings lost: 0 (0%)",IDC_PINGS_LOST,91,111,88,8
+    LTEXT           "Anon replies: 0",IDC_ANON_ADDR,91,135,87,8
+    LTEXT           "Maximum: 0ms",IDC_ICMP_MAX,13,128,73,8
+    LTEXT           "Speed (Est): 0 kb/s",IDC_SPEEDTEXT,188,98,133,8
+    LTEXT           "Distance (Est):",IDC_DISTEXT,188,111,134,8
 END
 
 IDD_TRACERT DIALOGEX 0, 0, 389, 212
@@ -164,7 +166,7 @@ BEGIN
     IDD_PINGDIALOG, DIALOG
     BEGIN
         LEFTMARGIN, 7
-        RIGHTMARGIN, 260
+        RIGHTMARGIN, 322
         TOPMARGIN, 7
         BOTTOMMARGIN, 144
     END
