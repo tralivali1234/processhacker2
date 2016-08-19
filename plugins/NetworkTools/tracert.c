@@ -198,12 +198,17 @@ static VOID TracertShowIpAddress(
 
             ListView_GetItemText(Context->OutputHandle, LvItemIndex, IP_ADDRESS_COLUMN, text, ARRAYSIZE(text));
 
-            if (wcslen(text) > 0)
+            if (PhCountStringZ(text) > 0)
             {
-                PPH_STRING ipstring = PhFormatString(L"%s, %s", text, addressString->Buffer);
+                if (!wcsstr(text, addressString->Buffer))
+                {
+                    PPH_STRING ipstring;
+                    
+                    ipstring = PhFormatString(L"%s, %s", text, addressString->Buffer);
 
-                PhSetListViewSubItem(Context->OutputHandle, LvItemIndex, IP_ADDRESS_COLUMN, ipstring->Buffer);
-                PhDereferenceObject(ipstring);
+                    PhSetListViewSubItem(Context->OutputHandle, LvItemIndex, IP_ADDRESS_COLUMN, ipstring->Buffer);
+                    PhDereferenceObject(ipstring);
+                }
             }
             else
             {
