@@ -22,7 +22,7 @@
     <ProjectGuid>{72C124A2-3C80-41C6-ABA1-C4948B713204}</ProjectGuid>
     <RootNamespace>peview</RootNamespace>
     <Keyword>Win32Proj</Keyword>
-    <WindowsTargetPlatformVersion>10.0.10586.0</WindowsTargetPlatformVersion>
+    <WindowsTargetPlatformVersion>10.0.14393.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
@@ -102,7 +102,7 @@
       <TreatWarningAsError>true</TreatWarningAsError>
     </ClCompile>
     <Link>
-      <AdditionalDependencies>phlib.lib;ntdll.lib;uxtheme.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>noenv.obj;phlib.lib;ntdll.lib;uxtheme.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalLibraryDirectories>..\..\phlib\bin\$(Configuration)$(PlatformArchitecture);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalManifestDependencies>
       </AdditionalManifestDependencies>
@@ -125,7 +125,7 @@
       <TreatWarningAsError>true</TreatWarningAsError>
     </ClCompile>
     <Link>
-      <AdditionalDependencies>phlib.lib;ntdll.lib;uxtheme.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>noenv.obj;phlib.lib;ntdll.lib;uxtheme.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalLibraryDirectories>..\..\phlib\bin\$(Configuration)$(PlatformArchitecture);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalManifestDependencies>
       </AdditionalManifestDependencies>
@@ -151,7 +151,7 @@
       <TreatWarningAsError>true</TreatWarningAsError>
     </ClCompile>
     <Link>
-      <AdditionalDependencies>phlib.lib;ntdll.lib;uxtheme.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>noenv.obj;phlib.lib;ntdll.lib;uxtheme.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalLibraryDirectories>..\..\phlib\bin\$(Configuration)$(PlatformArchitecture);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalManifestDependencies>
       </AdditionalManifestDependencies>
@@ -179,7 +179,7 @@
       <TreatWarningAsError>true</TreatWarningAsError>
     </ClCompile>
     <Link>
-      <AdditionalDependencies>phlib.lib;ntdll.lib;uxtheme.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>noenv.obj;phlib.lib;ntdll.lib;uxtheme.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalLibraryDirectories>..\..\phlib\bin\$(Configuration)$(PlatformArchitecture);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalManifestDependencies>
       </AdditionalManifestDependencies>
