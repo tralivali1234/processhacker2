@@ -82,8 +82,6 @@ INT_PTR CALLBACK NetworkOutputDlgProc(
 
             PhInitializeLayoutManager(&context->LayoutManager, hwndDlg);
             PhAddLayoutItem(&context->LayoutManager, context->OutputHandle, NULL, PH_ANCHOR_ALL);
-            //PhAddLayoutItem(&context->LayoutManager, GetDlgItem(hwndDlg, IDC_MORE_INFO), NULL, PH_ANCHOR_BOTTOM | PH_ANCHOR_LEFT);
-            //PhAddLayoutItem(&context->LayoutManager, GetDlgItem(hwndDlg, IDOK), NULL, PH_ANCHOR_BOTTOM | PH_ANCHOR_RIGHT);
 
             windowRectangle.Position = PhGetIntegerPairSetting(SETTING_NAME_OUTPUT_WINDOW_POSITION);
             windowRectangle.Size = PhGetScalableIntegerPairSetting(SETTING_NAME_OUTPUT_WINDOW_SIZE, TRUE).Pair;
@@ -129,8 +127,6 @@ INT_PTR CALLBACK NetworkOutputDlgProc(
                     Static_SetText(context->WindowHandle,
                         PhaFormatString(L"Whois %s...", context->IpAddressString)->Buffer
                         );
-
-                    ShowWindow(GetDlgItem(hwndDlg, IDC_MORE_INFO), SW_SHOW);
 
                     if (dialogThread = PhCreateThread(0, NetworkWhoisThreadStart, (PVOID)context))
                         NtClose(dialogThread);
@@ -192,28 +188,6 @@ INT_PTR CALLBACK NetworkOutputDlgProc(
 
                 // Set a black control backcolor.
                 return (INT_PTR)GetStockBrush(BLACK_BRUSH);
-            }
-        }
-        break;
-    case WM_NOTIFY:
-        {
-            switch (((LPNMHDR)lParam)->code)
-            {
-            case NM_CLICK:
-            case NM_RETURN:
-                {
-                    PNMLINK syslink = (PNMLINK)lParam;
-
-                    if (syslink->hdr.idFrom == IDC_MORE_INFO)
-                    {
-                        PhShellExecute(
-                            PhMainWndHandle,
-                            PhaConcatStrings2(L"http://wq.apnic.net/apnic-bin/whois.pl?searchtext=", context->IpAddressString)->Buffer,
-                            NULL
-                            );
-                    }
-                }
-                break;
             }
         }
         break;

@@ -75,11 +75,11 @@ static VOID TracertUpdateTime(
 { 
     if (RoundTripTime)
     { 
-        PhSetListViewSubItem(Context->OutputHandle, Index, SubIndex, PhFormatString(L"%lu ms", RoundTripTime)->Buffer);
+        PhSetListViewSubItem(Context->OutputHandle, Index, SubIndex, PhaFormatString(L"%lu ms", RoundTripTime)->Buffer);
     } 
     else 
     { 
-        PhSetListViewSubItem(Context->OutputHandle, Index, SubIndex, PhFormatString(L"<1 ms", RoundTripTime)->Buffer);
+        PhSetListViewSubItem(Context->OutputHandle, Index, SubIndex, PhaFormatString(L"<1 ms", RoundTripTime)->Buffer);
     } 
 } 
 
@@ -87,8 +87,8 @@ static NTSTATUS TracertHostnameLookupCallback(
     _In_ PVOID Parameter
     )
 {
-    PTRACERT_RESOLVE_WORKITEM workItem = Parameter;
     WSADATA wsa;
+    PTRACERT_RESOLVE_WORKITEM workItem = Parameter;
 
     if (WSAStartup(WINSOCK_VERSION, &wsa) != ERROR_SUCCESS)
         return STATUS_UNEXPECTED_NETWORK_ERROR;
@@ -107,9 +107,29 @@ static NTSTATUS TracertHostnameLookupCallback(
             NI_NAMEREQD
             ))
         {
+            WCHAR text[MAX_PATH] = L"";
+
             PhTrimToNullTerminatorString(ipAddressHostname);
 
-            PhSetListViewSubItem(workItem->LvHandle, workItem->LvItemIndex, HOSTNAME_COLUMN, ipAddressHostname->Buffer);
+            ListView_GetItemText(workItem->LvHandle, workItem->LvItemIndex, HOSTNAME_COLUMN, text, ARRAYSIZE(text));
+
+            if (PhCountStringZ(text) > 0)
+            {
+                if (!wcsstr(text, ipAddressHostname->Buffer))
+                {
+                    PPH_STRING ipstring;
+
+                    ipstring = PhFormatString(L"%s, %s", text, ipAddressHostname->Buffer);
+
+                    PhSetListViewSubItem(workItem->LvHandle, workItem->LvItemIndex, HOSTNAME_COLUMN, ipstring->Buffer);
+                    PhDereferenceObject(ipstring);
+                }
+            }
+            else
+            {
+                PhSetListViewSubItem(workItem->LvHandle, workItem->LvItemIndex, HOSTNAME_COLUMN, ipAddressHostname->Buffer);
+            }
+
             PhDereferenceObject(ipAddressHostname);
         }
         else
@@ -320,7 +340,8 @@ static BOOLEAN RunTraceRoute(
                 Context->OutputHandle,
                 MAXINT,
                 PhaFormatString(L"%u", (UINT)pingOptions.Ttl)->Buffer,
-                NULL);
+                NULL
+                );
 
             for (UINT i = 0; i < MAX_PINGS; i++)
             {
@@ -347,7 +368,7 @@ static BOOLEAN RunTraceRoute(
                         icmpReplyBuffer,
                         icmpReplyLength,
                         DEFAULT_TIMEOUT
-                    ))
+                        ))
                     {
                         // We did not get any replies due to a timeout or error. 
                         if (GetLastError() == IP_REQ_TIMED_OUT)
@@ -413,7 +434,7 @@ static BOOLEAN RunTraceRoute(
                         icmpReplyBuffer,
                         icmpReplyLength,
                         DEFAULT_TIMEOUT
-                    ))
+                        ))
                     {
                         if (GetLastError() == IP_REQ_TIMED_OUT)
                         {
@@ -487,9 +508,6 @@ static BOOLEAN RunTraceRoute(
     return TRUE; 
 }
 
-
-
-
 NTSTATUS NetworkTracertThreadStart(
     _In_ PVOID Parameter
     )
@@ -501,19 +519,13 @@ NTSTATUS NetworkTracertThreadStart(
 
     PhInitializeAutoPool(&autoPool);
 
-
     RunTraceRoute(context);
-
-    
-
+ 
     PhDrainAutoPool(&autoPool);
     PhDeleteAutoPool(&autoPool);
 
     return STATUS_SUCCESS;
 }
-
-
-
 
 INT_PTR CALLBACK TracertDlgProc(
     _In_ HWND hwndDlg,
@@ -594,26 +606,19 @@ INT_PTR CALLBACK TracertDlgProc(
             if (context->IconHandle)
                 SendMessage(hwndDlg, WM_SETICON, ICON_SMALL, (LPARAM)context->IconHandle);
 
-            //PhInitializeWorkQueue(&context->PingWorkQueue, 0, 20, 5000);
-
             PhSetListViewStyle(context->OutputHandle, FALSE, TRUE);
             PhSetControlTheme(context->OutputHandle, L"explorer");
             PhAddListViewColumn(context->OutputHandle, 0, 0, 0, LVCFMT_RIGHT, 30, L"TTL");
             for (UINT i = 0; i < MAX_PINGS; i++)
                 PhAddListViewColumn(context->OutputHandle, i + 1, i + 1, i + 1, LVCFMT_RIGHT, 50, L"Time");
-            PhAddListViewColumn(context->OutputHandle, IP_ADDRESS_COLUMN, IP_ADDRESS_COLUMN, IP_ADDRESS_COLUMN, LVCFMT_LEFT, 120, L"Ip Address");
+            PhAddListViewColumn(context->OutputHandle, IP_ADDRESS_COLUMN, IP_ADDRESS_COLUMN, IP_ADDRESS_COLUMN, LVCFMT_LEFT, 120, L"IP Address");
             PhAddListViewColumn(context->OutputHandle, HOSTNAME_COLUMN, HOSTNAME_COLUMN, HOSTNAME_COLUMN, LVCFMT_LEFT, 240, L"Hostname");
             PhSetExtendedListView(context->OutputHandle);
             PhLoadListViewColumnsFromSetting(SETTING_NAME_TRACERT_COLUMNS, context->OutputHandle);
 
             PhInitializeLayoutManager(&context->LayoutManager, hwndDlg);
             PhAddLayoutItem(&context->LayoutManager, context->OutputHandle, NULL, PH_ANCHOR_ALL);
-            PhAddLayoutItem(&context->LayoutManager, GetDlgItem(hwndDlg, IDC_STATUS), NULL, PH_ANCHOR_TOP | PH_ANCHOR_LEFT | PH_ANCHOR_RIGHT);
-            PhAddLayoutItem(&context->LayoutManager, GetDlgItem(hwndDlg, IDC_ICMP_PANEL), NULL, PH_ANCHOR_BOTTOM | PH_ANCHOR_LEFT);
-            PhAddLayoutItem(&context->LayoutManager, GetDlgItem(hwndDlg, IDC_PINGS_SENT), NULL, PH_ANCHOR_BOTTOM | PH_ANCHOR_LEFT);
-            PhAddLayoutItem(&context->LayoutManager, GetDlgItem(hwndDlg, IDC_PINGS_LOST), NULL, PH_ANCHOR_BOTTOM | PH_ANCHOR_LEFT);
-            PhAddLayoutItem(&context->LayoutManager, GetDlgItem(hwndDlg, IDC_BAD_HASH), NULL, PH_ANCHOR_BOTTOM | PH_ANCHOR_LEFT);
-            //PhAddLayoutItem(&context->LayoutManager, GetDlgItem(hwndDlg, IDCANCEL), NULL, PH_ANCHOR_BOTTOM | PH_ANCHOR_RIGHT);            
+            PhAddLayoutItem(&context->LayoutManager, GetDlgItem(hwndDlg, IDC_STATUS), NULL, PH_ANCHOR_TOP | PH_ANCHOR_LEFT | PH_ANCHOR_RIGHT);      
 
             // Load window settings.
             if (windowRectangle.Position.X == 0 || windowRectangle.Position.Y == 0)

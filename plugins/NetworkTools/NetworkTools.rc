@@ -116,17 +116,15 @@ CAPTION "Dialog"
 FONT 8, "MS Shell Dlg", 400, 0, 0x1
 BEGIN
     LTEXT           "Pinging X with X bytes of data:",IDC_MAINTEXT,7,7,315,16
-    LTEXT           "PingGraphLayout",IDC_PING_LAYOUT,7,26,315,66,NOT WS_VISIBLE | WS_BORDER
+    LTEXT           "PingGraphLayout",IDC_PING_LAYOUT,7,26,315,64,NOT WS_VISIBLE | WS_BORDER
     GROUPBOX        "Ping statistics",IDC_ICMP_PANEL,7,92,315,52,0,WS_EX_TRANSPARENT
-    LTEXT           "Average: 0ms",IDC_ICMP_AVG,13,105,73,8
-    LTEXT           "Pings sent: 0",IDC_PINGS_SENT,91,99,88,8
-    LTEXT           "Bad replies: 0",IDC_BAD_HASH,91,123,90,8
-    LTEXT           "Minimum: 0ms",IDC_ICMP_MIN,13,117,73,8
-    LTEXT           "Pings lost: 0 (0%)",IDC_PINGS_LOST,91,111,88,8
-    LTEXT           "Anon replies: 0",IDC_ANON_ADDR,91,135,87,8
-    LTEXT           "Maximum: 0ms",IDC_ICMP_MAX,13,128,73,8
-    LTEXT           "Speed (Est): 0 kb/s",IDC_SPEEDTEXT,188,98,133,8
-    LTEXT           "Distance (Est):",IDC_DISTEXT,188,111,134,8
+    LTEXT           "Average: 0ms",IDC_ICMP_AVG,13,104,73,8
+    LTEXT           "Pings sent: 0",IDC_PINGS_SENT,91,104,88,8
+    LTEXT           "Bad replies: 0",IDC_BAD_HASH,187,104,90,8
+    LTEXT           "Minimum: 0ms",IDC_ICMP_MIN,13,116,73,8
+    LTEXT           "Pings lost: 0 (0%)",IDC_PINGS_LOST,91,116,88,8
+    LTEXT           "Anon replies: 0",IDC_ANON_ADDR,188,116,87,8
+    LTEXT           "Maximum: 0ms",IDC_ICMP_MAX,13,129,73,8
 END
 
 IDD_TRACERT DIALOGEX 0, 0, 389, 212
@@ -134,12 +132,8 @@ STYLE DS_SETFONT | DS_FIXEDSYS | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_POPUP | WS
 CAPTION "Dialog"
 FONT 8, "MS Shell Dlg", 400, 0, 0x1
 BEGIN
-    CONTROL         "",IDC_NETOUTPUTEDIT,"SysListView32",LVS_REPORT | LVS_ALIGNLEFT | WS_BORDER | WS_TABSTOP,7,23,375,142
+    CONTROL         "",IDC_NETOUTPUTEDIT,"SysListView32",LVS_REPORT | LVS_ALIGNLEFT | WS_BORDER | WS_TABSTOP,7,23,375,182
     LTEXT           "Tracing route to xyz...",IDC_STATUS,7,5,375,12
-    LTEXT           "Packets sent: 0",IDC_PINGS_SENT,13,179,88,8
-    LTEXT           "Bad replies: 0",IDC_BAD_HASH,111,179,72,8
-    LTEXT           "Packets lost: 0 (0%)",IDC_PINGS_LOST,13,192,88,8
-    GROUPBOX        "Tracert statistics",IDC_ICMP_PANEL,7,168,254,37,0,WS_EX_TRANSPARENT
 END
 
 
