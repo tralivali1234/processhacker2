@@ -25,6 +25,9 @@
     <Filter Include="Source Files\setup">
       <UniqueIdentifier>{c394360d-d423-4249-a23e-70558948e7f2}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Source Files\lib\mxml">
+      <UniqueIdentifier>{6b743e1b-8b31-421f-b766-ea897b2055d4}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="main.c">
@@ -60,33 +63,6 @@
     <ClCompile Include="lib\superclass.c">
       <Filter>Source Files\lib</Filter>
     </ClCompile>
-    <ClCompile Include="lib\mxml\mxml-attr.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="lib\mxml\mxml-entity.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="lib\mxml\mxml-file.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="lib\mxml\mxml-index.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="lib\mxml\mxml-node.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="lib\mxml\mxml-private.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="lib\mxml\mxml-search.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="lib\mxml\mxml-set.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="lib\mxml\mxml-string.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="download.c">
       <Filter>Source Files\setup</Filter>
     </ClCompile>
@@ -95,6 +71,33 @@
     </ClCompile>
     <ClCompile Include="reset.c">
       <Filter>Source Files\setup</Filter>
+    </ClCompile>
+    <ClCompile Include="lib\mxml\mxml-attr.c">
+      <Filter>Source Files\lib\mxml</Filter>
+    </ClCompile>
+    <ClCompile Include="lib\mxml\mxml-entity.c">
+      <Filter>Source Files\lib\mxml</Filter>
+    </ClCompile>
+    <ClCompile Include="lib\mxml\mxml-file.c">
+      <Filter>Source Files\lib\mxml</Filter>
+    </ClCompile>
+    <ClCompile Include="lib\mxml\mxml-index.c">
+      <Filter>Source Files\lib\mxml</Filter>
+    </ClCompile>
+    <ClCompile Include="lib\mxml\mxml-node.c">
+      <Filter>Source Files\lib\mxml</Filter>
+    </ClCompile>
+    <ClCompile Include="lib\mxml\mxml-private.c">
+      <Filter>Source Files\lib\mxml</Filter>
+    </ClCompile>
+    <ClCompile Include="lib\mxml\mxml-search.c">
+      <Filter>Source Files\lib\mxml</Filter>
+    </ClCompile>
+    <ClCompile Include="lib\mxml\mxml-set.c">
+      <Filter>Source Files\lib\mxml</Filter>
+    </ClCompile>
+    <ClCompile Include="lib\mxml\mxml-string.c">
+      <Filter>Source Files\lib\mxml</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
