@@ -14,20 +14,31 @@ VOID LoadInstallDirectory(
         PPH_STRING defaultInstallPath;
         PPH_STRING expandedString;
 
-        // TODO: Does ProgramW6432 work on 32bit?
-        defaultInstallPath = PhCreateString(L"%ProgramW6432%\\Process Hacker\\");
-
-        if (expandedString = PhExpandEnvironmentStrings(&defaultInstallPath->sr))
+        if (USER_SHARED_DATA->NativeProcessorArchitecture == PROCESSOR_ARCHITECTURE_AMD64) 
         {
-            SetupInstallPath = expandedString;
+            // We're on 64-bit Windows. Try find the 64-bit Program Files directory.
+            defaultInstallPath = PhaCreateString(L"%ProgramW6432%");
+
+            if (expandedString = PH_AUTO(PhExpandEnvironmentStrings(&defaultInstallPath->sr)))
+            {
+                SetupInstallPath = PhConcatStrings2(expandedString->Buffer, L"\\Process Hacker\\");
+            }
         }
+        else
+        {
+            // We're on 32-bit Windows. Try find the Program Files directory.
+            defaultInstallPath = PhaCreateString(L"%ProgramFiles%");
 
-        PhDereferenceObject(defaultInstallPath);
+            if (expandedString = PH_AUTO(PhExpandEnvironmentStrings(&defaultInstallPath->sr)))
+            {
+                SetupInstallPath = PhConcatStrings2(expandedString->Buffer, L"\\Process Hacker\\");
+            }
+        }
     }
-
-    // If the string is null or empty, fallback to a hard-coded default path.
+    
     if (PhIsNullOrEmptyString(SetupInstallPath))
     {
+        // Fallback to a hard-coded default path.
         SetupInstallPath = PhCreateString(L"C:\\Program Files\\Process Hacker\\");
     }
 
@@ -37,8 +48,7 @@ VOID LoadInstallDirectory(
     PhDereferenceObject(setupDirectory);
 #endif
 
-    // We must make sure the install path ends with a backslash since
-    // the string is wcscat' with our zip extraction paths.
+    // The user might have removed the trailing backslash (required for zip extraction).
     if (PathAddBackslash(SetupInstallPath->Buffer))
     {
         //PathSearchAndQualify()
