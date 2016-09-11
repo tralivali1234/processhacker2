@@ -118,7 +118,6 @@
     <ClCompile Include="page3.c" />
     <ClCompile Include="page4.c" />
     <ClCompile Include="page5.c" />
-    <ClCompile Include="lib\progress.c" />
     <ClCompile Include="lib\superclass.c" />
     <ClCompile Include="reset.c" />
   </ItemGroup>

@@ -198,28 +198,6 @@ VOID InitializeFont(
 }
 
 
-PPH_STRING GetSystemTemp(VOID)
-{
-    PPH_STRING dirPath;
-    ULONG dirPathLength;
-
-    // Query the directory length...
-    dirPathLength = GetTempPath(0, NULL);
-
-    // Allocate the string...
-    dirPath = PhCreateStringEx(NULL, dirPathLength * sizeof(WCHAR));
-
-    // Query the directory path...
-    if (!GetTempPath(dirPath->Length, dirPath->Buffer))
-    {
-        PhDereferenceObject(dirPath);
-        return NULL;
-    }
-
-    return dirPath;
-}
-
-
 PPH_STRING PhGetUrlBaseName(
     _In_ PPH_STRING FileName
     )
@@ -292,38 +270,6 @@ PPH_STRING BrowseForFolder(
     }
 
     return NULL;
-}
-
-VOID StopwatchInitialize(
-    __out PSTOPWATCH Stopwatch
-    )
-{
-    Stopwatch->StartCounter.QuadPart = 0;
-    Stopwatch->EndCounter.QuadPart = 0;
-}
-
-VOID StopwatchStart(
-    _Inout_ PSTOPWATCH Stopwatch
-    )
-{
-    QueryPerformanceCounter(&Stopwatch->StartCounter);
-    QueryPerformanceFrequency(&Stopwatch->Frequency);
-}
-
-ULONG StopwatchGetMilliseconds(
-    _In_ PSTOPWATCH Stopwatch
-    )
-{
-#define CLOCKS_PER_SEC  1000
-
-    LARGE_INTEGER countsPerMs;
-
-    countsPerMs = Stopwatch->Frequency;
-    countsPerMs.QuadPart /= CLOCKS_PER_SEC;
-
-    QueryPerformanceCounter(&Stopwatch->EndCounter);
-
-    return (ULONG)((Stopwatch->EndCounter.QuadPart - Stopwatch->StartCounter.QuadPart) / countsPerMs.QuadPart);
 }
 
 BOOLEAN ConnectionAvailable(VOID)

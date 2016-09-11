@@ -1,8 +1,7 @@
 #ifndef _APPSUP_H
 #define _APPSUP_H
 
-extern HWND _hwndProgress;
-
+HWND _hwndProgress;
 
 #define STATUS_MSG(Format, ...) \
 { \
@@ -15,15 +14,6 @@ extern HWND _hwndProgress;
     } \
 }
 
-typedef struct _STOPWATCH
-{
-    LARGE_INTEGER StartCounter;
-    LARGE_INTEGER EndCounter;
-    LARGE_INTEGER Frequency;
-} STOPWATCH, *PSTOPWATCH;
-
-PPH_STRING GetSystemTemp(VOID);
-
 PPH_STRING BrowseForFolder(
     _In_opt_ HWND DialogHandle,
     _In_opt_ PCWSTR Title
@@ -33,18 +23,6 @@ VOID InitializeFont(
     _In_ HWND ControlHandle,
     _In_ LONG Height,
     _In_ LONG Weight
-    );
-
-VOID StopwatchInitialize(
-    __out PSTOPWATCH Stopwatch
-    );
-
-VOID StopwatchStart(
-    _Inout_ PSTOPWATCH Stopwatch
-    );
-
-ULONG StopwatchGetMilliseconds(
-    _In_ PSTOPWATCH Stopwatch
     );
 
 

@@ -28,6 +28,9 @@
     <Filter Include="Source Files\lib\mxml">
       <UniqueIdentifier>{6b743e1b-8b31-421f-b766-ea897b2055d4}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Resource Files\Text">
+      <UniqueIdentifier>{de42287f-b6af-40c6-b76a-f56ee7dcf507}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="main.c">
@@ -55,9 +58,6 @@
       <Filter>Source Files\lib</Filter>
     </ClCompile>
     <ClCompile Include="lib\miniz\miniz.c">
-      <Filter>Source Files\lib</Filter>
-    </ClCompile>
-    <ClCompile Include="lib\progress.c">
       <Filter>Source Files\lib</Filter>
     </ClCompile>
     <ClCompile Include="lib\superclass.c">
@@ -140,13 +140,13 @@
     </ResourceCompile>
   </ItemGroup>
   <ItemGroup>
-    <Text Include="resources\Licence.txt">
-      <Filter>Resource Files</Filter>
-    </Text>
-  </ItemGroup>
-  <ItemGroup>
     <Manifest Include="resources\app.manifest">
       <Filter>Resource Files</Filter>
     </Manifest>
+  </ItemGroup>
+  <ItemGroup>
+    <Text Include="resources\Licence.txt">
+      <Filter>Resource Files\Text</Filter>
+    </Text>
   </ItemGroup>
 </Project>

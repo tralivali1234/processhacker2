@@ -6,7 +6,106 @@
 static PPH_STRING Version = NULL;
 static PPH_STRING DownloadURL = NULL;
 
-BOOLEAN QueryBuildServerThread(
+static PPH_STRING GenerateDownloadFilePath(
+    _In_ PPH_STRING Version
+    )
+{
+    BOOLEAN success = FALSE;
+    ULONG indexOfFileName = -1;
+    GUID randomGuid;
+    PPH_STRING setupTempPath = NULL;
+    PPH_STRING randomGuidString = NULL;
+    PPH_STRING setupFilePath = NULL;
+    PPH_STRING fullSetupPath = NULL;
+
+    __try
+    {
+        // Allocate the GetTempPath buffer
+        setupTempPath = PhCreateStringEx(NULL, GetTempPath(0, NULL) * sizeof(WCHAR));
+        if (PhIsNullOrEmptyString(setupTempPath))
+            __leave;
+
+        // Get the temp path
+        if (GetTempPath((ULONG)setupTempPath->Length / sizeof(WCHAR), setupTempPath->Buffer) == 0)
+            __leave;
+        if (PhIsNullOrEmptyString(setupTempPath))
+            __leave;
+
+        // Generate random guid for our directory path.
+        PhGenerateGuid(&randomGuid);
+
+        if (randomGuidString = PhFormatGuid(&randomGuid))
+        {
+            PPH_STRING guidSubString;
+
+            // Strip the left and right curly brackets.
+            guidSubString = PhSubstring(
+                randomGuidString, 
+                1, 
+                randomGuidString->Length / sizeof(WCHAR) - 2
+                );
+
+            PhSwapReference(&randomGuidString, guidSubString);
+        }
+
+        // Append the tempath to our string: %TEMP%RandomString\\processhacker-%lu.%lu-setup.zip
+        // Example: C:\\Users\\dmex\\AppData\\Temp\\ABCD\\processhacker-3.10-setup.zip
+        setupFilePath = PhFormatString(
+            L"%s%s\\processhacker-%s-setup.zip",
+            setupTempPath->Buffer,
+            randomGuidString->Buffer,
+            Version->Buffer
+            );
+
+        // Create the directory if it does not exist.
+        if (fullSetupPath = PhGetFullPath(setupFilePath->Buffer, &indexOfFileName))
+        {
+            PPH_STRING directoryPath;
+
+            if (indexOfFileName == -1)
+                __leave;
+
+            if (directoryPath = PhSubstring(fullSetupPath, 0, indexOfFileName))
+            {
+                CreateDirectoryPath(directoryPath);
+
+                PhDereferenceObject(directoryPath);
+            }
+        }
+
+        success = TRUE;
+    }
+    __finally
+    {
+        if (!success)
+        {
+            if (setupFilePath)
+            {
+                PhDereferenceObject(setupFilePath);
+            }
+        }
+
+        if (fullSetupPath)
+        {
+            PhDereferenceObject(fullSetupPath);
+        }
+
+        if (randomGuidString)
+        {
+            PhDereferenceObject(randomGuidString);
+        }
+
+        if (setupTempPath)
+        {
+            PhDereferenceObject(setupTempPath);
+        }
+    }
+
+    return success ? setupFilePath : NULL;
+}
+
+
+BOOLEAN SetupQueryBuildServer(
     _Out_ PPH_STRING *Version,
     _Out_ PPH_STRING *DownloadURL
     )
@@ -181,105 +280,6 @@ BOOLEAN QueryBuildServerThread(
     return isSuccess;
 }
 
-PPH_STRING GenerateDownloadFilePath(
-    _In_ PPH_STRING Version
-    )
-{
-    BOOLEAN success = FALSE;
-    ULONG indexOfFileName = -1;
-    GUID randomGuid;
-    PPH_STRING setupTempPath = NULL;
-    PPH_STRING randomGuidString = NULL;
-    PPH_STRING setupFilePath = NULL;
-    PPH_STRING fullSetupPath = NULL;
-
-    __try
-    {
-        // Allocate the GetTempPath buffer
-        setupTempPath = PhCreateStringEx(NULL, GetTempPath(0, NULL) * sizeof(WCHAR));
-        if (PhIsNullOrEmptyString(setupTempPath))
-            __leave;
-
-        // Get the temp path
-        if (GetTempPath((ULONG)setupTempPath->Length / sizeof(WCHAR), setupTempPath->Buffer) == 0)
-            __leave;
-        if (PhIsNullOrEmptyString(setupTempPath))
-            __leave;
-
-        // Generate random guid for our directory path.
-        PhGenerateGuid(&randomGuid);
-
-        if (randomGuidString = PhFormatGuid(&randomGuid))
-        {
-            PPH_STRING guidSubString;
-
-            // Strip the left and right curly brackets.
-            guidSubString = PhSubstring(
-                randomGuidString, 
-                1, 
-                randomGuidString->Length / sizeof(WCHAR) - 2
-                );
-
-            PhSwapReference(&randomGuidString, guidSubString);
-        }
-
-        // Append the tempath to our string: %TEMP%RandomString\\processhacker-%lu.%lu-setup.zip
-        // Example: C:\\Users\\dmex\\AppData\\Temp\\ABCD\\processhacker-3.10-setup.zip
-        setupFilePath = PhFormatString(
-            L"%s%s\\processhacker-%s-setup.zip",
-            setupTempPath->Buffer,
-            randomGuidString->Buffer,
-            Version->Buffer
-            );
-
-        // Create the directory if it does not exist.
-        if (fullSetupPath = PhGetFullPath(setupFilePath->Buffer, &indexOfFileName))
-        {
-            PPH_STRING directoryPath;
-
-            if (indexOfFileName == -1)
-                __leave;
-
-            if (directoryPath = PhSubstring(fullSetupPath, 0, indexOfFileName))
-            {
-                CreateDirectoryPath(directoryPath);
-
-                PhDereferenceObject(directoryPath);
-            }
-        }
-
-        success = TRUE;
-    }
-    __finally
-    {
-        if (!success)
-        {
-            if (setupFilePath)
-            {
-                PhDereferenceObject(setupFilePath);
-            }
-        }
-
-        if (fullSetupPath)
-        {
-            PhDereferenceObject(fullSetupPath);
-        }
-
-        if (randomGuidString)
-        {
-            PhDereferenceObject(randomGuidString);
-        }
-
-        if (setupTempPath)
-        {
-            PhDereferenceObject(setupTempPath);
-        }
-    }
-
-    return success ? setupFilePath : NULL;
-}
-
-
 
 BOOLEAN SetupDownloadBuild(
     _In_ PVOID Arguments
@@ -310,7 +310,7 @@ BOOLEAN SetupDownloadBuild(
 
     __try
     {
-        if (!QueryBuildServerThread(&Version, &DownloadURL))
+        if (!SetupQueryBuildServer(&Version, &DownloadURL))
             __leave;
 
 

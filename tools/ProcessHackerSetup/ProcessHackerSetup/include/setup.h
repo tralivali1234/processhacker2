@@ -83,13 +83,6 @@ INT_PTR CALLBACK PropSheetPage5_WndProc(
     _Inout_ LPARAM lParam
     );
 
-VOID StartProgress(VOID);
-VOID _SetProgressTime(VOID);
-VOID SetProgress(
-    _In_ LONG Completed,
-    _In_ LONG Total
-    );
-
 _Check_return_
 BOOLEAN ProcessHackerShutdown(
     VOID

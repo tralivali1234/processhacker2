@@ -52,9 +52,6 @@ BOOLEAN SetupExtractBuild(
     memset(&zip_archive, 0, sizeof(zip_archive));
 
     //STATUS_MSG(L"Extracting update %s...", Version);
-    //Sleep(1000);
-
-    StartProgress();
 
     __try
     {
@@ -208,7 +205,7 @@ BOOLEAN SetupExtractBuild(
             }
 
             totalLength += (mz_uint64)bufferLength;
-            SetProgress((LONG)totalLength, (LONG)total_size);
+            //SetProgress((LONG)totalLength, (LONG)total_size);
 
             NtClose(fileHandle);
             mz_free(buffer);
