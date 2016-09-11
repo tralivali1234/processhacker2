@@ -16,6 +16,7 @@
 #include <Wincodec.h>
 #include <uxtheme.h>
 #include <Shlwapi.h>
+#include <shlobj.h>
 
 #include "..\resource.h"
 #include "..\lib\mxml\mxml.h"

@@ -1,9 +1,6 @@
 #ifndef _APPSUP_H
 #define _APPSUP_H
 
-
-extern PWSTR Version;
-extern PWSTR DownloadURL;
 extern HWND _hwndProgress;
 
 

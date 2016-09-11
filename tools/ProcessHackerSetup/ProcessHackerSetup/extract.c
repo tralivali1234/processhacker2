@@ -51,8 +51,8 @@ BOOLEAN SetupExtractBuild(
 
     memset(&zip_archive, 0, sizeof(zip_archive));
 
-    STATUS_MSG(L"Extracting update %s...", Version);
-    Sleep(1000);
+    //STATUS_MSG(L"Extracting update %s...", Version);
+    //Sleep(1000);
 
     StartProgress();
 

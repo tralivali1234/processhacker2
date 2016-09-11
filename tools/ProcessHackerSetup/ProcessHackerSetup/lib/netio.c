@@ -1,119 +1,8 @@
 #include <setup.h>
 #include "netio.h"
 
-static VOID HttpSocketFree(
-    _In_ __deref_out PVOID Object
-    )
-{
-    P_HTTP_SESSION httpSocket = (P_HTTP_SESSION)Object;
-
-    if (httpSocket->RequestHandle)
-        WinHttpCloseHandle(httpSocket->RequestHandle);
-
-    if (httpSocket->ConnectionHandle)
-        WinHttpCloseHandle(httpSocket->ConnectionHandle);
-
-    if (httpSocket->SessionHandle)
-        WinHttpCloseHandle(httpSocket->SessionHandle);
-}
-
-P_HTTP_SESSION HttpSocketCreate(VOID)
-{
-    P_HTTP_SESSION httpSocket;
-    WINHTTP_CURRENT_USER_IE_PROXY_CONFIG proxyConfig = { 0 };
-
-    httpSocket = (P_HTTP_SESSION)PhAllocate(sizeof(SETUP_HTTP_SESSION));
-    memset(httpSocket, 0, sizeof(SETUP_HTTP_SESSION));
-
-    WinHttpGetIEProxyConfigForCurrentUser(&proxyConfig);
-
-    httpSocket->SessionHandle = WinHttpOpen(
-        NULL,
-        proxyConfig.lpszProxy ? WINHTTP_ACCESS_TYPE_NAMED_PROXY : WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
-        proxyConfig.lpszProxy ? proxyConfig.lpszProxy : WINHTTP_NO_PROXY_NAME,
-        proxyConfig.lpszProxy ? proxyConfig.lpszProxyBypass : WINHTTP_NO_PROXY_BYPASS,
-        0
-        );
-
-    return httpSocket;
-}
-
-BOOLEAN HttpConnect(
-    _Inout_ P_HTTP_SESSION HttpSocket,
-    _In_ PCWSTR ServerName,
-    _In_ INTERNET_PORT ServerPort
-    )
-{
-    // Create the HTTP connection handle.
-    HttpSocket->ConnectionHandle = WinHttpConnect(
-        HttpSocket->SessionHandle,
-        ServerName,
-        ServerPort,
-        0
-        );
-
-    if (HttpSocket->ConnectionHandle)
-        return TRUE;
-
-    return FALSE;
-}
-
-BOOLEAN HttpBeginRequest(
-    _Inout_ P_HTTP_SESSION HttpSocket,
-    _In_ PCWSTR MethodType,
-    _In_ PCWSTR UrlPath,
-    _In_ ULONG Flags
-    )
-{
-    HttpSocket->RequestHandle = WinHttpOpenRequest(
-        HttpSocket->ConnectionHandle,
-        MethodType,
-        UrlPath,
-        NULL,
-        WINHTTP_NO_REFERER,
-        WINHTTP_DEFAULT_ACCEPT_TYPES,
-        Flags
-        );
-
-    if (HttpSocket->RequestHandle)
-        return TRUE;
-
-    return FALSE;
-}
-
-BOOLEAN HttpSendRequest(
-    _Inout_ P_HTTP_SESSION HttpSocket,
-    _In_ ULONG TotalLength
-    )
-{
-    return WinHttpSendRequest(
-        HttpSocket->RequestHandle,
-        WINHTTP_NO_ADDITIONAL_HEADERS,
-        0,
-        WINHTTP_NO_REQUEST_DATA,
-        0,
-        TotalLength,
-        0
-        ) == TRUE;
-}
-
-BOOLEAN HttpEndRequest(
-    _Inout_ P_HTTP_SESSION HttpSocket
-    )
-{
-    return WinHttpReceiveResponse(HttpSocket->RequestHandle, NULL) == TRUE;
-}
-
-BOOLEAN HttpAddRequestHeaders(
-    _Inout_ P_HTTP_SESSION HttpSocket,
-    _In_ PCWSTR RequestHeaders
-    )
-{
-    return WinHttpAddRequestHeaders(HttpSocket->RequestHandle, RequestHeaders, -1L, WINHTTP_ADDREQ_FLAG_ADD) == TRUE;
-}
-
 //PVOID HttpGetRequestHeaderValue(
-//    _Inout_ P_HTTP_SESSION HttpSocket,
+//    _Inout_ PSETUP_HTTP_SESSION HttpSocket,
 //    _In_ LPCWSTR RequestHeader,
 //    _In_ ULONG Flags
 //    )
@@ -161,7 +50,7 @@ BOOLEAN HttpAddRequestHeaders(
 //}
 
 PPH_STRING HttpGetRequestHeaderString(
-    _Inout_ P_HTTP_SESSION HttpSocket,
+    _In_ HINTERNET RequestHandle,
     _In_ PCWSTR RequestHeader
     )
 {
@@ -170,7 +59,7 @@ PPH_STRING HttpGetRequestHeaderString(
 
     // Get the length of the data...
     if (!WinHttpQueryHeaders(
-        HttpSocket->RequestHandle,
+        RequestHandle,
         WINHTTP_QUERY_CUSTOM,
         RequestHeader,
         WINHTTP_NO_OUTPUT_BUFFER,
@@ -187,7 +76,7 @@ PPH_STRING HttpGetRequestHeaderString(
 
     // Query the data value...
     if (WinHttpQueryHeaders(
-        HttpSocket->RequestHandle,
+        RequestHandle,
         WINHTTP_QUERY_CUSTOM,
         RequestHeader,
         stringBuffer->Buffer,
@@ -203,7 +92,7 @@ PPH_STRING HttpGetRequestHeaderString(
 }
 
 ULONG HttpGetRequestHeaderDword(
-    _Inout_ P_HTTP_SESSION HttpSocket,
+    _In_ HINTERNET RequestHandle,
     _In_ ULONG Flags
     )
 {
@@ -212,7 +101,7 @@ ULONG HttpGetRequestHeaderDword(
     ULONG dwordResultTemp = 0;
 
     if (WinHttpQueryHeaders(
-        HttpSocket->RequestHandle,
+        RequestHandle,
         Flags | WINHTTP_QUERY_FLAG_NUMBER,
         NULL,
         &dwordResultTemp,
@@ -227,7 +116,7 @@ ULONG HttpGetRequestHeaderDword(
 }
 
 PSTR HttpDownloadString(
-    _Inout_ P_HTTP_SESSION HttpSocket
+    _In_ HINTERNET RequestHandle
     )
 {
     PSTR tempDataPtr = NULL;
@@ -239,7 +128,7 @@ PSTR HttpDownloadString(
 
     tempDataPtr = (PSTR)PhAllocate(allocatedLength);
 
-    while (WinHttpReadData(HttpSocket->RequestHandle, buffer, PAGE_SIZE, &returnLength))
+    while (WinHttpReadData(RequestHandle, buffer, PAGE_SIZE, &returnLength))
     {
         if (returnLength == 0)
             break;
@@ -270,7 +159,6 @@ PSTR HttpDownloadString(
 }
 
 BOOLEAN HttpParseURL(
-    _Inout_ P_HTTP_SESSION HttpSocket,
     _In_ PCWSTR Url,
     _Out_ HTTP_PARSED_URL* HttpParsedUrl
     )

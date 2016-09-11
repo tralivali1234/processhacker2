@@ -1,7 +1,6 @@
 ﻿#include <setup.h>
 #include <appsup.h>
 
-#include <Shlobj.h>
 #include <Netlistmgr.h>
 
 HBITMAP LoadPngImageFromResources(
@@ -208,7 +207,7 @@ PPH_STRING GetSystemTemp(VOID)
     dirPathLength = GetTempPath(0, NULL);
 
     // Allocate the string...
-    dirPath = PhCreateStringEx(NULL, dirPathLength * sizeof(TCHAR));
+    dirPath = PhCreateStringEx(NULL, dirPathLength * sizeof(WCHAR));
 
     // Query the directory path...
     if (!GetTempPath(dirPath->Length, dirPath->Buffer))
@@ -240,8 +239,6 @@ PPH_STRING BrowseForFolder(
     _In_opt_ PCWSTR Title
     )
 {
-    PPH_STRING folderPath = NULL;
-
     if (WINDOWS_HAS_IFILEDIALOG)
     {
         PVOID fileDialog;
@@ -253,20 +250,13 @@ PPH_STRING BrowseForFolder(
         if (PhShowFileDialog(DialogHandle, fileDialog))
         {
             PPH_STRING folderPath;
-            PPH_STRING fileDialogFolderPath = PhGetFileDialogFileName(fileDialog);
-
-            folderPath = PhCreateStringEx(fileDialogFolderPath->Buffer, fileDialogFolderPath->Length * 2);
-
-            // Ensure the folder path ends with a slash
-            // We must make sure the install path ends with a backslash since
-            // this string is wcscat' with our zip extraction paths.
-            PathAddBackslash(folderPath->Buffer);
-
-            PhTrimToNullTerminatorString(folderPath);
+            PPH_STRING fileDialogFolderPath = PH_AUTO(PhGetFileDialogFileName(fileDialog));
+            
+            PhTrimToNullTerminatorString(fileDialogFolderPath);
 
             PhFreeFileDialog(fileDialog);
 
-            return folderPath;
+            return PhDuplicateString(fileDialogFolderPath);
         }
     }
     else
@@ -282,15 +272,12 @@ PPH_STRING BrowseForFolder(
 
         if (shellItemId = SHBrowseForFolder(&browseInformation))
         {
+            PPH_STRING folderPath;
+
             folderPath = PhCreateStringEx(NULL, MAX_PATH * 2);
 
             if (SHGetPathFromIDList(shellItemId, folderPath->Buffer))
             {
-                // Ensure the folder path ends with a slash
-                // We must make sure the install path ends with a backslash since
-                // this string is wcscat' with our zip extraction paths.
-                PathAddBackslash(folderPath->Buffer);
-
                 PhTrimToNullTerminatorString(folderPath);
             }
             else
@@ -299,10 +286,12 @@ PPH_STRING BrowseForFolder(
             }
 
             CoTaskMemFree(shellItemId);
+
+            return folderPath;
         }
     }
 
-    return folderPath;
+    return NULL;
 }
 
 VOID StopwatchInitialize(

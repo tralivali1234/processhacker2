@@ -42,18 +42,18 @@ VOID StartProgress(VOID)
 
 VOID _SetProgressTime(VOID)
 {
-    volatile LONG dwTotal = 0;
-    volatile LONG dwCompleted = 0;
-    volatile LONG dwCurrentRate = 0;
-    volatile LONG dwTickDelta = 0;
-    volatile LONG dwLeft = 0;
-    volatile LONG dwCurrentTickCount = 0;
-    volatile LONG dwAverageRate = 0;
+    volatile ULONG dwTotal = 0;
+    volatile ULONG dwCompleted = 0;
+    volatile ULONG dwCurrentRate = 0;
+    volatile ULONG dwTickDelta = 0;
+    volatile ULONG dwLeft = 0;
+    volatile ULONG dwCurrentTickCount = 0;
+    volatile ULONG dwAverageRate = 0;
 
-    LONG dwSecondsLeft = 0;
-    LONG dwTickCount = 0;
-    LONG time_taken = 0;
-    LONG download_speed = 0;
+    ULONG dwSecondsLeft = 0;
+    ULONG dwTickCount = 0;
+    ULONG time_taken = 0;
+    ULONG download_speed = 0;
     PPH_STRING timeRemainingString = NULL;
 
     InterlockedIncrement(&_NumTimesSetProgressCalled);
@@ -103,130 +103,128 @@ VOID _SetProgressTime(VOID)
     dwSecondsLeft = (dwLeft / dwAverageRate) / 10;
 
     // Skip the first five calls (we need an average)...
-    //if (_NumTimesSetProgressCalled > 5)// ((dwSecondsLeft >= MIN_MINTIME4FEEDBACK) && (_iNumTimesSetProgressCalled >= 5))
+
+    time_taken = dwCurrentTickCount - dwTickDelta;
+    time_taken = __max(time_taken, 1); // Protect from divide by zero
+    download_speed = (dwCompleted / time_taken) * 1024;
+
+    //if (download_speed)
     {
-        time_taken = dwCurrentTickCount - dwTickDelta;
-        time_taken = __max(time_taken, 1); // Protect from divide by zero
-        download_speed = (dwCompleted / time_taken) * 1024;
+        ULONG nPercent = 0;
+        PPH_STRING statusRemaningBytesString = PhFormatSize(dwCompleted, -1);
+        PPH_STRING statusLengthString = PhFormatSize(dwTotal, -1);
+        PPH_STRING statusSpeedString = PhFormatSize(download_speed, -1);
 
-        //if (download_speed)
+        if (dwTotal)
         {
-            LONGLONG nPercent = 0;
-            PPH_STRING statusRemaningBytesString = PhFormatSize(dwCompleted, -1);
-            PPH_STRING statusLengthString = PhFormatSize(dwTotal, -1);
-            PPH_STRING statusSpeedString = PhFormatSize(download_speed, -1);
-
-            if (dwTotal)
+            // Will scaling it up cause a wrap?
+            if ((100 * 100) <= dwTotal)
             {
-                // Will scaling it up cause a wrap?
-                if ((100 * 100) <= dwTotal)
-                {
-                    // Yes, so scale down.
-                    nPercent = (dwCompleted / (dwTotal / 100));
-                }
-                else
-                {
-                    // No, so scale up.
-                    nPercent = ((100 * dwCompleted) / dwTotal);
-                }
-            }
-
-            PPH_STRING statusText1 = PhFormatString(L"Transfer rate: %s/s ", statusSpeedString->Buffer);
-            PPH_STRING statusText2 = PhFormatString(L"Downloaded: %s of %s (%u%% Completed)",
-                statusRemaningBytesString->Buffer,
-                statusLengthString->Buffer,
-                nPercent
-                );
-
-            SetDlgItemText(_hwndProgress, IDC_REMAINTIME, statusText1->Buffer);
-            SetDlgItemText(_hwndProgress, IDC_REMAINTIME3, statusText2->Buffer);
-
-            PhDereferenceObject(statusText2);
-            PhDereferenceObject(statusText1);
-            PhDereferenceObject(statusSpeedString);
-            PhDereferenceObject(statusLengthString);
-            PhDereferenceObject(statusRemaningBytesString);
-        }
-
-        // Is it more than an hour?
-        if (dwSecondsLeft > (TIME_SECONDS_IN_MINUTE * TIME_MINUTES_IN_HOUR))
-        {
-            LONGLONG dwMinutes = dwSecondsLeft / TIME_SECONDS_IN_MINUTE;
-            LONGLONG dwHours = dwMinutes / TIME_MINUTES_IN_HOUR;
-            LONGLONG dwDays = dwHours / TIME_HOURS_IN_DAY;
-
-            if (dwDays)
-            {
-                dwHours %= TIME_HOURS_IN_DAY;
-
-                // It's more than a day, so display days and hours.
-                if (dwDays == 1)
-                {
-                    if (dwHours == 1)
-                        timeRemainingString = PhFormatString(L"Remaining time: %u day and %u hour", dwHours, dwMinutes);
-                    else
-                        timeRemainingString = PhFormatString(L"Remaining time: %u day and %u hours", dwHours, dwMinutes);
-                }
-                else
-                {
-                    if (dwHours == 1)
-                        timeRemainingString = PhFormatString(L"Remaining time: %u days and %u hour", dwHours, dwMinutes);
-                    else
-                        timeRemainingString = PhFormatString(L"Remaining time: %u days and %u hours", dwHours, dwMinutes);
-                }
+                // Yes, so scale down.
+                nPercent = (dwCompleted / (dwTotal / 100));
             }
             else
             {
-                // It's less than a day, so display hours and minutes.
-                dwMinutes %= TIME_MINUTES_IN_HOUR;
+                // No, so scale up.
+                nPercent = ((100 * dwCompleted) / dwTotal);
+            }
+        }
 
+        PPH_STRING statusText1 = PhFormatString(L"Transfer rate: %s/s ", statusSpeedString->Buffer);
+        PPH_STRING statusText2 = PhFormatString(L"Downloaded: %s of %s (%lu%% Completed)",
+            statusRemaningBytesString->Buffer,
+            statusLengthString->Buffer,
+            nPercent);
+
+        SetDlgItemText(_hwndProgress, IDC_REMAINTIME, statusText1->Buffer);
+        SetDlgItemText(_hwndProgress, IDC_REMAINTIME3, statusText2->Buffer);
+
+        PhDereferenceObject(statusText2);
+        PhDereferenceObject(statusText1);
+        PhDereferenceObject(statusSpeedString);
+        PhDereferenceObject(statusLengthString);
+        PhDereferenceObject(statusRemaningBytesString);
+    }
+
+    // Is it more than an hour?
+    if (dwSecondsLeft > (TIME_SECONDS_IN_MINUTE * TIME_MINUTES_IN_HOUR))
+    {
+        ULONG dwMinutes = dwSecondsLeft / TIME_SECONDS_IN_MINUTE;
+        ULONG dwHours = dwMinutes / TIME_MINUTES_IN_HOUR;
+        ULONG dwDays = dwHours / TIME_HOURS_IN_DAY;
+
+        if (dwDays)
+        {
+            dwHours %= TIME_HOURS_IN_DAY;
+
+            // It's more than a day, so display days and hours.
+            if (dwDays == 1)
+            {
                 if (dwHours == 1)
-                {
-                    if (dwMinutes == 1)
-                        timeRemainingString = PhFormatString(L"Remaining time: %u hour and %u minute", dwHours, dwMinutes);
-                    else
-                        timeRemainingString = PhFormatString(L"Remaining time: %u hour and %u minutes", dwHours, dwMinutes);
-                }
+                    timeRemainingString = PhFormatString(L"Remaining time: %u day and %u hour", dwHours, dwMinutes);
                 else
-                {
-                    if (dwMinutes == 1)
-                        timeRemainingString = PhFormatString(L"Remaining time: %u hours and %u minute", dwHours, dwMinutes);
-                    else
-                    {
-                        ULONG stime =  dwSecondsLeft %= TIME_MINUTES_IN_HOUR;
-                        timeRemainingString = PhFormatString(L"Remaining time: %u hours, %u minutes and %u seconds", dwHours, dwMinutes, stime);
-                    }
-                }
+                    timeRemainingString = PhFormatString(L"Remaining time: %u day and %u hours", dwHours, dwMinutes);
+            }
+            else
+            {
+                if (dwHours == 1)
+                    timeRemainingString = PhFormatString(L"Remaining time: %u days and %u hour", dwHours, dwMinutes);
+                else
+                    timeRemainingString = PhFormatString(L"Remaining time: %u days and %u hours", dwHours, dwMinutes);
             }
         }
         else
         {
-            if (dwSecondsLeft > TIME_SECONDS_IN_MINUTE)
-            {
-                ULONG time = dwSecondsLeft / TIME_SECONDS_IN_MINUTE;
-                ULONG stime =  dwSecondsLeft %= TIME_MINUTES_IN_HOUR;
+            // It's less than a day, so display hours and minutes.
+            dwMinutes %= TIME_MINUTES_IN_HOUR;
 
-                timeRemainingString = PhFormatString(L"Remaining time: %u minutes and %u seconds", time, stime);
+            if (dwHours == 1)
+            {
+                if (dwMinutes == 1)
+                    timeRemainingString = PhFormatString(L"Remaining time: %u hour and %u minute", dwHours, dwMinutes);
+                else
+                    timeRemainingString = PhFormatString(L"Remaining time: %u hour and %u minutes", dwHours, dwMinutes);
             }
             else
             {
-                if (dwSecondsLeft > 0)
-                {
-                    // Round up to 5 seconds so it doesn't look so random
-                    //ULONG stime = ((dwSecondsLeft + 4) / 5) * 5;
-                    timeRemainingString = PhFormatString(L"Remaining time: %u seconds", dwSecondsLeft);
-                }
+                if (dwMinutes == 1)
+                    timeRemainingString = PhFormatString(L"Remaining time: %u hours and %u minute", dwHours, dwMinutes);
                 else
                 {
-                    timeRemainingString = PhFormatString(L"Remaining time: 0 seconds");
+                    ULONG stime = dwSecondsLeft %= TIME_MINUTES_IN_HOUR;
+                    timeRemainingString = PhFormatString(L"Remaining time: %u hours, %u minutes and %u seconds", dwHours, dwMinutes, stime);
                 }
             }
         }
-
-        // update the Time remaining field
-        SetDlgItemText(_hwndProgress, IDC_REMAINTIME2, timeRemainingString->Buffer);
-        PhDereferenceObject(timeRemainingString);
     }
+    else
+    {
+        if (dwSecondsLeft > TIME_SECONDS_IN_MINUTE)
+        {
+            ULONG time = dwSecondsLeft / TIME_SECONDS_IN_MINUTE;
+            ULONG stime = dwSecondsLeft %= TIME_MINUTES_IN_HOUR;
+
+            timeRemainingString = PhFormatString(L"Remaining time: %u minutes and %u seconds", time, stime);
+        }
+        else
+        {
+            if (dwSecondsLeft > 0)
+            {
+                // Round up to 5 seconds so it doesn't look so random
+                //ULONG stime = ((dwSecondsLeft + 4) / 5) * 5;
+                timeRemainingString = PhFormatString(L"Remaining time: %u seconds", dwSecondsLeft);
+            }
+            else
+            {
+                timeRemainingString = PhFormatString(L"Remaining time: 0 seconds");
+            }
+        }
+    }
+
+    // update the Time remaining field
+    SetDlgItemText(_hwndProgress, IDC_REMAINTIME2, timeRemainingString->Buffer);
+    PhDereferenceObject(timeRemainingString);
+
 
     // we are updating now, so set all the stuff for next time
     InterlockedExchange(&_LastUpdatedTimeRemaining, dwTickCount);

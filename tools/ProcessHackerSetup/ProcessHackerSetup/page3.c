@@ -11,27 +11,24 @@ VOID LoadInstallDirectory(
     // If the string is null or empty, use the default installation path.
     if (PhIsNullOrEmptyString(SetupInstallPath))
     {
-        PPH_STRING defaultInstallPath;
+        static PH_STRINGREF programW6432 = PH_STRINGREF_INIT(L"%ProgramW6432%");
+        static PH_STRINGREF programFiles = PH_STRINGREF_INIT(L"%ProgramFiles%");
+        static PH_STRINGREF defaultDirectoryName = PH_STRINGREF_INIT(L"\\Process Hacker\\");
+
         PPH_STRING expandedString;
 
         if (USER_SHARED_DATA->NativeProcessorArchitecture == PROCESSOR_ARCHITECTURE_AMD64) 
         {
-            // We're on 64-bit Windows. Try find the 64-bit Program Files directory.
-            defaultInstallPath = PhaCreateString(L"%ProgramW6432%");
-
-            if (expandedString = PH_AUTO(PhExpandEnvironmentStrings(&defaultInstallPath->sr)))
+            if (expandedString = PH_AUTO(PhExpandEnvironmentStrings(&programW6432)))
             {
-                SetupInstallPath = PhConcatStrings2(expandedString->Buffer, L"\\Process Hacker\\");
+                SetupInstallPath = PhConcatStringRef2(&expandedString->sr, &defaultDirectoryName);
             }
         }
         else
         {
-            // We're on 32-bit Windows. Try find the Program Files directory.
-            defaultInstallPath = PhaCreateString(L"%ProgramFiles%");
-
-            if (expandedString = PH_AUTO(PhExpandEnvironmentStrings(&defaultInstallPath->sr)))
+            if (expandedString = PH_AUTO(PhExpandEnvironmentStrings(&programFiles)))
             {
-                SetupInstallPath = PhConcatStrings2(expandedString->Buffer, L"\\Process Hacker\\");
+                SetupInstallPath = PhConcatStringRef2(&expandedString->sr, &defaultDirectoryName);
             }
         }
     }
@@ -43,9 +40,8 @@ VOID LoadInstallDirectory(
     }
 
 #ifdef _DEBUG
-    PPH_STRING setupDirectory = PhGetApplicationDirectory();
+    PPH_STRING setupDirectory = PH_AUTO(PhGetApplicationDirectory());
     PhSwapReference(&SetupInstallPath, PhConcatStrings2(setupDirectory->Buffer, L"ProcessHacker_Test\\"));
-    PhDereferenceObject(setupDirectory);
 #endif
 
     // The user might have removed the trailing backslash (required for zip extraction).
@@ -67,15 +63,16 @@ BOOL PropSheetPage3_OnInitDialog(
     InitializeFont(GetDlgItem(hwndDlg, IDC_MAINHEADER), -17, FW_SEMIBOLD);
 
     // Set the default checkboxes.
-    Button_SetCheck(GetDlgItem(hwndDlg, IDC_CHECK1), TRUE);
-    Button_SetCheck(GetDlgItem(hwndDlg, IDC_CHECK6), TRUE);
+    //Button_SetCheck(GetDlgItem(hwndDlg, IDC_CHECK1), TRUE);
+    //Button_SetCheck(GetDlgItem(hwndDlg, IDC_CHECK6), TRUE);
 
     // Fix the text margins.
     SendMessage(
         GetDlgItem(hwndDlg, IDC_INSTALL_DIRECTORY),
         EM_SETMARGINS,
         EC_LEFTMARGIN | EC_RIGHTMARGIN,
-        MAKELPARAM(0, 0));
+        MAKELPARAM(0, 0)
+        );
 
     // Query the default installation path
     LoadInstallDirectory(hwndDlg);
@@ -120,9 +117,10 @@ BOOL PropSheetPage3_OnCommand(
         {
             PPH_STRING installFolder;
 
-            installFolder = BrowseForFolder(hwndDlg, L"Select installation folder");
-
-            if (installFolder)
+            if (installFolder = BrowseForFolder(
+                hwndDlg, 
+                L"Select installation folder"
+                ))
             {
                 PhSwapReference(&SetupInstallPath, installFolder);
 

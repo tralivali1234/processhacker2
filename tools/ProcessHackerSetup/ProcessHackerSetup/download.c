@@ -3,44 +3,89 @@
 #include <netio.h>
 #include "lib\mxml\mxml.h"
 
-PWSTR Version = NULL;
-PWSTR DownloadURL = NULL;
+static PPH_STRING Version = NULL;
+static PPH_STRING DownloadURL = NULL;
 
 BOOLEAN QueryBuildServerThread(
-    _Inout_ P_HTTP_SESSION HttpSocket
+    _Out_ PPH_STRING *Version,
+    _Out_ PPH_STRING *DownloadURL
     )
 {
     BOOLEAN isSuccess = FALSE;
+    HINTERNET sessionHandle = NULL;
+    HINTERNET connectionHandle = NULL;
+    HINTERNET requestHandle = NULL;
     PSTR xmlStringBuffer = NULL;
     mxml_node_t* xmlNode = NULL;
     PPH_STRING versionString = NULL;
     PPH_STRING revisionString = NULL;
+    WINHTTP_CURRENT_USER_IE_PROXY_CONFIG proxyConfig = { 0 };
+
+    WinHttpGetIEProxyConfigForCurrentUser(&proxyConfig);
 
     __try
     {
         STATUS_MSG(L"Connecting to build server...\n");
 
-        if (!HttpConnect(HttpSocket, L"wj32.org", INTERNET_DEFAULT_HTTPS_PORT))
+        if (!(sessionHandle = WinHttpOpen(
+            NULL,
+            proxyConfig.lpszProxy ? WINHTTP_ACCESS_TYPE_NAMED_PROXY : WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
+            proxyConfig.lpszProxy ? proxyConfig.lpszProxy : WINHTTP_NO_PROXY_NAME,
+            proxyConfig.lpszProxy ? proxyConfig.lpszProxyBypass : WINHTTP_NO_PROXY_BYPASS,
+            0
+            )))
+        {
+            STATUS_MSG(L"WinHttpOpen: %u\n", GetLastError());
+            __leave;
+        }
+
+        if (!(connectionHandle = WinHttpConnect(
+            sessionHandle,
+            L"wj32.org",
+            INTERNET_DEFAULT_HTTPS_PORT,
+            0
+            )))
         {
             STATUS_MSG(L"HttpConnect: %u\n", GetLastError());
             __leave;
         }
 
         STATUS_MSG(L"Connected to build server...\n");
-
-        if (!HttpBeginRequest(HttpSocket, NULL, L"/processhacker/update.php", WINHTTP_FLAG_SECURE))
+        
+        if (!(requestHandle = WinHttpOpenRequest(
+            connectionHandle,
+            NULL,
+            L"/processhacker/update.php",
+            NULL,
+            WINHTTP_NO_REFERER,
+            WINHTTP_DEFAULT_ACCEPT_TYPES,
+            WINHTTP_FLAG_SECURE
+            )))
         {
             STATUS_MSG(L"HttpBeginRequest: %u\n", GetLastError());
             __leave;
         }
 
-        if (!HttpAddRequestHeaders(HttpSocket, L"ProcessHacker-OsBuild: 0x0D06F00D"))
+        if (!WinHttpAddRequestHeaders(
+            requestHandle, 
+            L"ProcessHacker-OsBuild: 0x0D06F00D", 
+            -1L, 
+            WINHTTP_ADDREQ_FLAG_ADD
+            ))
         {
             STATUS_MSG(TEXT("HttpAddRequestHeaders: %u\n"), GetLastError());
             __leave;
         }
 
-        if (!HttpSendRequest(HttpSocket, 0))
+        if (!WinHttpSendRequest(
+            requestHandle,
+            WINHTTP_NO_ADDITIONAL_HEADERS,
+            0,
+            WINHTTP_NO_REQUEST_DATA,
+            0,
+            0,
+            0
+            ))
         {
             STATUS_MSG(L"HttpSendRequest: %u\n", GetLastError());
             __leave;
@@ -48,13 +93,13 @@ BOOLEAN QueryBuildServerThread(
 
         STATUS_MSG(L"Querying build server...");
 
-        if (!HttpEndRequest(HttpSocket))
+        if (!WinHttpReceiveResponse(requestHandle, NULL))
         {
             STATUS_MSG(L"HttpEndRequest: %u\n", GetLastError());
             __leave;
         }
 
-        if (!(xmlStringBuffer = HttpDownloadString(HttpSocket)))
+        if (!(xmlStringBuffer = HttpDownloadString(requestHandle)))
         {
             STATUS_MSG(L"HttpDownloadString: %u\n", GetLastError());
             __leave;
@@ -79,24 +124,39 @@ BOOLEAN QueryBuildServerThread(
         if (PhIsNullOrEmptyString(revisionString))
             __leave;
 
-        Version = PhFormatString(
+        *Version = PhFormatString(
             L"%s.%s",
             versionString->Buffer,
             revisionString->Buffer
-            )->Buffer;
+            );
 
-        DownloadURL = PhFormatString(
+        *DownloadURL = PhFormatString(
             L"https://github.com/processhacker2/processhacker2/releases/download/v%s/processhacker-%s-bin.zip",
             versionString->Buffer,
             versionString->Buffer
-            )->Buffer;
+            );
 
-        STATUS_MSG(L"Found build: %s\n", Version);
+        STATUS_MSG(L"Found build: %s\n", *Version);
 
         isSuccess = TRUE;
     }
     __finally
     {
+        if (requestHandle)
+        {
+            WinHttpCloseHandle(requestHandle);
+        }
+
+        if (connectionHandle)
+        {
+            WinHttpCloseHandle(connectionHandle);
+        }
+
+        if (sessionHandle)
+        {
+            WinHttpCloseHandle(sessionHandle);
+        }
+
         if (revisionString)
         {
             PhDereferenceObject(revisionString);
@@ -121,6 +181,103 @@ BOOLEAN QueryBuildServerThread(
     return isSuccess;
 }
 
+PPH_STRING GenerateDownloadFilePath(
+    _In_ PPH_STRING Version
+    )
+{
+    BOOLEAN success = FALSE;
+    ULONG indexOfFileName = -1;
+    GUID randomGuid;
+    PPH_STRING setupTempPath = NULL;
+    PPH_STRING randomGuidString = NULL;
+    PPH_STRING setupFilePath = NULL;
+    PPH_STRING fullSetupPath = NULL;
+
+    __try
+    {
+        // Allocate the GetTempPath buffer
+        setupTempPath = PhCreateStringEx(NULL, GetTempPath(0, NULL) * sizeof(WCHAR));
+        if (PhIsNullOrEmptyString(setupTempPath))
+            __leave;
+
+        // Get the temp path
+        if (GetTempPath((ULONG)setupTempPath->Length / sizeof(WCHAR), setupTempPath->Buffer) == 0)
+            __leave;
+        if (PhIsNullOrEmptyString(setupTempPath))
+            __leave;
+
+        // Generate random guid for our directory path.
+        PhGenerateGuid(&randomGuid);
+
+        if (randomGuidString = PhFormatGuid(&randomGuid))
+        {
+            PPH_STRING guidSubString;
+
+            // Strip the left and right curly brackets.
+            guidSubString = PhSubstring(
+                randomGuidString, 
+                1, 
+                randomGuidString->Length / sizeof(WCHAR) - 2
+                );
+
+            PhSwapReference(&randomGuidString, guidSubString);
+        }
+
+        // Append the tempath to our string: %TEMP%RandomString\\processhacker-%lu.%lu-setup.zip
+        // Example: C:\\Users\\dmex\\AppData\\Temp\\ABCD\\processhacker-3.10-setup.zip
+        setupFilePath = PhFormatString(
+            L"%s%s\\processhacker-%s-setup.zip",
+            setupTempPath->Buffer,
+            randomGuidString->Buffer,
+            Version->Buffer
+            );
+
+        // Create the directory if it does not exist.
+        if (fullSetupPath = PhGetFullPath(setupFilePath->Buffer, &indexOfFileName))
+        {
+            PPH_STRING directoryPath;
+
+            if (indexOfFileName == -1)
+                __leave;
+
+            if (directoryPath = PhSubstring(fullSetupPath, 0, indexOfFileName))
+            {
+                CreateDirectoryPath(directoryPath);
+
+                PhDereferenceObject(directoryPath);
+            }
+        }
+
+        success = TRUE;
+    }
+    __finally
+    {
+        if (!success)
+        {
+            if (setupFilePath)
+            {
+                PhDereferenceObject(setupFilePath);
+            }
+        }
+
+        if (fullSetupPath)
+        {
+            PhDereferenceObject(fullSetupPath);
+        }
+
+        if (randomGuidString)
+        {
+            PhDereferenceObject(randomGuidString);
+        }
+
+        if (setupTempPath)
+        {
+            PhDereferenceObject(setupTempPath);
+        }
+    }
+
+    return success ? setupFilePath : NULL;
+}
 
 
 
@@ -128,11 +285,13 @@ BOOLEAN SetupDownloadBuild(
     _In_ PVOID Arguments
     )
 {
+    HINTERNET sessionHandle = NULL;
+    HINTERNET connectionHandle = NULL;
+    HINTERNET requestHandle = NULL;
+    HANDLE tempFileHandle = NULL;
     ULONG contentLength = 0;
     BOOLEAN isDownloadSuccess = FALSE;
-    P_HTTP_SESSION httpSocket = NULL;
     HTTP_PARSED_URL urlComponents = NULL;
-    HANDLE tempFileHandle = NULL;
     ULONG writeLength = 0;
     ULONG readLength = 0;
     ULONG totalLength = 0;
@@ -142,18 +301,26 @@ BOOLEAN SetupDownloadBuild(
     PH_HASH_CONTEXT hashContext;
     IO_STATUS_BLOCK isb;
     BYTE buffer[PAGE_SIZE];
+    WINHTTP_CURRENT_USER_IE_PROXY_CONFIG proxyConfig = { 0 };
+
+    WinHttpGetIEProxyConfigForCurrentUser(&proxyConfig);
 
     StartProgress();
     SendDlgItemMessage(Arguments, IDC_PROGRESS1, PBM_SETSTATE, PBST_NORMAL, 0);
 
-    httpSocket = HttpSocketCreate();
-
     __try
     {
-        if (!QueryBuildServerThread(httpSocket))
+        if (!QueryBuildServerThread(&Version, &DownloadURL))
             __leave;
 
-        if (!HttpParseURL(httpSocket, DownloadURL, &urlComponents))
+
+
+
+        GenerateDownloadFilePath(Version);
+
+
+
+        if (!HttpParseURL(DownloadURL->Buffer, &urlComponents))
         {
             STATUS_MSG(L"HttpParseURL: %u\n", GetLastError());
             __leave;
@@ -161,7 +328,24 @@ BOOLEAN SetupDownloadBuild(
 
         STATUS_MSG(L"Connecting to download server...\n");
 
-        if (!HttpConnect(httpSocket, urlComponents->HttpServer, INTERNET_DEFAULT_HTTPS_PORT))
+        if (!(sessionHandle = WinHttpOpen(
+            NULL,
+            proxyConfig.lpszProxy ? WINHTTP_ACCESS_TYPE_NAMED_PROXY : WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
+            proxyConfig.lpszProxy ? proxyConfig.lpszProxy : WINHTTP_NO_PROXY_NAME,
+            proxyConfig.lpszProxy ? proxyConfig.lpszProxyBypass : WINHTTP_NO_PROXY_BYPASS,
+            0
+            )))
+        {
+            STATUS_MSG(L"WinHttpOpen: %u\n", GetLastError());
+            __leave;
+        }
+
+        if (!(connectionHandle = WinHttpConnect(
+            sessionHandle,
+            urlComponents->HttpServer,
+            INTERNET_DEFAULT_HTTPS_PORT,
+            0
+            )))
         {
             STATUS_MSG(L"HttpConnect: %u\n", GetLastError());
             __leave;
@@ -169,41 +353,63 @@ BOOLEAN SetupDownloadBuild(
 
         STATUS_MSG(L"Connected to download server...\n");
 
-        if (!HttpBeginRequest(httpSocket, NULL, urlComponents->HttpPath, WINHTTP_FLAG_SECURE))
+        if (!(requestHandle = WinHttpOpenRequest(
+            connectionHandle,
+            NULL,
+            urlComponents->HttpPath,
+            NULL,
+            WINHTTP_NO_REFERER,
+            WINHTTP_DEFAULT_ACCEPT_TYPES,
+            WINHTTP_FLAG_SECURE
+            )))
         {
             STATUS_MSG(L"HttpBeginRequest: %u\n", GetLastError());
             __leave;
         }
 
-        if (!HttpAddRequestHeaders(httpSocket, L"User-Agent: 0x0D06F00D"))
+        if (!WinHttpAddRequestHeaders(
+            requestHandle, 
+            L"User-Agent: 0x0D06F00D", 
+            -1L, 
+            WINHTTP_ADDREQ_FLAG_ADD
+            ))
         {
-            STATUS_MSG(L"HttpAddRequestHeaders: %u\n", GetLastError());
+            STATUS_MSG(TEXT("HttpAddRequestHeaders: %u\n"), GetLastError());
             __leave;
         }
 
-        if (!HttpSendRequest(httpSocket, 0))
+        if (!WinHttpSendRequest(
+            requestHandle,
+            WINHTTP_NO_ADDITIONAL_HEADERS,
+            0,
+            WINHTTP_NO_REQUEST_DATA,
+            0,
+            0,
+            0
+            ))
         {
             STATUS_MSG(L"HttpSendRequest: %u\n", GetLastError());
             __leave;
         }
 
         STATUS_MSG(L"Querying download server...");
-
-        if (!HttpEndRequest(httpSocket))
+        
+        if (!WinHttpReceiveResponse(requestHandle, NULL))
         {
             STATUS_MSG(L"HttpEndRequest: %u\n", GetLastError());
             __leave;
         }
 
-        contentLength = HttpGetRequestHeaderDword(httpSocket, WINHTTP_QUERY_CONTENT_LENGTH);
-
-        if (contentLength == 0)
+        if (!(contentLength = HttpGetRequestHeaderDword(
+            requestHandle, 
+            WINHTTP_QUERY_CONTENT_LENGTH
+            )))
         {
             STATUS_MSG(L"HttpGetRequestHeaderDword: %u\n", GetLastError());
             __leave;
         }
 
-        STATUS_MSG(L"Downloading latest build %s...\n", Version);
+        STATUS_MSG(L"Downloading latest build %s...\n", Version->Buffer);
 
         // Create output file
         if (!NT_SUCCESS(PhCreateFileWin32(
@@ -226,7 +432,7 @@ BOOLEAN SetupDownloadBuild(
         memset(buffer, 0, PAGE_SIZE);
 
         // Download the data.
-        while (WinHttpReadData(httpSocket->RequestHandle, buffer, PAGE_SIZE, &bytesDownloaded))
+        while (WinHttpReadData(requestHandle, buffer, PAGE_SIZE, &bytesDownloaded))
         {
             // If we get zero bytes, the file was uploaded or there was an error
             if (bytesDownloaded == 0)
@@ -314,6 +520,21 @@ BOOLEAN SetupDownloadBuild(
     }
     __finally
     {
+        if (requestHandle)
+        {
+            WinHttpCloseHandle(requestHandle);
+        }
+
+        if (connectionHandle)
+        {
+            WinHttpCloseHandle(connectionHandle);
+        }
+
+        if (sessionHandle)
+        {
+            WinHttpCloseHandle(sessionHandle);
+        }
+
         if (tempFileHandle)
         {
             NtClose(tempFileHandle);
