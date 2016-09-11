@@ -305,7 +305,6 @@ BOOLEAN SetupDownloadBuild(
 
     WinHttpGetIEProxyConfigForCurrentUser(&proxyConfig);
 
-    StartProgress();
     SendDlgItemMessage(Arguments, IDC_PROGRESS1, PBM_SETSTATE, PBST_NORMAL, 0);
 
     __try
