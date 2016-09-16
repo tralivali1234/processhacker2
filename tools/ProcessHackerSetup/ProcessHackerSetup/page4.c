@@ -71,8 +71,6 @@ BOOL PropSheetPage4_OnNotify(
 
             _hwndProgress = hwndDlg;
 
-            SetTimer(hwndDlg, 1, 100, NULL);
-
             PhCreateThread(0, DownloadThread, hwPropSheet);
         }
         break;
@@ -90,7 +88,7 @@ BOOL PropSheetPage4_OnNotify(
         break;
     case PSN_KILLACTIVE:
         {
-            KillTimer(hwndDlg, 1);
+      
         }
         break;
     }
@@ -109,11 +107,6 @@ INT_PTR CALLBACK PropSheetPage4_WndProc(
     {
         HANDLE_MSG(hwndDlg, WM_INITDIALOG, PropSheetPage4_OnInitDialog);
         HANDLE_MSG(hwndDlg, WM_NOTIFY, PropSheetPage4_OnNotify);
-    case WM_TIMER:
-        {
-            _SetProgressTime();
-        }
-        break;
     }
 
     return FALSE;

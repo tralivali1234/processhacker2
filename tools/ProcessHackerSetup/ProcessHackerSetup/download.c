@@ -486,7 +486,7 @@ BOOLEAN SetupDownloadBuild(
             //    PhDereferenceObject(totalLength);
             //}
 
-            SetProgress(downloadedBytes, contentLength);
+            //SetProgress(downloadedBytes, contentLength);
         }
 
         // Compute hash result (will fail if file not downloaded correctly).
