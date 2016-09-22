@@ -40,6 +40,8 @@ BOOL PropSheetPage2_OnInitDialog(
 
     // Set the fonts.
     InitializeFont(GetDlgItem(hwndDlg, IDC_MAINHEADER), -17, FW_SEMIBOLD);
+    InitializeFont(GetDlgItem(hwndDlg, IDC_SUBHEADER), -13, FW_NORMAL);
+    //InitializeFont(GetDlgItem(hwndDlg, IDC_MAINHEADER), -17, FW_SEMIBOLD);
 
     // Set the default radio button state to 'do not accept'.
     Button_SetCheck(GetDlgItem(hwndDlg, IDC_RADIO2), BST_CHECKED);

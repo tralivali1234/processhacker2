@@ -175,12 +175,12 @@ VOID InitializeFont(
     LOGFONT fontAttributes = { 0 };
     fontAttributes.lfHeight = Height;
     fontAttributes.lfWeight = Weight;
-    fontAttributes.lfQuality = CLEARTYPE_QUALITY | ANTIALIASED_QUALITY;
+    fontAttributes.lfQuality = CLEARTYPE_QUALITY;
 
     wcscpy_s(
         fontAttributes.lfFaceName,
         ARRAYSIZE(fontAttributes.lfFaceName),
-        WindowsVersion > WINDOWS_VISTA ? L"Segoe UI" : L"MS Shell Dlg 2"
+        WindowsVersion > WINDOWS_VISTA ? L"Calibri" : L"MS Shell Dlg 2"
         );
 
     // Verdana
@@ -227,9 +227,9 @@ PPH_STRING BrowseForFolder(
 
         if (PhShowFileDialog(DialogHandle, fileDialog))
         {
-            PPH_STRING folderPath;
-            PPH_STRING fileDialogFolderPath = PH_AUTO(PhGetFileDialogFileName(fileDialog));
+            PPH_STRING fileDialogFolderPath;
             
+            fileDialogFolderPath = PH_AUTO(PhGetFileDialogFileName(fileDialog));       
             PhTrimToNullTerminatorString(fileDialogFolderPath);
 
             PhFreeFileDialog(fileDialog);

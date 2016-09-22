@@ -17,94 +17,84 @@
 
 #if !defined(AFX_RESOURCE_DLL) || defined(AFX_TARG_ENU)
 LANGUAGE LANG_ENGLISH, SUBLANG_NEUTRAL
+#pragma code_page(1252)
 
 /////////////////////////////////////////////////////////////////////////////
 //
 // Dialog
 //
 
-IDD_DIALOG1 DIALOGEX 0, 0, 355, 215
+IDD_DIALOG1 DIALOGEX 0, 0, 400, 225
 STYLE DS_SETFONT | DS_MODALFRAME | DS_NOFAILCREATE | WS_POPUP | WS_CAPTION | WS_SYSMENU
 EXSTYLE WS_EX_CONTROLPARENT
 FONT 8, "MS Shell Dlg 2", 400, 0, 0x1
 BEGIN
-    CONTROL         "Process Hacker - Setup",IDC_MAINHEADER,"Static",SS_SIMPLE | WS_GROUP,128,7,209,18
-    LTEXT           "A free, powerful, multi-purpose tool that helps you monitor system resources, debug software and detect malware.",IDC_SUBHEADER,128,27,211,36
-    CONTROL         "",IDC_PROJECT_ICON,"Static",SS_BLACKFRAME,10,54,92,75
+    CONTROL         "Process Hacker - Setup",IDC_MAINHEADER,"Static",SS_SIMPLE | WS_GROUP,22,26,209,18
+    LTEXT           "A free, powerful, multi-purpose tool that helps you monitor system resources, debug software and detect malware.",IDC_SUBHEADER,22,46,211,36
+    CONTROL         "",IDC_PROJECT_ICON,"Static",SS_BLACKFRAME,271,15,92,75
+    LTEXT           "Click Next to continue.",IDC_SUBHEADER2,22,98,100,10,NOT WS_VISIBLE
 END
 
-IDD_DIALOG2 DIALOGEX 0, 0, 355, 215
+IDD_DIALOG2 DIALOGEX 0, 0, 400, 225
 STYLE DS_SETFONT | DS_MODALFRAME | DS_NOFAILCREATE | WS_POPUP | WS_CAPTION | WS_SYSMENU
 EXSTYLE WS_EX_CONTROLPARENT
 FONT 8, "MS Shell Dlg 2", 400, 0, 0x1
 BEGIN
-    CONTROL         "License Agreement",IDC_MAINHEADER,"Static",SS_SIMPLE | WS_GROUP,44,7,267,24
-    LTEXT           "Please read the following important information. You must accept the terms of this agreement before continuing with the installation.",IDC_SUBHEADER,45,25,267,19
-    EDITTEXT        IDC_EDIT1,45,47,266,134,ES_MULTILINE | ES_READONLY | WS_VSCROLL
-    CONTROL         "I accept the agreement",IDC_RADIO1,"Button",BS_AUTORADIOBUTTON,45,185,267,10
-    CONTROL         "I do not accept the agreement",IDC_RADIO2,"Button",BS_AUTORADIOBUTTON,45,198,267,10
+    CONTROL         "License Agreement",IDC_MAINHEADER,"Static",SS_SIMPLE | WS_GROUP,22,7,267,24
+    LTEXT           "Please read the following important information. You must accept the terms of this agreement before you're able to continue with the installation.",IDC_SUBHEADER,22,23,356,19
+    EDITTEXT        IDC_EDIT1,22,47,356,143,ES_MULTILINE | ES_READONLY | WS_VSCROLL
+    CONTROL         "I accept the agreement",IDC_RADIO1,"Button",BS_AUTORADIOBUTTON,22,194,356,10
+    CONTROL         "I do not accept the agreement",IDC_RADIO2,"Button",BS_AUTORADIOBUTTON,22,206,356,10
 END
 
-IDD_DIALOG4 DIALOGEX 0, 0, 355, 215
+IDD_DIALOG3 DIALOGEX 0, 0, 400, 225
 STYLE DS_SETFONT | DS_MODALFRAME | DS_NOFAILCREATE | WS_POPUP | WS_CAPTION | WS_SYSMENU
 EXSTYLE WS_EX_CONTROLPARENT
 FONT 8, "MS Shell Dlg 2", 400, 0, 0x1
 BEGIN
-    LTEXT           "Preparing downloads...",IDC_MAINHEADER1,44,73,243,16
-    CONTROL         "Transfer rate:",IDC_REMAINTIME,"Static",SS_LEFTNOWORDWRAP | WS_GROUP,44,103,268,8
-    CONTROL         "",IDC_PROGRESS1,"msctls_progress32",PBS_SMOOTH,44,135,258,11,WS_EX_CLIENTEDGE
-    LTEXT           "Remaining time:",IDC_REMAINTIME2,44,116,268,8
-    LTEXT           "Downloaded:",IDC_REMAINTIME3,44,89,268,8
-    LTEXT           "Installing Process Hacker...",IDC_MAINHEADER,44,7,267,17
+    CONTROL         "Create a desktop shortcut",IDC_CHECK1,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,33,95,100,10
+    CONTROL         "Start on system startup",IDC_CHECK2,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,216,95,92,10
+    CONTROL         "Set Process Hacker as the default Task Manager for Windows",IDC_CHECK3,
+                    "Button",BS_AUTOCHECKBOX | WS_TABSTOP,33,123,213,10
+    EDITTEXT        IDC_INSTALL_DIRECTORY,33,57,277,14,ES_AUTOHSCROLL | ES_READONLY
+    PUSHBUTTON      "Browse",IDC_FOLDER_BROWSE,314,57,50,14
+    CONTROL         "Setup Options",IDC_MAINHEADER,"Static",SS_SIMPLE | WS_GROUP,22,7,267,24
+    LTEXT           "Please review the following tasks that will be performed during installation.",IDC_SUBHEADER,23,25,267,19
+    GROUPBOX        "Additional Options",IDC_STATIC,22,145,356,59
+    GROUPBOX        "Options",IDC_STATIC,22,82,356,59
+    CONTROL         "Associate file extensions with PE Viewer",IDC_CHECK5,
+                    "Button",BS_AUTOCHECKBOX | WS_TABSTOP,33,159,143,10
+    CONTROL         "Create a desktop shortcut for all users",IDC_CHECK7,
+                    "Button",BS_AUTOCHECKBOX | WS_TABSTOP,33,109,136,10
+    CONTROL         "Start minimized on system tray",IDC_CHECK8,"Button",BS_AUTOCHECKBOX | WS_DISABLED | WS_TABSTOP,216,109,114,10
+    CONTROL         "Install KProcessHacker as a service",IDC_CHECK6,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,33,172,143,10
+    CONTROL         "Install Debugging Tools for Windows",IDC_CHECK9,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,33,186,143,10
+    CONTROL         "Reset Process Hacker settings",IDC_CHECK10,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,217,156,113,10
+    GROUPBOX        "Installation Folder",IDC_STATIC,22,41,356,40
 END
 
-IDD_DIALOG5 DIALOGEX 0, 0, 355, 215
+IDD_DIALOG4 DIALOGEX 0, 0, 400, 225
+STYLE DS_SETFONT | DS_MODALFRAME | DS_NOFAILCREATE | WS_POPUP | WS_CAPTION | WS_SYSMENU
+EXSTYLE WS_EX_CONTROLPARENT
+FONT 8, "MS Shell Dlg 2", 400, 0, 0x1
+BEGIN
+    LTEXT           "Preparing downloads...",IDC_MAINHEADER1,22,73,243,16
+    CONTROL         "Transfer rate:",IDC_REMAINTIME,"Static",SS_LEFTNOWORDWRAP | WS_GROUP,22,103,356,8
+    CONTROL         "",IDC_PROGRESS1,"msctls_progress32",PBS_SMOOTH,22,135,258,11,WS_EX_CLIENTEDGE
+    LTEXT           "Remaining time:",IDC_REMAINTIME2,22,116,356,8
+    LTEXT           "Downloaded:",IDC_REMAINTIME3,22,89,356,8
+    LTEXT           "Installing Process Hacker...",IDC_MAINHEADER,22,7,267,17
+END
+
+IDD_DIALOG5 DIALOGEX 0, 0, 400, 225
 STYLE DS_SETFONT | DS_MODALFRAME | DS_NOFAILCREATE | WS_POPUP | WS_CAPTION | WS_SYSMENU
 EXSTYLE WS_EX_CONTROLPARENT
 FONT 8, "MS Shell Dlg 2", 400, 0, 0x1
 BEGIN
     CONTROL         "Completed the Process Hacker Setup",IDC_MAINHEADER,
-                    "Static",SS_SIMPLE | WS_GROUP,128,7,220,24
-    LTEXT           "Setup has finished installing Process Hacker on your computer.\r\n\r\nClick Finish to exit setup.",IDC_SUBHEADER,128,27,211,36
-    CONTROL         "",IDC_PROJECT_ICON,"Static",SS_BLACKFRAME,10,54,92,75
-    CONTROL         "Launch Process Hacker",IDC_CHECK1,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,128,78,89,10
-END
-
-IDD_DIALOG3 DIALOGEX 0, 0, 355, 215
-STYLE DS_SETFONT | DS_MODALFRAME | DS_NOFAILCREATE | WS_POPUP | WS_CAPTION | WS_SYSMENU
-EXSTYLE WS_EX_CONTROLPARENT
-FONT 8, "MS Shell Dlg 2", 400, 0, 0x1
-BEGIN
-    CONTROL         "Create a desktop shortcut",IDC_CHECK1,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,51,103,100,10
-    CONTROL         "Start on system startup",IDC_CHECK2,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,194,103,92,10
-    CONTROL         "Set Process Hacker as the default task manager for Windows",IDC_CHECK3,
-                    "Button",BS_AUTOCHECKBOX | WS_TABSTOP,51,184,211,10
-    EDITTEXT        IDC_INSTALL_DIRECTORY,45,61,211,14,ES_AUTOHSCROLL | ES_READONLY
-    PUSHBUTTON      "Browse",IDC_FOLDER_BROWSE,261,61,50,14
-    CONTROL         "Setup Options",IDC_MAINHEADER,"Static",SS_SIMPLE | WS_GROUP,44,7,267,24
-    LTEXT           "Please review the following tasks that will be performed during installation.",IDC_SUBHEADER,45,25,267,19
-    LTEXT           "Setup will install Process Hacker into the following folder:",IDC_STATIC,45,50,260,10
-    GROUPBOX        "Additional Options",IDC_STATIC,44,146,268,55
-    GROUPBOX        "Options",IDC_STATIC,44,91,268,52
-    CONTROL         "Install KProcessHacker as a service",IDC_CHECK5,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,51,158,128,10
-    CONTROL         "Create a desktop shortcut for all users",IDC_CHECK7,
-                    "Button",BS_AUTOCHECKBOX | WS_TABSTOP,51,116,136,10
-    CONTROL         "Start minimized on system tray",IDC_CHECK8,"Button",BS_AUTOCHECKBOX | WS_DISABLED | WS_TABSTOP,194,116,114,10
-    CONTROL         "Reset Process Hacker settings",IDC_CHECK6,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,51,171,113,10
-END
-
-IDD_DIALOG6 DIALOGEX 0, 0, 355, 215
-STYLE DS_SETFONT | DS_MODALFRAME | DS_NOFAILCREATE | WS_POPUP | WS_CAPTION | WS_SYSMENU
-EXSTYLE WS_EX_CONTROLPARENT
-FONT 8, "MS Shell Dlg 2", 400, 0, 0x1
-BEGIN
-    LTEXT           "Preparing downloads...",IDC_MAINHEADER1,44,31,243,16,NOT WS_VISIBLE
-    CONTROL         "Transfer rate:",IDC_REMAINTIME,"Static",SS_LEFTNOWORDWRAP | NOT WS_VISIBLE | WS_GROUP,44,61,268,8
-    CONTROL         "",IDC_PROGRESS1,"msctls_progress32",PBS_SMOOTH | NOT WS_VISIBLE,44,92,258,11,WS_EX_CLIENTEDGE
-    LTEXT           "Remaining time:",IDC_REMAINTIME2,44,74,268,8,NOT WS_VISIBLE
-    LTEXT           "Downloaded:",IDC_REMAINTIME3,44,47,268,8,NOT WS_VISIBLE
-    LTEXT           "Installing...",IDC_MAINHEADER,44,7,267,17
-    EDITTEXT        IDC_EDIT1,44,27,268,181,ES_MULTILINE | ES_READONLY | WS_VSCROLL
+                    "Static",SS_SIMPLE | WS_GROUP,22,26,207,24
+    LTEXT           "Setup has finished installing Process Hacker on your computer.\r\n\r\nClick Finish to exit setup.",IDC_SUBHEADER,22,46,211,36
+    CONTROL         "",IDC_PROJECT_ICON,"Static",SS_BLACKFRAME,271,15,92,75
 END
 
 
@@ -118,50 +108,42 @@ GUIDELINES DESIGNINFO
 BEGIN
     IDD_DIALOG1, DIALOG
     BEGIN
-        LEFTMARGIN, 10
-        RIGHTMARGIN, 348
-        TOPMARGIN, 7
-        BOTTOMMARGIN, 208
+        LEFTMARGIN, 22
+        RIGHTMARGIN, 378
+        TOPMARGIN, 10
+        BOTTOMMARGIN, 216
     END
 
     IDD_DIALOG2, DIALOG
     BEGIN
-        LEFTMARGIN, 44
-        RIGHTMARGIN, 312
+        LEFTMARGIN, 22
+        RIGHTMARGIN, 378
         TOPMARGIN, 7
-        BOTTOMMARGIN, 208
-    END
-
-    IDD_DIALOG4, DIALOG
-    BEGIN
-        LEFTMARGIN, 44
-        RIGHTMARGIN, 312
-        TOPMARGIN, 7
-        BOTTOMMARGIN, 208
-    END
-
-    IDD_DIALOG5, DIALOG
-    BEGIN
-        LEFTMARGIN, 7
-        RIGHTMARGIN, 348
-        TOPMARGIN, 7
-        BOTTOMMARGIN, 208
+        BOTTOMMARGIN, 216
     END
 
     IDD_DIALOG3, DIALOG
     BEGIN
-        LEFTMARGIN, 44
-        RIGHTMARGIN, 312
+        LEFTMARGIN, 22
+        RIGHTMARGIN, 378
         TOPMARGIN, 7
-        BOTTOMMARGIN, 208
+        BOTTOMMARGIN, 216
     END
 
-    IDD_DIALOG6, DIALOG
+    IDD_DIALOG4, DIALOG
     BEGIN
-        LEFTMARGIN, 44
-        RIGHTMARGIN, 312
+        LEFTMARGIN, 22
+        RIGHTMARGIN, 378
         TOPMARGIN, 7
-        BOTTOMMARGIN, 208
+        BOTTOMMARGIN, 216
+    END
+
+    IDD_DIALOG5, DIALOG
+    BEGIN
+        LEFTMARGIN, 22
+        RIGHTMARGIN, 378
+        TOPMARGIN, 10
+        BOTTOMMARGIN, 216
     END
 END
 #endif    // APSTUDIO_INVOKED
@@ -193,11 +175,6 @@ BEGIN
 END
 
 IDD_DIALOG3 AFX_DIALOG_LAYOUT
-BEGIN
-    0
-END
-
-IDD_DIALOG6 AFX_DIALOG_LAYOUT
 BEGIN
     0
 END
@@ -267,7 +244,6 @@ IDB_PNG1                PNG                     "resources\\ProcessHacker.png"
 
 IDR_TXT1                TXT                     "resources\\Licence.txt"
 
-
 #endif    // English resources
 /////////////////////////////////////////////////////////////////////////////
 
@@ -277,6 +253,7 @@ IDR_TXT1                TXT                     "resources\\Licence.txt"
 
 #if !defined(AFX_RESOURCE_DLL) || defined(AFX_TARG_ENU)
 LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US
+#pragma code_page(1252)
 
 #ifdef APSTUDIO_INVOKED
 /////////////////////////////////////////////////////////////////////////////

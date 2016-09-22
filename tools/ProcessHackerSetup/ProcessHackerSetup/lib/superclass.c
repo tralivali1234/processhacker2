@@ -179,6 +179,11 @@ LRESULT CALLBACK SubclassWindowProc(
             if (BeginPaint(hWnd, &paintStruct))
             {
                 SetBkMode(paintStruct.hdc, TRANSPARENT);
+                
+                // Fill window background
+                FillClientRect(paintStruct.hdc, &clientRect, GetSysColorBrush(COLOR_3DFACE));
+                // Draw window border
+                FrameClientRect(paintStruct.hdc, &clientRect, GetStockBrush(LTGRAY_BRUSH));
 
                 //if (BeginBufferedPaint_I)
                 //{
@@ -221,6 +226,19 @@ LRESULT CALLBACK SubclassWindowProc(
     }
 
     return DefSubclassProc(hWnd, uMsg, wParam, lParam);
+}
+
+VOID SetupProgressSubclass(
+    _In_ HWND WindowHandle,
+    _In_ ULONG SubclassId
+    )
+{
+    SetWindowSubclass(
+        WindowHandle,
+        SubclassWindowProc,
+        SubclassId,
+        0
+        );
 }
 
 //VOID SetupSuperSubclass(VOID)

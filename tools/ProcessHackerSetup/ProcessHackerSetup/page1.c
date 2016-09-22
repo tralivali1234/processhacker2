@@ -69,8 +69,9 @@ BOOL PropSheetPage1_OnInitDialog(
     SetForegroundWindow(GetParent(hwndDlg));
 
     // Set the fonts
-    InitializeFont(GetDlgItem(hwndDlg, IDC_MAINHEADER), 24, FW_SEMIBOLD);
+    InitializeFont(GetDlgItem(hwndDlg, IDC_MAINHEADER), -18, FW_SEMIBOLD);
     InitializeFont(GetDlgItem(hwndDlg, IDC_SUBHEADER), 0, FW_NORMAL);
+    InitializeFont(GetDlgItem(hwndDlg, IDC_SUBHEADER2), 18, FW_NORMAL);
 
     // Enable the themed dialog background texture.
     EnableThemeDialogTexture(hwndDlg, ETDT_ENABLETAB);
