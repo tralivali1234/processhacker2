@@ -191,50 +191,6 @@ INT_PTR CALLBACK NetworkOutputDlgProc(
             }
         }
         break;
-    case NTM_RECEIVEDTRACE:
-        {
-            PPH_STRING inputString;
-            PH_STRING_BUILDER receivedString;
-
-            if (wParam != 0)
-            {
-                inputString = (PPH_STRING)wParam;
-                PPH_STRING windowText = NULL;
-
-                PhInitializeStringBuilder(&receivedString, PAGE_SIZE);
-
-                // Get the current output text.
-                windowText = PhGetWindowText(context->OutputHandle);
-
-                // Append the current output text to the New string.
-                if (!PhIsNullOrEmptyString(windowText))
-                    PhAppendStringBuilder(&receivedString, &windowText->sr);
-
-                PhAppendFormatStringBuilder(&receivedString, L"%s", inputString->Buffer);
-
-                // Remove leading newlines.
-                if (receivedString.String->Length >= 2 * 2 &&
-                    receivedString.String->Buffer[0] == '\r' &&
-                    receivedString.String->Buffer[1] == '\n')
-                {
-                    PhRemoveStringBuilder(&receivedString, 0, 2);
-                }
-
-                SetWindowText(context->OutputHandle, receivedString.String->Buffer);
-                SendMessage(
-                    context->OutputHandle,
-                    EM_SETSEL,
-                    receivedString.String->Length / 2 - 1,
-                    receivedString.String->Length / 2 - 1
-                );
-                SendMessage(context->OutputHandle, WM_VSCROLL, SB_BOTTOM, 0);
-
-                PhDereferenceObject(windowText);
-                PhDeleteStringBuilder(&receivedString);
-                //PhDereferenceObject(&inputString);
-            }
-        }
-        break;
     case NTM_RECEIVEDWHOIS:
         {
             if (lParam != 0)

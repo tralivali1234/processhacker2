@@ -58,7 +58,8 @@
 //       + the number of bytes of data specified in the RequestSize parameter.
 // This buffer should also be large enough to also hold 8 more bytes of data (the size of an ICMP error message)
 //       + space for an IO_STATUS_BLOCK structure.
-#define ICMP_BUFFER_SIZE(EchoReplyLength, Buffer) (ULONG)(((EchoReplyLength) + (Buffer)->Length) + 8 + sizeof(IO_STATUS_BLOCK) + MAX_OPT_SIZE)
+#define ICMP_BUFFER_SIZE(EchoReplyLength, Buffer) \
+    (ULONG)(((EchoReplyLength) + (Buffer)->Length) + 8 + sizeof(IO_STATUS_BLOCK) + MAX_OPT_SIZE)
 
 #define BITS_IN_ONE_BYTE 8
 #define NDIS_UNIT_OF_MEASUREMENT 100
@@ -92,6 +93,9 @@ typedef enum _PH_NETWORK_ACTION
 #define NTM_RECEIVEDTRACE (WM_APP + NETWORK_ACTION_TRACEROUTE)
 #define NTM_RECEIVEDWHOIS (WM_APP + NETWORK_ACTION_WHOIS)
 #define NTM_RECEIVEDFINISH (WM_APP + NETWORK_ACTION_FINISH)
+
+#define WM_TRACERT_ERROR (WM_APP + NETWORK_ACTION_TRACEROUTE + 1001)
+
 
 typedef struct _NETWORK_OUTPUT_CONTEXT
 {
