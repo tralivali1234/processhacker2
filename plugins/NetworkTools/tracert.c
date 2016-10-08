@@ -583,24 +583,15 @@ INT_PTR CALLBACK TracertDlgProc(
 
         if (uMsg == WM_DESTROY)
         {
-            context->OutputHandle = NULL;
-
             PhSaveListViewColumnsToSetting(SETTING_NAME_TRACERT_COLUMNS, context->OutputHandle);
             PhSaveWindowPlacementToSetting(SETTING_NAME_TRACERT_WINDOW_POSITION, SETTING_NAME_TRACERT_WINDOW_SIZE, hwndDlg);
-
-            PhSaveWindowPlacementToSetting(
-                SETTING_NAME_PING_WINDOW_POSITION,
-                SETTING_NAME_PING_WINDOW_SIZE,
-                hwndDlg
-                );
-
-            if (context->IconHandle)
-                DestroyIcon(context->IconHandle);
 
             if (context->FontHandle)
                 DeleteObject(context->FontHandle);
 
             PhDeleteLayoutManager(&context->LayoutManager);
+
+            context->OutputHandle = NULL;
 
             RemoveProp(hwndDlg, L"Context");
             PhFree(context);
@@ -616,70 +607,42 @@ INT_PTR CALLBACK TracertDlgProc(
     {
     case WM_INITDIALOG:
         {
-            PH_RECTANGLE windowRectangle;
             HANDLE dialogThread;
+            
+            PhCenterWindow(hwndDlg, GetParent(hwndDlg));
+            CommonSetWindowIcon(hwndDlg);
 
-            context->WindowHandle = hwndDlg;
-            context->OutputHandle = GetDlgItem(hwndDlg, IDC_NETOUTPUTEDIT);
-            context->MaxPingTimeout = PhGetIntegerSetting(SETTING_NAME_PING_MINIMUM_SCALING);
-
-            windowRectangle.Position = PhGetIntegerPairSetting(SETTING_NAME_TRACERT_WINDOW_POSITION);
-            windowRectangle.Size = PhGetScalableIntegerPairSetting(SETTING_NAME_TRACERT_WINDOW_SIZE, TRUE).Pair;
-
-            // Create the font handle.
-            context->FontHandle = CommonCreateFont(-15, GetDlgItem(hwndDlg, IDC_STATUS));
-
-            // Load the Process Hacker icon.
-            context->IconHandle = (HICON)LoadImage(
-                NtCurrentPeb()->ImageBaseAddress,
-                MAKEINTRESOURCE(PHAPP_IDI_PROCESSHACKER),
-                IMAGE_ICON,
-                GetSystemMetrics(SM_CXICON),
-                GetSystemMetrics(SM_CYICON),
-                LR_SHARED
-                );
-
-            // Set window icon.
-            if (context->IconHandle)
-                SendMessage(hwndDlg, WM_SETICON, ICON_SMALL, (LPARAM)context->IconHandle);
-
-            PhSetListViewStyle(context->OutputHandle, FALSE, TRUE);
-            PhSetControlTheme(context->OutputHandle, L"explorer");
-            PhAddListViewColumn(context->OutputHandle, 0, 0, 0, LVCFMT_RIGHT, 30, L"TTL");
-            for (UINT i = 0; i < MAX_PINGS; i++)
-                PhAddListViewColumn(context->OutputHandle, i + 1, i + 1, i + 1, LVCFMT_RIGHT, 50, L"Time");
-            PhAddListViewColumn(context->OutputHandle, IP_ADDRESS_COLUMN, IP_ADDRESS_COLUMN, IP_ADDRESS_COLUMN, LVCFMT_LEFT, 120, L"IP Address");
-            PhAddListViewColumn(context->OutputHandle, HOSTNAME_COLUMN, HOSTNAME_COLUMN, HOSTNAME_COLUMN, LVCFMT_LEFT, 240, L"Hostname");
-            PhSetExtendedListView(context->OutputHandle);
-
-            PhLoadListViewColumnsFromSetting(SETTING_NAME_TRACERT_COLUMNS, context->OutputHandle);
-
-            PhInitializeLayoutManager(&context->LayoutManager, hwndDlg);
-            PhAddLayoutItem(&context->LayoutManager, context->OutputHandle, NULL, PH_ANCHOR_ALL);
-            PhAddLayoutItem(&context->LayoutManager, GetDlgItem(hwndDlg, IDC_STATUS), NULL, PH_ANCHOR_TOP | PH_ANCHOR_LEFT | PH_ANCHOR_RIGHT);      
-
-            // Load window settings.
-            if (windowRectangle.Position.X == 0 || windowRectangle.Position.Y == 0)
-            {
-                PhCenterWindow(hwndDlg, GetParent(hwndDlg));
-            }
-            else
-            {
-                PhLoadWindowPlacementFromSetting(SETTING_NAME_PING_WINDOW_POSITION, SETTING_NAME_PING_WINDOW_SIZE, hwndDlg);
-            }
-
-
-            Static_SetText(context->WindowHandle,
+            Static_SetText(hwndDlg,
                 PhaFormatString(L"Tracing  %s...", context->IpAddressString)->Buffer
                 );
             Static_SetText(GetDlgItem(hwndDlg, IDC_STATUS),
                 PhaFormatString(L"Tracing route to %s with %lu bytes of data...", context->IpAddressString, PhGetIntegerSetting(SETTING_NAME_PING_SIZE))->Buffer
                 );
 
+            context->WindowHandle = hwndDlg;
+            context->OutputHandle = GetDlgItem(hwndDlg, IDC_LIST_TRACERT);
+            context->MaxPingTimeout = PhGetIntegerSetting(SETTING_NAME_PING_MINIMUM_SCALING);
+            context->FontHandle = CommonCreateFont(-15, GetDlgItem(hwndDlg, IDC_STATUS));
+
+            PhSetListViewStyle(context->OutputHandle, FALSE, TRUE);
+            PhSetControlTheme(context->OutputHandle, L"explorer");
+            PhAddListViewColumn(context->OutputHandle, 0, 0, 0, LVCFMT_RIGHT, 30, L"TTL");
+
+            for (UINT i = 0; i < MAX_PINGS; i++)
+                PhAddListViewColumn(context->OutputHandle, i + 1, i + 1, i + 1, LVCFMT_RIGHT, 50, L"Time");
+
+            PhAddListViewColumn(context->OutputHandle, IP_ADDRESS_COLUMN, IP_ADDRESS_COLUMN, IP_ADDRESS_COLUMN, LVCFMT_LEFT, 120, L"IP Address");
+            PhAddListViewColumn(context->OutputHandle, HOSTNAME_COLUMN, HOSTNAME_COLUMN, HOSTNAME_COLUMN, LVCFMT_LEFT, 240, L"Hostname");
+            PhLoadListViewColumnsFromSetting(SETTING_NAME_TRACERT_COLUMNS, context->OutputHandle);
+            PhSetExtendedListView(context->OutputHandle);
+
+            PhInitializeLayoutManager(&context->LayoutManager, hwndDlg);
+            PhAddLayoutItem(&context->LayoutManager, context->OutputHandle, NULL, PH_ANCHOR_ALL);
+            PhAddLayoutItem(&context->LayoutManager, GetDlgItem(hwndDlg, IDC_STATUS), NULL, PH_ANCHOR_TOP | PH_ANCHOR_LEFT | PH_ANCHOR_RIGHT);      
+            PhLoadWindowPlacementFromSetting(SETTING_NAME_TRACERT_WINDOW_POSITION, SETTING_NAME_TRACERT_WINDOW_SIZE, hwndDlg);
+
             if (dialogThread = PhCreateThread(0, NetworkTracertThreadStart, (PVOID)context))
-            {
                 NtClose(dialogThread);
-            }
         }
         break;
     case WM_COMMAND:
@@ -687,7 +650,6 @@ INT_PTR CALLBACK TracertDlgProc(
             switch (GET_WM_COMMAND_ID(wParam, lParam))
             {
             case IDCANCEL:
-            case IDOK:
                 DestroyWindow(hwndDlg);
                 break;
             }
@@ -709,12 +671,12 @@ INT_PTR CALLBACK TracertDlgProc(
                     L"*"
                     );
 
-                TracertAppendText(
-                    context, 
-                    error->LvItemIndex, 
-                    IP_ADDRESS_COLUMN, 
-                    TracertGetErrorMessage(error->LastErrorCode)->Buffer
-                    );
+                //TracertAppendText(
+                //    context, 
+                //    error->LvItemIndex, 
+                //    IP_ADDRESS_COLUMN, 
+                //    TracertGetErrorMessage(error->LastErrorCode)->Buffer
+                //    );
             }
             else
             {
@@ -749,26 +711,22 @@ INT_PTR CALLBACK TracertDlgProc(
         break;
     case NTM_RECEIVEDFINISH:
         {
-            PPH_STRING windowText = PhGetWindowText(context->WindowHandle);
+            PPH_STRING windowText;
 
-            if (windowText)
+            if (windowText = PH_AUTO(PhGetWindowText(context->WindowHandle)))
             {
                 Static_SetText(
                     context->WindowHandle,
                     PhaFormatString(L"%s complete.", windowText->Buffer)->Buffer
                     );
-                PhDereferenceObject(windowText);
             }
 
-            windowText = PhGetWindowText(GetDlgItem(hwndDlg, IDC_STATUS));
-
-            if (windowText)
+            if (windowText = PH_AUTO(PhGetWindowText(GetDlgItem(hwndDlg, IDC_STATUS))))
             {
                 Static_SetText(
                     GetDlgItem(hwndDlg, IDC_STATUS),
                     PhaFormatString(L"%s complete.", windowText->Buffer)->Buffer
                     );
-                PhDereferenceObject(windowText);
             }
         }
         break;

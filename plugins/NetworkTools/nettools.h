@@ -106,7 +106,6 @@ typedef struct _NETWORK_OUTPUT_CONTEXT
     HANDLE PipeReadHandle;
     HANDLE ProcessHandle;
     HFONT FontHandle;
-    HICON IconHandle;
 
     ULONG CurrentPingMs;
     ULONG MaxPingTimeout;

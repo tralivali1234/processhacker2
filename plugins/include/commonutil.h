@@ -52,8 +52,6 @@ FormatAnsiString(
     return FormatAnsiString_V(Format, argptr);
 }
 
-
-
 FORCEINLINE
 HFONT
 CommonCreateFont(
@@ -103,6 +101,28 @@ CommonDuplicateFont(
         return CreateFontIndirect(&logFont);
     else
         return NULL;
+}
+
+FORCEINLINE
+VOID
+CommonSetWindowIcon(
+    _In_ HWND WindowHandle
+    )
+{
+    HICON iconHandle;
+
+    // Load the Process Hacker window icon
+    if (iconHandle = (HICON)LoadImage(
+        NtCurrentPeb()->ImageBaseAddress,
+        MAKEINTRESOURCE(PHAPP_IDI_PROCESSHACKER),
+        IMAGE_ICON,
+        GetSystemMetrics(SM_CXICON),
+        GetSystemMetrics(SM_CYICON),
+        LR_SHARED
+        ))
+    {
+        SendMessage(WindowHandle, WM_SETICON, ICON_SMALL, (LPARAM)iconHandle);
+    }
 }
 
 #endif

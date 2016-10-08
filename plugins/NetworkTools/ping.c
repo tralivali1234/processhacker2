@@ -293,6 +293,8 @@ INT_PTR CALLBACK NetworkPingWndProc(
             PH_RECTANGLE windowRectangle;
             PPH_LAYOUT_ITEM panelItem;
 
+            CommonSetWindowIcon(hwndDlg);
+
             // We have already set the group boxes to have WS_EX_TRANSPARENT to fix
             // the drawing issue that arises when using WS_CLIPCHILDREN. However
             // in removing the flicker from the graphs the group boxes will now flicker.
@@ -325,20 +327,7 @@ INT_PTR CALLBACK NetworkPingWndProc(
                 );
             Graph_SetTooltip(context->PingGraphHandle, TRUE);
 
-            // Load the Process Hacker icon.
-            context->IconHandle = (HICON)LoadImage(
-                NtCurrentPeb()->ImageBaseAddress,
-                MAKEINTRESOURCE(PHAPP_IDI_PROCESSHACKER),
-                IMAGE_ICON,
-                GetSystemMetrics(SM_CXICON),
-                GetSystemMetrics(SM_CYICON),
-                LR_SHARED
-                );
-            // Set window icon.
-            if (context->IconHandle)
-                SendMessage(hwndDlg, WM_SETICON, ICON_SMALL, (LPARAM)context->IconHandle);
-
-            // Initialize the WorkQueue with a maximum of 20 threads (fix pinging slow-links with a high interval update).
+            // Initialize the WorkQueue with a maximum of 20 threads (fixes pinging slow-links when the refresh interval is 'very slow').
             PhInitializeWorkQueue(&context->PingWorkQueue, 0, 20, 5000);
             PhInitializeGraphState(&context->PingGraphState);
             PhInitializeLayoutManager(&context->LayoutManager, hwndDlg);
@@ -414,9 +403,6 @@ INT_PTR CALLBACK NetworkPingWndProc(
 
             if (context->PingGraphHandle)
                 DestroyWindow(context->PingGraphHandle);
-
-            if (context->IconHandle)
-                DestroyIcon(context->IconHandle);
 
             if (context->FontHandle)
                 DeleteObject(context->FontHandle);
