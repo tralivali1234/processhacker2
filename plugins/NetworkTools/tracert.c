@@ -56,10 +56,14 @@ PPH_STRING TracertGetErrorMessage(
     )
 {
     PPH_STRING message;
-    ULONG messageLength = 0;
+    ULONG messageLength;
 
-    if (GetIpErrorString(Result, NULL, &messageLength) == ERROR_INSUFFICIENT_BUFFER)
+    messageLength = 128;
+    message = PhCreateStringEx(NULL, 128 * sizeof(WCHAR));
+
+    if (GetIpErrorString(Result, message->Buffer, &messageLength) == ERROR_INSUFFICIENT_BUFFER)
     {
+        PhDereferenceObject(message);
         message = PhCreateStringEx(NULL, messageLength * sizeof(WCHAR));
 
         if (GetIpErrorString(Result, message->Buffer, &messageLength) != ERROR_SUCCESS)
@@ -86,7 +90,7 @@ VOID TracertDelayExecution(
 }
 
 VOID TracertAppendText(
-    _In_ PNETWORK_OUTPUT_CONTEXT Context,
+    _In_ PNETWORK_TRACERT_CONTEXT Context,
     _In_ INT Index,
     _In_ INT SubItemIndex,
     _In_ PWSTR Text
@@ -95,7 +99,7 @@ VOID TracertAppendText(
     WCHAR itemText[MAX_PATH] = L"";
 
     ListView_GetItemText(
-        Context->OutputHandle, 
+        Context->ListviewHandle,
         Index, 
         SubItemIndex,
         itemText,
@@ -111,7 +115,7 @@ VOID TracertAppendText(
             string = PhFormatString(L"%s, %s", itemText, Text);
 
             PhSetListViewSubItem(
-                Context->OutputHandle,
+                Context->ListviewHandle,
                 Index,
                 SubItemIndex,
                 string->Buffer
@@ -122,7 +126,7 @@ VOID TracertAppendText(
     else
     {
         PhSetListViewSubItem(
-            Context->OutputHandle,
+            Context->ListviewHandle,
             Index,
             SubItemIndex,
             Text
@@ -131,7 +135,7 @@ VOID TracertAppendText(
 }
 
 static VOID TracertUpdateTime(
-    _In_ PNETWORK_OUTPUT_CONTEXT Context,
+    _In_ PNETWORK_TRACERT_CONTEXT Context,
     _In_ INT Index,
     _In_ INT SubIndex,
     _In_ ULONG RoundTripTime
@@ -139,11 +143,11 @@ static VOID TracertUpdateTime(
 { 
     if (RoundTripTime)
     { 
-        PhSetListViewSubItem(Context->OutputHandle, Index, SubIndex, PhaFormatString(L"%lu ms", RoundTripTime)->Buffer);
+        PhSetListViewSubItem(Context->ListviewHandle, Index, SubIndex, PhaFormatString(L"%lu ms", RoundTripTime)->Buffer);
     } 
     else 
     { 
-        PhSetListViewSubItem(Context->OutputHandle, Index, SubIndex, PhaFormatString(L"<1 ms", RoundTripTime)->Buffer);
+        PhSetListViewSubItem(Context->ListviewHandle, Index, SubIndex, PhaFormatString(L"<1 ms", RoundTripTime)->Buffer);
     } 
 } 
 
@@ -152,26 +156,26 @@ static NTSTATUS TracertHostnameLookupCallback(
     )
 {
     WSADATA wsa;
-    PTRACERT_RESOLVE_WORKITEM workItem = Parameter;
+    PTRACERT_RESOLVE_WORKITEM work = Parameter;
 
     if (WSAStartup(WINSOCK_VERSION, &wsa) != ERROR_SUCCESS)
     {
         return STATUS_UNEXPECTED_NETWORK_ERROR;
     }
 
-    if (workItem->Type == PH_IPV4_NETWORK_TYPE)
+    if (work->Type == PH_IPV4_NETWORK_TYPE)
     {
         if (!GetNameInfo(
-            (PSOCKADDR)&workItem->SocketAddress,
+            (PSOCKADDR)&work->SocketAddress,
             sizeof(SOCKADDR_IN),
-            workItem->SocketAddressHostname,
-            sizeof(workItem->SocketAddressHostname),
+            work->SocketAddressHostname,
+            sizeof(work->SocketAddressHostname),
             NULL,
             0,
             NI_NAMEREQD
             ))
         {
-            PostMessage(workItem->WindowHandle, NTM_RECEIVEDTRACE, 0, (LPARAM)workItem);
+            PostMessage(work->WindowHandle, NTM_RECEIVEDTRACE, 0, (LPARAM)work);
         }
         else
         {
@@ -180,25 +184,26 @@ static NTSTATUS TracertHostnameLookupCallback(
             if (errorCode != WSAHOST_NOT_FOUND && errorCode != WSATRY_AGAIN)
             {
                 //PPH_STRING errorMessage = PhGetWin32Message(errorCode);
-                //PhSetListViewSubItem(workItem->LvHandle, workItem->LvItemIndex, HOSTNAME_COLUMN, errorMessage->Buffer);
+                //PhSetListViewSubItem(work->LvHandle, work->LvItemIndex, HOSTNAME_COLUMN, errorMessage->Buffer);
                 //PhDereferenceObject(errorMessage);
             }
+
+            PhFree(work);
         }
     }
-    else if (workItem->Type == PH_IPV6_NETWORK_TYPE)
+    else if (work->Type == PH_IPV6_NETWORK_TYPE)
     {
         if (!GetNameInfo(
-            (PSOCKADDR)&workItem->SocketAddress,
+            (PSOCKADDR)&work->SocketAddress,
             sizeof(SOCKADDR_IN6),
-            workItem->SocketAddressHostname,
-            sizeof(workItem->SocketAddressHostname),
+            work->SocketAddressHostname,
+            sizeof(work->SocketAddressHostname),
             NULL,
             0,
             NI_NAMEREQD
             ))
         {
-            PostMessage(workItem->WindowHandle, NTM_RECEIVEDTRACE, 0, (LPARAM)workItem);
-            //PhSetListViewSubItem(workItem->LvHandle, workItem->LvItemIndex, HOSTNAME_COLUMN, ipAddressHostname);
+            PostMessage(work->WindowHandle, NTM_RECEIVEDTRACE, 0, (LPARAM)work);
         }
         else
         {
@@ -207,9 +212,11 @@ static NTSTATUS TracertHostnameLookupCallback(
             if (errorCode != WSAHOST_NOT_FOUND && errorCode != WSATRY_AGAIN)
             {
                 //PPH_STRING errorMessage = PhGetWin32Message(errorCode);
-                //PhSetListViewSubItem(workItem->LvHandle, workItem->LvItemIndex, HOSTNAME_COLUMN, errorMessage->Buffer);
+                //PhSetListViewSubItem(work->LvHandle, work->LvItemIndex, HOSTNAME_COLUMN, errorMessage->Buffer);
                 //PhDereferenceObject(errorMessage);
             }
+
+            PhFree(work);
         }
     }
 
@@ -219,7 +226,7 @@ static NTSTATUS TracertHostnameLookupCallback(
 }
 
 VOID TracertQueueHostLookup(
-    _In_ PNETWORK_OUTPUT_CONTEXT Context,
+    _In_ PNETWORK_TRACERT_CONTEXT Context,
     _In_ INT LvItemIndex,
     _In_ PVOID SocketAddress
     ) 
@@ -301,7 +308,7 @@ NTSTATUS NetworkTracertThreadStart(
     _In_ PVOID Parameter
     )
 {
-    PNETWORK_OUTPUT_CONTEXT context;
+    PNETWORK_TRACERT_CONTEXT context;
     PH_AUTO_POOL autoPool;
     HANDLE icmpHandle = INVALID_HANDLE_VALUE;
     SOCKADDR_STORAGE sourceAddress = { 0 };
@@ -318,7 +325,7 @@ NTSTATUS NetworkTracertThreadStart(
         0
     };
 
-    context = (PNETWORK_OUTPUT_CONTEXT)Parameter;
+    context = (PNETWORK_TRACERT_CONTEXT)Parameter;
 
     PhInitializeAutoPool(&autoPool);
 
@@ -358,30 +365,29 @@ NTSTATUS NetworkTracertThreadStart(
             //((PSOCKADDR_IN6)&destinationAddress)->sin6_port = (USHORT)context->RemoteEndpoint.Port;//_byteswap_ushort((USHORT)Context->RemoteEndpoint.Port);
         }
 
-        for (UINT i = 0; i < DEFAULT_MAXIMUM_HOPS; i++)
+        for (INT i = 0; i < DEFAULT_MAXIMUM_HOPS; i++)
         {
             IN_ADDR last4ReplyAddress = in4addr_any;
             IN6_ADDR last6ReplyAddress = in6addr_any;
             INT lvItemIndex;
 
-            if (!context->OutputHandle)
+            if (context->Cancel)
                 break;
 
             lvItemIndex = PhAddListViewItem(
-                context->OutputHandle,
+                context->ListviewHandle,
                 MAXINT,
                 PhaFormatString(L"%u", (UINT)pingOptions.Ttl)->Buffer,
                 NULL
                 );
 
-            for (UINT i = 0; i < MAX_PINGS; i++)
+            for (INT ii = 0; ii < MAX_PINGS; ii++)
             {
-                if (!context->OutputHandle)
+                if (context->Cancel)
                     break;
 
                 if (context->RemoteEndpoint.Address.Type == PH_IPV4_NETWORK_TYPE)
                 {
-                    // Allocate ICMPv6 message.
                     icmpReplyLength = ICMP_BUFFER_SIZE(sizeof(ICMP_ECHO_REPLY), icmpEchoBuffer);
                     icmpReplyBuffer = PhAllocate(icmpReplyLength);
                     memset(icmpReplyBuffer, 0, icmpReplyLength);
@@ -408,7 +414,7 @@ NTSTATUS NetworkTracertThreadStart(
 
                         error->LastErrorCode = GetLastError();
                         error->LvItemIndex = lvItemIndex;
-                        error->lvSubItemIndex = i + 1;
+                        error->lvSubItemIndex = ii + 1;
 
                         PostMessage(context->WindowHandle, WM_TRACERT_ERROR, 0, (LPARAM)error);
                     }
@@ -419,7 +425,7 @@ NTSTATUS NetworkTracertThreadStart(
                         TracertUpdateTime(
                             context, 
                             lvItemIndex, 
-                            i + 1, 
+                            ii + 1, 
                             reply4->RoundTripTime
                             );
 
@@ -447,7 +453,7 @@ NTSTATUS NetworkTracertThreadStart(
 
                             error->LastErrorCode = reply4->Status;
                             error->LvItemIndex = lvItemIndex;
-                            error->lvSubItemIndex = i + 1;
+                            error->lvSubItemIndex = ii + 1;
 
                             PostMessage(context->WindowHandle, WM_TRACERT_ERROR, 0, (LPARAM)error);
                         }
@@ -483,7 +489,7 @@ NTSTATUS NetworkTracertThreadStart(
 
                         error->LastErrorCode = GetLastError();
                         error->LvItemIndex = lvItemIndex;
-                        error->lvSubItemIndex = i + 1;
+                        error->lvSubItemIndex = ii + 1;
 
                         PostMessage(context->WindowHandle, WM_TRACERT_ERROR, 0, (LPARAM)error);
                     }
@@ -494,7 +500,7 @@ NTSTATUS NetworkTracertThreadStart(
                         TracertUpdateTime(
                             context, 
                             lvItemIndex, 
-                            i + 1, 
+                            ii + 1, 
                             reply6->RoundTripTime
                             );
 
@@ -522,7 +528,7 @@ NTSTATUS NetworkTracertThreadStart(
 
                             error->LastErrorCode = reply6->Status;
                             error->LvItemIndex = lvItemIndex;
-                            error->lvSubItemIndex = i + 1;
+                            error->lvSubItemIndex = ii + 1;
 
                             PostMessage(context->WindowHandle, WM_TRACERT_ERROR, 0, (LPARAM)error);
                         }
@@ -558,11 +564,10 @@ NTSTATUS NetworkTracertThreadStart(
 
     PostMessage(context->WindowHandle, NTM_RECEIVEDFINISH, 0, 0);
 
+    PhDereferenceObject(context);
+
     return STATUS_SUCCESS;
 }
-
-
-
 INT_PTR CALLBACK TracertDlgProc(
     _In_ HWND hwndDlg,
     _In_ UINT uMsg,
@@ -570,20 +575,22 @@ INT_PTR CALLBACK TracertDlgProc(
     _In_ LPARAM lParam
     )
 {
-    PNETWORK_OUTPUT_CONTEXT context;
+    PNETWORK_TRACERT_CONTEXT context;
 
     if (uMsg == WM_INITDIALOG)
     {
-        context = (PNETWORK_OUTPUT_CONTEXT)lParam;
+        context = (PNETWORK_TRACERT_CONTEXT)lParam;
         SetProp(hwndDlg, L"Context", (HANDLE)context);
     }
     else
     {
-        context = (PNETWORK_OUTPUT_CONTEXT)GetProp(hwndDlg, L"Context");
+        context = (PNETWORK_TRACERT_CONTEXT)GetProp(hwndDlg, L"Context");
 
         if (uMsg == WM_DESTROY)
         {
-            PhSaveListViewColumnsToSetting(SETTING_NAME_TRACERT_COLUMNS, context->OutputHandle);
+            context->Cancel = TRUE;
+
+            PhSaveListViewColumnsToSetting(SETTING_NAME_TRACERT_COLUMNS, context->ListviewHandle);
             PhSaveWindowPlacementToSetting(SETTING_NAME_TRACERT_WINDOW_POSITION, SETTING_NAME_TRACERT_WINDOW_SIZE, hwndDlg);
 
             if (context->FontHandle)
@@ -591,10 +598,9 @@ INT_PTR CALLBACK TracertDlgProc(
 
             PhDeleteLayoutManager(&context->LayoutManager);
 
-            context->OutputHandle = NULL;
-
             RemoveProp(hwndDlg, L"Context");
-            PhFree(context);
+
+            PhDereferenceObject(context);
 
             PostQuitMessage(0);
         }
@@ -607,42 +613,42 @@ INT_PTR CALLBACK TracertDlgProc(
     {
     case WM_INITDIALOG:
         {
-            HANDLE dialogThread;
-            
-            PhCenterWindow(hwndDlg, GetParent(hwndDlg));
+            HANDLE tracertThread;
+
             CommonSetWindowIcon(hwndDlg);
+            PhCenterWindow(hwndDlg, PhMainWndHandle);            
 
             Static_SetText(hwndDlg,
-                PhaFormatString(L"Tracing  %s...", context->IpAddressString)->Buffer
+                PhaFormatString(L"Tracing %s...", context->IpAddressString)->Buffer
                 );
             Static_SetText(GetDlgItem(hwndDlg, IDC_STATUS),
                 PhaFormatString(L"Tracing route to %s with %lu bytes of data...", context->IpAddressString, PhGetIntegerSetting(SETTING_NAME_PING_SIZE))->Buffer
                 );
 
             context->WindowHandle = hwndDlg;
-            context->OutputHandle = GetDlgItem(hwndDlg, IDC_LIST_TRACERT);
-            context->MaxPingTimeout = PhGetIntegerSetting(SETTING_NAME_PING_MINIMUM_SCALING);
+            context->ListviewHandle = GetDlgItem(hwndDlg, IDC_LIST_TRACERT);
             context->FontHandle = CommonCreateFont(-15, GetDlgItem(hwndDlg, IDC_STATUS));
 
-            PhSetListViewStyle(context->OutputHandle, FALSE, TRUE);
-            PhSetControlTheme(context->OutputHandle, L"explorer");
-            PhAddListViewColumn(context->OutputHandle, 0, 0, 0, LVCFMT_RIGHT, 30, L"TTL");
-
-            for (UINT i = 0; i < MAX_PINGS; i++)
-                PhAddListViewColumn(context->OutputHandle, i + 1, i + 1, i + 1, LVCFMT_RIGHT, 50, L"Time");
-
-            PhAddListViewColumn(context->OutputHandle, IP_ADDRESS_COLUMN, IP_ADDRESS_COLUMN, IP_ADDRESS_COLUMN, LVCFMT_LEFT, 120, L"IP Address");
-            PhAddListViewColumn(context->OutputHandle, HOSTNAME_COLUMN, HOSTNAME_COLUMN, HOSTNAME_COLUMN, LVCFMT_LEFT, 240, L"Hostname");
-            PhLoadListViewColumnsFromSetting(SETTING_NAME_TRACERT_COLUMNS, context->OutputHandle);
-            PhSetExtendedListView(context->OutputHandle);
+            PhSetListViewStyle(context->ListviewHandle, FALSE, TRUE);
+            PhSetControlTheme(context->ListviewHandle, L"explorer");
+            PhAddListViewColumn(context->ListviewHandle, 0, 0, 0, LVCFMT_RIGHT, 30, L"TTL");
+            for (INT i = 0; i < MAX_PINGS; i++)
+                PhAddListViewColumn(context->ListviewHandle, i + 1, i + 1, i + 1, LVCFMT_RIGHT, 50, L"Time");
+            PhAddListViewColumn(context->ListviewHandle, IP_ADDRESS_COLUMN, IP_ADDRESS_COLUMN, IP_ADDRESS_COLUMN, LVCFMT_LEFT, 180, L"IP Address");
+            PhAddListViewColumn(context->ListviewHandle, HOSTNAME_COLUMN, HOSTNAME_COLUMN, HOSTNAME_COLUMN, LVCFMT_LEFT, 300, L"Hostname");
+            PhLoadListViewColumnsFromSetting(SETTING_NAME_TRACERT_COLUMNS, context->ListviewHandle);
+            PhSetExtendedListView(context->ListviewHandle);
 
             PhInitializeLayoutManager(&context->LayoutManager, hwndDlg);
-            PhAddLayoutItem(&context->LayoutManager, context->OutputHandle, NULL, PH_ANCHOR_ALL);
-            PhAddLayoutItem(&context->LayoutManager, GetDlgItem(hwndDlg, IDC_STATUS), NULL, PH_ANCHOR_TOP | PH_ANCHOR_LEFT | PH_ANCHOR_RIGHT);      
+            PhAddLayoutItem(&context->LayoutManager, GetDlgItem(hwndDlg, IDC_STATUS), NULL, PH_ANCHOR_TOP | PH_ANCHOR_LEFT | PH_ANCHOR_RIGHT | PH_LAYOUT_FORCE_INVALIDATE);
+            PhAddLayoutItem(&context->LayoutManager, context->ListviewHandle, NULL, PH_ANCHOR_ALL);
+            PhAddLayoutItem(&context->LayoutManager, GetDlgItem(hwndDlg, IDCANCEL), NULL, PH_ANCHOR_BOTTOM | PH_ANCHOR_RIGHT);
             PhLoadWindowPlacementFromSetting(SETTING_NAME_TRACERT_WINDOW_POSITION, SETTING_NAME_TRACERT_WINDOW_SIZE, hwndDlg);
 
-            if (dialogThread = PhCreateThread(0, NetworkTracertThreadStart, (PVOID)context))
-                NtClose(dialogThread);
+            PhReferenceObject(context);
+
+            if (tracertThread = PhCreateThread(0, NetworkTracertThreadStart, (PVOID)context))
+                NtClose(tracertThread);
         }
         break;
     case WM_COMMAND:
@@ -665,7 +671,7 @@ INT_PTR CALLBACK TracertDlgProc(
             if (error->LastErrorCode == IP_REQ_TIMED_OUT)
             {
                 PhSetListViewSubItem(
-                    context->OutputHandle, 
+                    context->ListviewHandle,
                     error->LvItemIndex, 
                     error->lvSubItemIndex, 
                     L"*"
@@ -743,7 +749,7 @@ NTSTATUS TracertDialogThreadStart(
     MSG message;
     HWND windowHandle;
     PH_AUTO_POOL autoPool;
-    PNETWORK_OUTPUT_CONTEXT context = (PNETWORK_OUTPUT_CONTEXT)Parameter;
+    PNETWORK_TRACERT_CONTEXT context = (PNETWORK_TRACERT_CONTEXT)Parameter;
 
     PhInitializeAutoPool(&autoPool);
 
@@ -782,10 +788,10 @@ VOID ShowTracertWindow(
     )
 {
     HANDLE dialogThread;
-    PNETWORK_OUTPUT_CONTEXT context;
+    PNETWORK_TRACERT_CONTEXT context;
 
-    context = (PNETWORK_OUTPUT_CONTEXT)PhAllocate(sizeof(NETWORK_OUTPUT_CONTEXT));
-    memset(context, 0, sizeof(NETWORK_OUTPUT_CONTEXT));
+    context = (PNETWORK_TRACERT_CONTEXT)PhCreateAlloc(sizeof(NETWORK_TRACERT_CONTEXT));
+    memset(context, 0, sizeof(NETWORK_TRACERT_CONTEXT));
 
     context->RemoteEndpoint = NetworkItem->RemoteEndpoint;
 
@@ -809,10 +815,10 @@ VOID ShowTracertWindowFromAddress(
     )
 {
     HANDLE dialogThread;
-    PNETWORK_OUTPUT_CONTEXT context;
+    PNETWORK_TRACERT_CONTEXT context;
 
-    context = (PNETWORK_OUTPUT_CONTEXT)PhAllocate(sizeof(NETWORK_OUTPUT_CONTEXT));
-    memset(context, 0, sizeof(NETWORK_OUTPUT_CONTEXT));
+    context = (PNETWORK_TRACERT_CONTEXT)PhCreateAlloc(sizeof(NETWORK_TRACERT_CONTEXT));
+    memset(context, 0, sizeof(NETWORK_TRACERT_CONTEXT));
 
     context->RemoteEndpoint = RemoteEndpoint;
 

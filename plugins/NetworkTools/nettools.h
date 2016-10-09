@@ -174,4 +174,19 @@ VOID PerformTracertAction(
     _In_ PH_IP_ENDPOINT RemoteEndpoint
     );
 
+
+typedef struct _NETWORK_TRACERT_CONTEXT
+{
+    HWND WindowHandle;
+    HWND ListviewHandle;
+    HFONT FontHandle;
+    PH_LAYOUT_MANAGER LayoutManager;
+    BOOLEAN Cancel;
+
+    PH_IP_ENDPOINT RemoteEndpoint;
+    WCHAR IpAddressString[INET6_ADDRSTRLEN + 1];
+} NETWORK_TRACERT_CONTEXT, *PNETWORK_TRACERT_CONTEXT;
+
+
+
 #endif
