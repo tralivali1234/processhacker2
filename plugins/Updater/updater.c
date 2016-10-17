@@ -259,8 +259,8 @@ BOOLEAN ParseVersionString(
     PH_STRINGREF sr, majorPart, minorPart, revisionPart;
     ULONG64 majorInteger = 0, minorInteger = 0, revisionInteger = 0;
 
-    PhInitializeStringRef(&sr, Context->Version->Buffer);
-    PhInitializeStringRef(&revisionPart, Context->RevVersion->Buffer);
+    PhInitializeStringRef(&sr, PhGetStringOrEmpty(Context->Version));
+    PhInitializeStringRef(&revisionPart, PhGetStringOrEmpty(Context->RevVersion));
 
     if (PhSplitStringRefAtChar(&sr, '.', &majorPart, &minorPart))
     {
@@ -781,8 +781,8 @@ NTSTATUS UpdateDownloadThread(
         // Example: C:\\Users\\dmex\\AppData\\Temp\\ABCD\\processhacker-2.90-setup.exe
         context->SetupFilePath = PhFormatString(
             L"%s%s\\processhacker-%lu.%lu-setup.exe",
-            setupTempPath->Buffer,
-            randomGuidString->Buffer,
+            PhGetStringOrEmpty(setupTempPath),
+            PhGetStringOrEmpty(randomGuidString),
             context->MajorVersion,
             context->MinorVersion
             );
@@ -856,7 +856,7 @@ NTSTATUS UpdateDownloadThread(
 
         // Open the HTTP session with the system proxy configuration if available
         if (!(httpSessionHandle = WinHttpOpen(
-            userAgentString->Buffer,
+            PhGetStringOrEmpty(userAgentString),
             proxyConfig.lpszProxy != NULL ? WINHTTP_ACCESS_TYPE_NAMED_PROXY : WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
             proxyConfig.lpszProxy,
             proxyConfig.lpszProxyBypass,
@@ -881,7 +881,7 @@ NTSTATUS UpdateDownloadThread(
 
         if (!(httpConnectionHandle = WinHttpConnect(
             httpSessionHandle,
-            downloadHostPath->Buffer,
+            PhGetStringOrEmpty(downloadHostPath),
             httpUrlComponents.nScheme == INTERNET_SCHEME_HTTP ? INTERNET_DEFAULT_HTTP_PORT : INTERNET_DEFAULT_HTTPS_PORT,
             0
             )))
@@ -892,7 +892,7 @@ NTSTATUS UpdateDownloadThread(
         if (!(httpRequestHandle = WinHttpOpenRequest(
             httpConnectionHandle,
             NULL,
-            downloadUrlPath->Buffer,
+            PhGetStringOrEmpty(downloadUrlPath),
             NULL,
             WINHTTP_NO_REFERER,
             WINHTTP_DEFAULT_ACCEPT_TYPES,
@@ -1019,10 +1019,10 @@ NTSTATUS UpdateDownloadThread(
 
                     PPH_STRING statusMessage = PhFormatString(
                         L"Downloaded: %s of %s (%.0f%%)\r\nSpeed: %s/s",
-                        totalDownloaded->Buffer,
-                        totalLength->Buffer,
+                        PhGetStringOrEmpty(totalDownloaded),
+                        PhGetStringOrEmpty(totalLength),
                         percent,
-                        totalSpeed->Buffer
+                        PhGetStringOrEmpty(totalSpeed)
                         );
 
                     SendMessage(context->DialogHandle, TDM_UPDATE_ELEMENT_TEXT, TDE_CONTENT, (LPARAM)statusMessage->Buffer);
