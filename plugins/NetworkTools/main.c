@@ -30,6 +30,14 @@ PH_CALLBACK_REGISTRATION PluginMenuItemCallbackRegistration;
 PH_CALLBACK_REGISTRATION MainMenuInitializingCallbackRegistration;
 PH_CALLBACK_REGISTRATION NetworkMenuInitializingCallbackRegistration;
 
+VOID NTAPI LoadCallback(
+    _In_opt_ PVOID Parameter,
+    _In_opt_ PVOID Context
+    )
+{
+    LoadLibrary(L"msftedit.dll");
+}
+
 VOID NTAPI ShowOptionsCallback(
     _In_opt_ PVOID Parameter,
     _In_opt_ PVOID Context
@@ -192,7 +200,6 @@ VOID NTAPI NetworkMenuInitializingCallback(
     PhInsertEMenuItem(toolsMenu, PhPluginCreateEMenuItem(PluginInstance, 0, NETWORK_ACTION_PING, L"Ping", networkItem), -1);
     PhInsertEMenuItem(toolsMenu, PhPluginCreateEMenuItem(PluginInstance, 0, NETWORK_ACTION_TRACEROUTE, L"Traceroute", networkItem), -1);
     PhInsertEMenuItem(toolsMenu, PhPluginCreateEMenuItem(PluginInstance, 0, NETWORK_ACTION_WHOIS, L"Whois", networkItem), -1);
-    PhInsertEMenuItem(toolsMenu, PhPluginCreateEMenuItem(PluginInstance, 0, NETWORK_ACTION_PATHPING, L"PathPing", networkItem), -1);
 
     // Insert the Tools menu into the network menu.
     closeMenuItem = PhFindEMenuItem(menuInfo->Menu, 0, L"Close", 0);
@@ -226,16 +233,13 @@ LOGICAL DllMain(
                 { ScalableIntegerPairSettingType, SETTING_NAME_PING_WINDOW_SIZE, L"@96|420,250" },
                 { IntegerSettingType, SETTING_NAME_PING_MINIMUM_SCALING, L"64" }, // 100ms minimum scaling
                 { IntegerSettingType, SETTING_NAME_PING_SIZE, L"20" }, // 32 byte packet
-
                 { IntegerPairSettingType, SETTING_NAME_TRACERT_WINDOW_POSITION, L"0,0" },
                 { ScalableIntegerPairSettingType, SETTING_NAME_TRACERT_WINDOW_SIZE, L"@96|600,365" },
                 { StringSettingType, SETTING_NAME_TRACERT_COLUMNS, L"" },
                 { StringSettingType, SETTING_NAME_TRACERT_HISTORY, L"" },
-
                 { IntegerPairSettingType, SETTING_NAME_OUTPUT_WINDOW_POSITION, L"0,0" },
                 { ScalableIntegerPairSettingType, SETTING_NAME_OUTPUT_WINDOW_SIZE, L"@96|600,365" },
             };
-
 
             PluginInstance = PhRegisterPlugin(PLUGIN_NAME, Instance, &info);
 
@@ -247,7 +251,13 @@ LOGICAL DllMain(
             info->Description = L"Provides ping, traceroute and whois for network connections.";
             info->Url = L"https://wj32.org/processhacker/forums/viewtopic.php?t=1117";
             info->HasOptions = TRUE;
-
+  
+            PhRegisterCallback(
+                PhGetPluginCallback(PluginInstance, PluginCallbackLoad),
+                LoadCallback,
+                NULL,
+                &PluginLoadCallbackRegistration
+                );
             PhRegisterCallback(
                 PhGetPluginCallback(PluginInstance, PluginCallbackShowOptions),
                 ShowOptionsCallback,

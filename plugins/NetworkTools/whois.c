@@ -23,7 +23,7 @@
 #include "nettools.h"
 #include <commonutil.h>
 
-static PPH_STRING TrimString(
+PPH_STRING TrimString(
     _In_ PPH_STRING String
     )
 {
@@ -33,7 +33,7 @@ static PPH_STRING TrimString(
     return PhCreateString2(&sr);
 }
 
-static BOOLEAN ReadSocketString(
+BOOLEAN ReadSocketString(
     _In_ SOCKET Handle,
     _Out_ _Deref_post_z_cap_(*DataLength) PSTR *Data,
     _Out_ ULONG *DataLength
@@ -86,7 +86,6 @@ static BOOLEAN ReadSocketString(
     return TRUE;
 }
 
-
 BOOLEAN WhoisExtractServerUrl(
     _In_ PPH_STRING WhoisResponce,
     _Out_ PPH_STRING *WhoisServerAddress
@@ -96,12 +95,9 @@ BOOLEAN WhoisExtractServerUrl(
     ULONG_PTR whoisServerHostnameLength;
     PPH_STRING whoisServerName;
 
-    whoisServerHostnameIndex = PhFindStringInString(WhoisResponce, 0, L"whois:");
-    if (whoisServerHostnameIndex == -1)
+    if ((whoisServerHostnameIndex = PhFindStringInString(WhoisResponce, 0, L"whois:")) == -1)
         return FALSE;
-
-    whoisServerHostnameLength = PhFindStringInString(WhoisResponce, whoisServerHostnameIndex, L"\n") - whoisServerHostnameIndex;
-    if (whoisServerHostnameLength == -1)
+    if ((whoisServerHostnameLength = PhFindStringInString(WhoisResponce, whoisServerHostnameIndex, L"\n") - whoisServerHostnameIndex) == -1)
         return FALSE;
 
     whoisServerName = PhSubstring(
@@ -113,7 +109,6 @@ BOOLEAN WhoisExtractServerUrl(
     *WhoisServerAddress = TrimString(whoisServerName);
 
     PhDereferenceObject(whoisServerName);
-
     return TRUE;
 }
 
@@ -132,12 +127,9 @@ BOOLEAN WhoisExtractReferralServer(
     WCHAR urlPort[0x100] = L"";
     WCHAR urlPath[0x100] = L"";
 
-    whoisServerHostnameIndex = PhFindStringInString(WhoisResponce, 0, L"ReferralServer:");
-    if (whoisServerHostnameIndex == -1)
+    if ((whoisServerHostnameIndex = PhFindStringInString(WhoisResponce, 0, L"ReferralServer:")) == -1)
         return FALSE;
-
-    whoisServerHostnameLength = PhFindStringInString(WhoisResponce, whoisServerHostnameIndex, L"\n") - whoisServerHostnameIndex;
-    if (whoisServerHostnameLength == -1)
+    if ((whoisServerHostnameLength = PhFindStringInString(WhoisResponce, whoisServerHostnameIndex, L"\n") - whoisServerHostnameIndex) == -1)
         return FALSE;
 
     whoisServerName = PhSubstring(
@@ -148,17 +140,13 @@ BOOLEAN WhoisExtractReferralServer(
 
     whoisServerHostname = TrimString(whoisServerName);
     
-    if (swscanf_s(
+    if (swscanf(
         whoisServerHostname->Buffer,
         L"%[^:]://%[^:]:%[^/]/%s",
         urlProtocal,
-        (unsigned)ARRAYSIZE(urlProtocal),
         urlHost,
-        (unsigned)ARRAYSIZE(urlHost),
         urlPort,
-        (unsigned)ARRAYSIZE(urlPort),
-        urlPath,
-        (unsigned)ARRAYSIZE(urlPath)
+        urlPath
         ))
     {
         *WhoisServerAddress = PhCreateString(urlHost);
@@ -171,11 +159,8 @@ BOOLEAN WhoisExtractReferralServer(
 
     PhDereferenceObject(whoisServerName);
     PhDereferenceObject(whoisServerHostname);
-
     return FALSE;
 }
-
-
 
 BOOLEAN WhoisQueryServer(
     _In_ PWSTR WhoisServerAddress,
@@ -190,10 +175,7 @@ BOOLEAN WhoisQueryServer(
     ADDRINFOW hints;
     ULONG whoisResponceLength = 0;
     PSTR whoisResponce = NULL;
-    CHAR whoisQuery[0x100] = "";
-
-    if (!WhoisServerPort || PhCountStringZ(WhoisServerPort) < 1)
-        WhoisServerPort = L"43";
+    CHAR whoisQuery[PAGE_SIZE] = "";
 
     if (PhEqualStringZ(WhoisServerAddress, L"whois.arin.net", TRUE))
     {
@@ -258,95 +240,94 @@ BOOLEAN WhoisQueryServer(
 
 BOOLEAN WhoisQueryLookup(
     _In_ PWSTR IpAddress, 
-    _In_ PPH_STRING_BUILDER sb
+    _Out_ PPH_STRING *WhoisQueryResult
     )
 {
+    BOOLEAN success = FALSE;
     PPH_STRING whoisResponse = NULL;
     PPH_STRING whoisReferralResponse = NULL;
     PPH_STRING whoisServerName = NULL;
     PPH_STRING whoisReferralServerName = NULL;
     PPH_STRING whoisReferralServerPort = NULL;
+    PH_STRING_BUILDER sb;
 
-    if (!WhoisQueryServer(L"whois.iana.org", L"43", IpAddress, &whoisResponse))
+    PhInitializeStringBuilder(&sb, 0x100);
+
+    __try
     {
-        PhAppendFormatStringBuilder(sb, L"Connection to whois.iana.org failed.\n");
-        return FALSE;
-    }
-
-    if (!WhoisExtractServerUrl(whoisResponse, &whoisServerName))
-    {
-        PhAppendFormatStringBuilder(sb, L"Error parsing whois.iana.org response:\n%s\n", whoisResponse->Buffer);
-        return TRUE;
-    }
-
-    PhAppendFormatStringBuilder(sb, L"whois.iana.org found the following authoritative answer from: %s\n", whoisServerName->Buffer);
-
-    if (WhoisQueryServer(whoisServerName->Buffer, L"43", IpAddress, &whoisResponse))
-    {
-        // Check if the response contains a referral server.
-        if (WhoisExtractReferralServer(whoisResponse, &whoisReferralServerName, &whoisReferralServerPort))
+        if (!WhoisQueryServer(L"whois.iana.org", L"43", IpAddress, &whoisResponse))
         {
-            PhAppendFormatStringBuilder(sb, L"%s referred the request to: %s\n", whoisServerName->Buffer, whoisReferralServerName->Buffer);
+            PhAppendFormatStringBuilder(&sb, L"Connection to whois.iana.org failed.\n");
+            __leave;
+        }
 
-            if (WhoisQueryServer(whoisReferralServerName->Buffer, whoisReferralServerPort->Buffer, IpAddress, &whoisReferralResponse))
+        if (!WhoisExtractServerUrl(whoisResponse, &whoisServerName))
+        {
+            PhAppendFormatStringBuilder(&sb, L"Error parsing whois.iana.org response:\n%s\n", whoisResponse->Buffer);
+            __leave;
+        }
+
+        PhAppendFormatStringBuilder(&sb, L"%s\n", whoisServerName->Buffer);
+
+        if (WhoisQueryServer(
+            whoisServerName->Buffer,
+            L"43",
+            IpAddress,
+            &whoisResponse
+            ))
+        {
+            if (WhoisExtractReferralServer(
+                whoisResponse,
+                &whoisReferralServerName,
+                &whoisReferralServerPort
+                ))
             {
-                PhAppendFormatStringBuilder(sb, L"\n%s\n", whoisReferralResponse->Buffer);
-                PhAppendFormatStringBuilder(sb, L"\nOriginal request to %s:\n%s\n", whoisServerName->Buffer, whoisResponse->Buffer);
+                PhAppendFormatStringBuilder(&sb, L"%s referred the request to: %s\n", whoisServerName->Buffer, whoisReferralServerName->Buffer);
 
-                PhClearReference(&whoisResponse);
-                PhClearReference(&whoisReferralResponse);
-                PhClearReference(&whoisServerName);
-                PhClearReference(&whoisReferralServerName);
-                PhClearReference(&whoisReferralServerPort);
-                return TRUE;
+                if (WhoisQueryServer(
+                    whoisReferralServerName->Buffer,
+                    whoisReferralServerPort->Buffer,
+                    IpAddress,
+                    &whoisReferralResponse
+                    ))
+                {
+                    PhAppendFormatStringBuilder(&sb, L"\n%s\n", whoisReferralResponse->Buffer);
+                    PhAppendFormatStringBuilder(&sb, L"\nOriginal request to %s:\n%s\n", whoisServerName->Buffer, whoisResponse->Buffer);
+                    success = TRUE;
+                    __leave;
+                }
             }
-
-            PhAppendFormatStringBuilder(sb, L"\n%s", whoisResponse->Buffer);
-
-            PhClearReference(&whoisResponse);
-            PhClearReference(&whoisReferralResponse);
-            PhClearReference(&whoisServerName);
-            PhClearReference(&whoisReferralServerName);
-            PhClearReference(&whoisReferralServerPort);
-            return TRUE;
         }
-        else
-        {
-            PhAppendFormatStringBuilder(sb, L"\n%s", whoisResponse->Buffer);
 
-            PhClearReference(&whoisResponse);
-            PhClearReference(&whoisReferralResponse);
-            PhClearReference(&whoisServerName);
-            PhClearReference(&whoisReferralServerName);
-            PhClearReference(&whoisReferralServerPort);
-            return TRUE;
-        }
+        PhAppendFormatStringBuilder(&sb, L"\n%s", whoisResponse->Buffer);
+        success = TRUE;
+    }
+    __finally
+    {
+        PhClearReference(&whoisResponse);
+        PhClearReference(&whoisReferralResponse);
+        PhClearReference(&whoisServerName);
+        PhClearReference(&whoisReferralServerName);
+        PhClearReference(&whoisReferralServerPort);
     }
 
-    PhAppendFormatStringBuilder(sb, L"\n%s", whoisResponse->Buffer);
+    *WhoisQueryResult = PhFinalStringBuilderString(&sb);
 
-    PhClearReference(&whoisResponse);
-    PhClearReference(&whoisReferralResponse);
-    PhClearReference(&whoisServerName);
-    PhClearReference(&whoisReferralServerName);
-    PhClearReference(&whoisReferralServerPort);
-    return TRUE;
+    return success;
 }
 
 NTSTATUS NetworkWhoisThreadStart(
     _In_ PVOID Parameter
-)
+    )
 {
     PNETWORK_OUTPUT_CONTEXT context = NULL;
-    PH_STRING_BUILDER whoisReplySb;
+    PPH_STRING whoisReply = NULL;
 
     context = (PNETWORK_OUTPUT_CONTEXT)Parameter;
 
-    PhInitializeStringBuilder(&whoisReplySb, 0x100);
+    WhoisQueryLookup(context->IpAddressString, &whoisReply);
 
-    WhoisQueryLookup(context->IpAddressString, &whoisReplySb);
-
-    PostMessage(context->WindowHandle, NTM_RECEIVEDWHOIS, 0, (LPARAM)PhFinalStringBuilderString(&whoisReplySb));
+    PostMessage(context->WindowHandle, NTM_RECEIVEDWHOIS, 0, (LPARAM)whoisReply);
     PostMessage(context->WindowHandle, NTM_RECEIVEDFINISH, 0, 0);
 
     return STATUS_SUCCESS;

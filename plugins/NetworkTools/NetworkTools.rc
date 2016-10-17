@@ -93,7 +93,8 @@ EXSTYLE WS_EX_APPWINDOW
 CAPTION "Network Tools"
 FONT 8, "MS Shell Dlg", 400, 0, 0x1
 BEGIN
-    EDITTEXT        IDC_NETOUTPUTEDIT,0,0,319,183,ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY | NOT WS_BORDER | WS_VSCROLL
+    PUSHBUTTON      "Close",IDCANCEL,260,162,50,14
+    CONTROL         "",IDC_NETOUTPUTEDIT,"RICHEDIT50W",WS_VSCROLL | WS_HSCROLL | 0xc4,0,0,319,159
 END
 
 IDD_OPTIONS DIALOGEX 0, 0, 215, 79
@@ -148,6 +149,7 @@ GUIDELINES DESIGNINFO
 BEGIN
     IDD_OUTPUT, DIALOG
     BEGIN
+        BOTTOMMARGIN, 176
     END
 
     IDD_OPTIONS, DIALOG
@@ -200,25 +202,6 @@ END
 IDD_PINGDIALOG AFX_DIALOG_LAYOUT
 BEGIN
     0
-END
-
-
-/////////////////////////////////////////////////////////////////////////////
-//
-// Menu
-//
-
-IDR_NETWORK MENU
-BEGIN
-    POPUP "Network"
-    BEGIN
-        MENUITEM "Ping",                        ID_NETWORK_PING
-        MENUITEM "Traceroute",                  ID_NETWORK_TRACEROUTE
-        MENUITEM "Whois",                       ID_NETWORK_WHOIS
-        MENUITEM "PathPing",                    ID_NETWORK_PATHPING
-        MENUITEM SEPARATOR
-        MENUITEM "Reverse",                     ID_NETWORK_REVERSE
-    END
 END
 
 #endif    // English (Australia) resources

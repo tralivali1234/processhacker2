@@ -22,8 +22,25 @@
  */
 
 #include "nettools.h"
+#include <richedit.h>
 
-static RECT MinimumSize = { -1, -1, -1, -1 };
+VOID RichEditAppendText(
+    _In_ HWND RichEditHandle,
+    _In_ PWSTR Text
+    )
+{
+    CHARFORMAT2 cf;
+
+    memset(&cf, 0, sizeof(CHARFORMAT2));
+    cf.cbSize = sizeof(CHARFORMAT2);
+    cf.dwMask = CFM_COLOR | CFM_EFFECTS;
+    cf.dwEffects = CFE_BOLD;
+    cf.crTextColor = RGB(0xff, 0xff, 0xff);
+    cf.crBackColor = RGB(0, 0, 0);
+
+    SendMessage(RichEditHandle, EM_SETCHARFORMAT, SCF_SELECTION, (LPARAM)&cf);
+    SendMessage(RichEditHandle, EM_REPLACESEL, FALSE, (LPARAM)Text);
+}
 
 INT_PTR CALLBACK NetworkOutputDlgProc(
     _In_ HWND hwndDlg,
@@ -80,34 +97,21 @@ INT_PTR CALLBACK NetworkOutputDlgProc(
             context->WindowHandle = hwndDlg;
             context->OutputHandle = GetDlgItem(hwndDlg, IDC_NETOUTPUTEDIT);
 
+            SendMessage(context->OutputHandle, EM_SETBKGNDCOLOR, RGB(0, 0, 0), 0);
+            SendMessage(context->OutputHandle, EM_SETEVENTMASK, 0, SendMessage(context->OutputHandle, EM_GETEVENTMASK, 0, 0) | ENM_LINK );
+            SendMessage(context->OutputHandle, EM_AUTOURLDETECT, AURL_ENABLEURL, 0);
+            SendMessage(context->OutputHandle, EM_SETWORDWRAPMODE, WBF_WORDWRAP, 0);
+
             PhInitializeLayoutManager(&context->LayoutManager, hwndDlg);
             PhAddLayoutItem(&context->LayoutManager, context->OutputHandle, NULL, PH_ANCHOR_ALL);
+            PhAddLayoutItem(&context->LayoutManager, GetDlgItem(hwndDlg, IDCANCEL), NULL, PH_ANCHOR_BOTTOM | PH_ANCHOR_RIGHT);
 
             windowRectangle.Position = PhGetIntegerPairSetting(SETTING_NAME_OUTPUT_WINDOW_POSITION);
             windowRectangle.Size = PhGetScalableIntegerPairSetting(SETTING_NAME_OUTPUT_WINDOW_SIZE, TRUE).Pair;
-
-            if (MinimumSize.left == -1)
-            {
-                RECT rect;
-
-                rect.left = 0;
-                rect.top = 0;
-                rect.right = 190;
-                rect.bottom = 120;
-                MapDialogRect(hwndDlg, &rect);
-                MinimumSize = rect;
-                MinimumSize.left = 0;
-            }
-
-            // Check for first-run default position.
-            if (windowRectangle.Position.X == 0 || windowRectangle.Position.Y == 0)
-            {
-                PhCenterWindow(hwndDlg, GetParent(hwndDlg));
-            }
-            else
-            {
+            if (windowRectangle.Position.X != 0 || windowRectangle.Position.Y != 0)
                 PhLoadWindowPlacementFromSetting(SETTING_NAME_OUTPUT_WINDOW_POSITION, SETTING_NAME_OUTPUT_WINDOW_SIZE, hwndDlg);
-            }
+            else
+                PhCenterWindow(hwndDlg, GetParent(hwndDlg));
 
             if (context->RemoteEndpoint.Address.Type == PH_IPV4_NETWORK_TYPE)
             {
@@ -124,23 +128,10 @@ INT_PTR CALLBACK NetworkOutputDlgProc(
                 {
                     HANDLE dialogThread = INVALID_HANDLE_VALUE;
 
-                    Static_SetText(context->WindowHandle,
-                        PhaFormatString(L"Whois %s...", context->IpAddressString)->Buffer
-                        );
+                    SetWindowText(context->WindowHandle, PhaFormatString(L"Whois %s...", context->IpAddressString)->Buffer);
+                    RichEditAppendText(context->OutputHandle, L"whois.iana.org found the following authoritative answer from: ");
 
                     if (dialogThread = PhCreateThread(0, NetworkWhoisThreadStart, (PVOID)context))
-                        NtClose(dialogThread);
-                }
-                break;
-            case NETWORK_ACTION_PATHPING:
-                {
-                    HANDLE dialogThread = INVALID_HANDLE_VALUE;
-
-                    Static_SetText(context->WindowHandle,
-                        PhaFormatString(L"Pathing route to %s...", context->IpAddressString)->Buffer
-                        );
-
-                    if (dialogThread = PhCreateThread(0, NetworkTracertThreadStart, (PVOID)context))
                         NtClose(dialogThread);
                 }
                 break;
@@ -161,80 +152,46 @@ INT_PTR CALLBACK NetworkOutputDlgProc(
     case WM_SIZE:
         PhLayoutManagerLayout(&context->LayoutManager);
         break;
-    case WM_SIZING:
-        PhResizingMinimumSize((PRECT)lParam, wParam, MinimumSize.right, MinimumSize.bottom);
-        break;
-    case WM_CTLCOLORDLG:
-    case WM_CTLCOLORSTATIC:
-        {
-            HDC hDC = (HDC)wParam;
-            HWND hwndChild = (HWND)lParam;
-
-            // Check if old graph colors are enabled.
-            if (!PhGetIntegerSetting(L"GraphColorMode"))
-                break;
-
-            // Check for our edit control and change the color.
-            if (hwndChild == context->OutputHandle)
-            {
-                // Set a transparent background for the control backcolor.
-                //SetBkMode(hDC, TRANSPARENT);
-
-                // Set the Edit control background.
-                SetBkColor(hDC, RGB(0x0, 0x0, 0x0));
-
-                // Set text color as the Green PH graph text color.
-                SetTextColor(hDC, RGB(124, 252, 0));
-
-                // Set a black control backcolor.
-                return (INT_PTR)GetStockBrush(BLACK_BRUSH);
-            }
-        }
-        break;
     case NTM_RECEIVEDWHOIS:
         {
-            if (lParam != 0)
+            PH_STRING_BUILDER receivedString;
+            PPH_STRING convertedString = (PPH_STRING)lParam;
+
+            PhInitializeStringBuilder(&receivedString, PAGE_SIZE);
+
+            for (SIZE_T i = 0; i < convertedString->Length / sizeof(WCHAR); i++)
             {
-                USHORT i;
-                PH_STRING_BUILDER receivedString;
-                PPH_STRING convertedString = (PPH_STRING)lParam;
-
-                PhInitializeStringBuilder(&receivedString, PAGE_SIZE);
-
-                // Convert carriage returns.
-                for (i = 0; i < convertedString->Length / sizeof(WCHAR); i++)
+                if (convertedString->Buffer[i] == '\n' && convertedString->Buffer[i + 1] == '\n')
                 {
-                    if (convertedString->Buffer[i] == '\n')
+                    if (i < convertedString->Length - 2 && 
+                        convertedString->Buffer[i] == '\n' &&
+                        convertedString->Buffer[i + 1] == '\n' &&
+                        convertedString->Buffer[i + 2] == '\n')
                     {
-                        PhAppendStringBuilder2(&receivedString, L"\r\n");
+                        NOTHING;
                     }
                     else
                     {
-                        PhAppendCharStringBuilder(&receivedString, convertedString->Buffer[i]);
+                        PhAppendStringBuilder2(&receivedString, L"\r\n");
                     }
                 }
-
-                // Remove leading newlines.
-                if (receivedString.String->Length >= 2 * 2 &&
-                    receivedString.String->Buffer[0] == '\r' &&
-                    receivedString.String->Buffer[1] == '\n')
+                else
                 {
-                    PhRemoveStringBuilder(&receivedString, 0, 2);
+                    PhAppendCharStringBuilder(&receivedString, convertedString->Buffer[i]);
                 }
-
-                SetWindowText(context->OutputHandle, receivedString.String->Buffer);
-                SendMessage(
-                    context->OutputHandle,
-                    EM_SETSEL,
-                    receivedString.String->Length / 2 - 1,
-                    receivedString.String->Length / 2 - 1
-                    );
-                SendMessage(context->OutputHandle, WM_VSCROLL, SB_TOP, 0);
-
-                PhDeleteStringBuilder(&receivedString);
-
-                PhDereferenceObject(convertedString);
             }
+
+            if (receivedString.String->Length >= 2 * 2 &&
+                receivedString.String->Buffer[0] == '\n' &&
+                receivedString.String->Buffer[1] == '\n')
+            {
+                PhRemoveStringBuilder(&receivedString, 0, 2);
+            }
+
+            RichEditAppendText(context->OutputHandle, receivedString.String->Buffer);
+
+            PhDeleteStringBuilder(&receivedString);
+            PhDereferenceObject(convertedString);
         }
         break;
     case NTM_RECEIVEDFINISH:
@@ -271,7 +228,7 @@ NTSTATUS PhNetworkOutputDialogThreadStart(
     windowHandle = CreateDialogParam(
         (HINSTANCE)PluginInstance->DllBase,
         MAKEINTRESOURCE(IDD_OUTPUT),
-        PhMainWndHandle,
+        NULL,
         NetworkOutputDlgProc,
         (LPARAM)Parameter
         );
