@@ -6,8 +6,6 @@
 typedef struct _PH_PROCESS_PROPCONTEXT
 {
     PPH_PROCESS_ITEM ProcessItem;
-    HWND WindowHandle;
-    PH_EVENT CreatedEvent;
     PPH_STRING Title;
     PROPSHEETHEADER PropSheetHeader;
     HPROPSHEETPAGE *PropSheetPages;
@@ -25,10 +23,6 @@ typedef struct _PH_PROCESS_PROPPAGECONTEXT
     BOOLEAN LayoutInitialized;
 } PH_PROCESS_PROPPAGECONTEXT, *PPH_PROCESS_PROPPAGECONTEXT;
 // end_phapppub
-
-BOOLEAN PhProcessPropInitialization(
-    VOID
-    );
 
 // begin_phapppub
 PHAPPAPI
@@ -95,16 +89,9 @@ PhPropPageDlgProcHeader(
     _In_ HWND hwndDlg,
     _In_ UINT uMsg,
     _In_ LPARAM lParam,
-    _Out_ LPPROPSHEETPAGE *PropSheetPage,
-    _Out_ PPH_PROCESS_PROPPAGECONTEXT *PropPageContext,
-    _Out_ PPH_PROCESS_ITEM *ProcessItem
-    );
-
-PHAPPAPI
-VOID
-NTAPI
-PhPropPageDlgProcDestroy(
-    _In_ HWND hwndDlg
+    _Out_opt_ LPPROPSHEETPAGE *PropSheetPage,
+    _Out_opt_ PPH_PROCESS_PROPPAGECONTEXT *PropPageContext,
+    _Out_opt_ PPH_PROCESS_ITEM *ProcessItem
     );
 
 #define PH_PROP_PAGE_TAB_CONTROL_PARENT ((PPH_LAYOUT_ITEM)0x1)
@@ -156,7 +143,7 @@ PhEndPropPageLayout(
 }
 
 PHAPPAPI
-BOOLEAN
+VOID
 NTAPI
 PhShowProcessProperties(
     _In_ PPH_PROCESS_PROPCONTEXT Context

@@ -3,6 +3,7 @@
  *   window treelist
  *
  * Copyright (C) 2011 wj32
+ * Copyright (C) 2017-2018 dmex
  *
  * This file is part of Process Hacker.
  *
@@ -44,6 +45,89 @@ BOOLEAN NTAPI WepWindowTreeNewCallback(
     _In_opt_ PVOID Context
     );
 
+BOOLEAN WordMatchStringRef(
+    _Inout_ PWE_WINDOW_TREE_CONTEXT Context,
+    _In_ PPH_STRINGREF Text
+    )
+{
+    PH_STRINGREF part;
+    PH_STRINGREF remainingPart;
+
+    remainingPart = PhGetStringRef(Context->SearchboxText);
+
+    while (remainingPart.Length != 0)
+    {
+        PhSplitStringRefAtChar(&remainingPart, '|', &part, &remainingPart);
+
+        if (part.Length != 0)
+        {
+            if (PhFindStringInStringRef(Text, &part, TRUE) != -1)
+                return TRUE;
+        }
+    }
+
+    return FALSE;
+}
+
+BOOLEAN WordMatchStringZ(
+    _Inout_ PWE_WINDOW_TREE_CONTEXT Context,
+    _In_ PWSTR Text
+    )
+{
+    PH_STRINGREF text;
+
+    PhInitializeStringRef(&text, Text);
+
+    return WordMatchStringRef(Context, &text);
+}
+
+BOOLEAN WeWindowTreeFilterCallback(
+    _In_ PPH_TREENEW_NODE Node,
+    _In_opt_ PVOID Context
+    )
+{
+    PWE_WINDOW_TREE_CONTEXT context = Context;
+    PWE_WINDOW_NODE windowNode = (PWE_WINDOW_NODE)Node;
+
+    if (!context)
+        return FALSE;
+
+    if (PhIsNullOrEmptyString(context->SearchboxText))
+        return TRUE;
+
+    if (windowNode->WindowClass[0])
+    {
+        if (WordMatchStringZ(context, windowNode->WindowClass))
+            return TRUE;
+    }
+
+    if (windowNode->WindowHandleString[0])
+    {
+        if (WordMatchStringZ(context, windowNode->WindowHandleString))
+            return TRUE;
+    }
+
+    if (!PhIsNullOrEmptyString(windowNode->WindowText))
+    {
+        if (WordMatchStringRef(context, &windowNode->WindowText->sr))
+            return TRUE;
+    }
+
+    if (!PhIsNullOrEmptyString(windowNode->ThreadString))
+    {
+        if (WordMatchStringRef(context, &windowNode->ThreadString->sr))
+            return TRUE;
+    }
+
+    if (!PhIsNullOrEmptyString(windowNode->ModuleString))
+    {
+        if (WordMatchStringRef(context, &windowNode->ModuleString->sr))
+            return TRUE;
+    }
+
+    return FALSE;
+}
+
 VOID WeInitializeWindowTree(
     _In_ HWND ParentWindowHandle,
     _In_ HWND TreeNewHandle,
@@ -75,13 +159,28 @@ VOID WeInitializeWindowTree(
     PhAddTreeNewColumn(hwnd, WEWNTLC_HANDLE, TRUE, L"Handle", 70, PH_ALIGN_LEFT, 1, 0);
     PhAddTreeNewColumn(hwnd, WEWNTLC_TEXT, TRUE, L"Text", 220, PH_ALIGN_LEFT, 2, 0);
     PhAddTreeNewColumn(hwnd, WEWNTLC_THREAD, TRUE, L"Thread", 150, PH_ALIGN_LEFT, 3, 0);
+    PhAddTreeNewColumn(hwnd, WEWNTLC_MODULE, TRUE, L"Module", 150, PH_ALIGN_LEFT, 4, 0);
 
     TreeNew_SetTriState(hwnd, TRUE);
-    TreeNew_SetSort(hwnd, 0, NoSortOrder);
+    TreeNew_SetSort(hwnd, WEWNTLC_CLASS, NoSortOrder);
 
     settings = PhGetStringSetting(SETTING_NAME_WINDOW_TREE_LIST_COLUMNS);
     PhCmLoadSettings(hwnd, &settings->sr);
     PhDereferenceObject(settings);
+
+    Context->SearchboxText = PhReferenceEmptyString();
+
+    PhInitializeTreeNewFilterSupport(
+        &Context->FilterSupport, 
+        Context->TreeNewHandle, 
+        Context->NodeList
+        );
+
+    Context->TreeFilterEntry = PhAddTreeNewFilter(
+        &Context->FilterSupport,
+        WeWindowTreeFilterCallback,
+        Context
+        );
 }
 
 VOID WeDeleteWindowTree(
@@ -90,6 +189,11 @@ VOID WeDeleteWindowTree(
 {
     PPH_STRING settings;
     ULONG i;
+
+    PhRemoveTreeNewFilter(&Context->FilterSupport, Context->TreeFilterEntry);
+    if (Context->SearchboxText) PhDereferenceObject(Context->SearchboxText);
+
+    PhDeleteTreeNewFilterSupport(&Context->FilterSupport);
 
     settings = PhCmSaveSettings(Context->TreeNewHandle);
     PhSetStringSetting2(SETTING_NAME_WINDOW_TREE_LIST_COLUMNS, &settings->sr);
@@ -140,7 +244,10 @@ PWE_WINDOW_NODE WeAddWindowNode(
     PhAddEntryHashtable(Context->NodeHashtable, &windowNode);
     PhAddItemList(Context->NodeList, windowNode);
 
-    TreeNew_NodesStructured(Context->TreeNewHandle);
+    //if (Context->FilterSupport.FilterList)
+    //   windowNode->Node.Visible = PhApplyTreeNewFiltersToNode(&Context->FilterSupport, &windowNode->Node);
+    //
+    //TreeNew_NodesStructured(Context->TreeNewHandle);
 
     return windowNode;
 }
@@ -178,7 +285,7 @@ VOID WeRemoveWindowNode(
 
     PhRemoveEntryHashtable(Context->NodeHashtable, &WindowNode);
 
-    if ((index = PhFindItemList(Context->NodeList, WindowNode)) != -1)
+    if ((index = PhFindItemList(Context->NodeList, WindowNode)) != ULONG_MAX)
         PhRemoveItemList(Context->NodeList, index);
 
     WepDestroyWindowNode(WindowNode);
@@ -193,8 +300,8 @@ VOID WepDestroyWindowNode(
     PhDereferenceObject(WindowNode->Children);
 
     if (WindowNode->WindowText) PhDereferenceObject(WindowNode->WindowText);
-
     if (WindowNode->ThreadString) PhDereferenceObject(WindowNode->ThreadString);
+    if (WindowNode->ModuleString) PhDereferenceObject(WindowNode->ModuleString);
 
     PhFree(WindowNode);
 }
@@ -242,6 +349,12 @@ BEGIN_SORT_FUNCTION(Thread)
 }
 END_SORT_FUNCTION
 
+BEGIN_SORT_FUNCTION(Module)
+{
+    sortResult = PhCompareString(node1->ModuleString, node2->ModuleString, TRUE);
+}
+END_SORT_FUNCTION
+
 BOOLEAN NTAPI WepWindowTreeNewCallback(
     _In_ HWND hwnd,
     _In_ PH_TREENEW_MESSAGE Message,
@@ -255,11 +368,17 @@ BOOLEAN NTAPI WepWindowTreeNewCallback(
 
     context = Context;
 
+    if (!context)
+        return FALSE;
+
     switch (Message)
     {
     case TreeNewGetChildren:
         {
             PPH_TREENEW_GET_CHILDREN getChildren = Parameter1;
+
+            if (!getChildren)
+                break;
 
             node = (PWE_WINDOW_NODE)getChildren->Node;
 
@@ -285,7 +404,8 @@ BOOLEAN NTAPI WepWindowTreeNewCallback(
                         SORT_FUNCTION(Class),
                         SORT_FUNCTION(Handle),
                         SORT_FUNCTION(Text),
-                        SORT_FUNCTION(Thread)
+                        SORT_FUNCTION(Thread),
+                        SORT_FUNCTION(Module)
                     };
                     int (__cdecl *sortFunction)(void *, const void *, const void *);
 
@@ -309,6 +429,9 @@ BOOLEAN NTAPI WepWindowTreeNewCallback(
         {
             PPH_TREENEW_IS_LEAF isLeaf = Parameter1;
 
+            if (!isLeaf)
+                break;
+
             node = (PWE_WINDOW_NODE)isLeaf->Node;
 
             if (context->TreeNewSortOrder == NoSortOrder)
@@ -321,6 +444,9 @@ BOOLEAN NTAPI WepWindowTreeNewCallback(
         {
             PPH_TREENEW_GET_CELL_TEXT getCellText = Parameter1;
 
+            if (!getCellText)
+                break;
+
             node = (PWE_WINDOW_NODE)getCellText->Node;
 
             switch (getCellText->Id)
@@ -329,16 +455,16 @@ BOOLEAN NTAPI WepWindowTreeNewCallback(
                 PhInitializeStringRef(&getCellText->Text, node->WindowClass);
                 break;
             case WEWNTLC_HANDLE:
-                PhPrintPointer(node->WindowHandleString, node->WindowHandle);
                 PhInitializeStringRef(&getCellText->Text, node->WindowHandleString);
                 break;
             case WEWNTLC_TEXT:
                 getCellText->Text = PhGetStringRef(node->WindowText);
                 break;
             case WEWNTLC_THREAD:
-                if (!node->ThreadString)
-                    node->ThreadString = PhGetClientIdName(&node->ClientId);
                 getCellText->Text = PhGetStringRef(node->ThreadString);
+                break;
+            case WEWNTLC_MODULE:
+                getCellText->Text = PhGetStringRef(node->ModuleString);
                 break;
             default:
                 return FALSE;
@@ -350,6 +476,9 @@ BOOLEAN NTAPI WepWindowTreeNewCallback(
     case TreeNewGetNodeColor:
         {
             PPH_TREENEW_GET_NODE_COLOR getNodeColor = Parameter1;
+
+            if (!getNodeColor)
+                break;
 
             node = (PWE_WINDOW_NODE)getNodeColor->Node;
 
@@ -370,6 +499,9 @@ BOOLEAN NTAPI WepWindowTreeNewCallback(
         {
             PPH_TREENEW_KEY_EVENT keyEvent = Parameter1;
 
+            if (!keyEvent)
+                break;
+
             switch (keyEvent->VirtualKey)
             {
             case 'C':
@@ -384,16 +516,27 @@ BOOLEAN NTAPI WepWindowTreeNewCallback(
             SendMessage(context->ParentWindowHandle, WM_COMMAND, ID_WINDOW_PROPERTIES, 0);
         }
         return TRUE;
-    case TreeNewNodeExpanding:
-        {
-            SendMessage(context->ParentWindowHandle, WM_WE_PLUSMINUS, 0, (LPARAM)Parameter1);
-        }
-        return FALSE;
     case TreeNewContextMenu:
         {
-            PPH_TREENEW_MOUSE_EVENT mouseEvent = Parameter1;
+            PPH_TREENEW_CONTEXT_MENU contextMenuEvent = Parameter1;
 
-            SendMessage(context->ParentWindowHandle, WM_COMMAND, ID_SHOWCONTEXTMENU, MAKELONG(mouseEvent->Location.x, mouseEvent->Location.y));
+            SendMessage(context->ParentWindowHandle, WM_COMMAND, ID_SHOWCONTEXTMENU, (LPARAM)contextMenuEvent);
+        }
+        return TRUE;
+    case TreeNewHeaderRightClick:
+        {
+            PH_TN_COLUMN_MENU_DATA data;
+
+            data.TreeNewHandle = hwnd;
+            data.MouseEvent = Parameter1;
+            data.DefaultSortColumn = 0;
+            data.DefaultSortOrder = AscendingSortOrder;
+            PhInitializeTreeNewColumnMenu(&data);
+
+            data.Selection = PhShowEMenu(data.Menu, hwnd, PH_EMENU_SHOW_LEFTRIGHT,
+                PH_ALIGN_LEFT | PH_ALIGN_TOP, data.MouseEvent->ScreenLocation.x, data.MouseEvent->ScreenLocation.y);
+            PhHandleTreeNewColumnMenu(&data);
+            PhDeleteTreeNewColumnMenu(&data);
         }
         return TRUE;
     }
@@ -458,4 +601,27 @@ VOID WeGetSelectedWindowNodes(
     *NumberOfWindows = list->Count;
 
     PhDereferenceObject(list);
+}
+
+VOID WeExpandAllWindowNodes(
+    _In_ PWE_WINDOW_TREE_CONTEXT Context,
+    _In_ BOOLEAN Expand
+    )
+{
+    ULONG i;
+    BOOLEAN needsRestructure = FALSE;
+
+    for (i = 0; i < Context->NodeList->Count; i++)
+    {
+        PWE_WINDOW_NODE node = Context->NodeList->Items[i];
+
+        if (node->Children->Count != 0 && node->Node.Expanded != Expand)
+        {
+            node->Node.Expanded = Expand;
+            needsRestructure = TRUE;
+        }
+    }
+
+    if (needsRestructure)
+        TreeNew_NodesStructured(Context->TreeNewHandle);
 }

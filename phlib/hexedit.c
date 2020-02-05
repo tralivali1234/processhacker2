@@ -3,6 +3,7 @@
  *   hex editor control
  *
  * Copyright (C) 2010-2015 wj32
+ * Copyright (C) 2017 dmex
  *
  * This file is part of Process Hacker.
  *
@@ -22,9 +23,7 @@
 
 #include <ph.h>
 #include <hexedit.h>
-
 #include <guisup.h>
-
 #include <hexeditp.h>
 
 // Code originally from http://www.codeguru.com/Cpp/controls/editctrl/article.php/c539
@@ -33,19 +32,16 @@ BOOLEAN PhHexEditInitialization(
     VOID
     )
 {
-    WNDCLASSEX c = { sizeof(c) };
+    WNDCLASSEX c;
 
-    c.style = CS_GLOBALCLASS;
-    c.lpfnWndProc = PhpHexEditWndProc;
-    c.cbClsExtra = 0;
-    c.cbWndExtra = sizeof(PVOID);
-    c.hInstance = PhLibImageBase;
-    c.hIcon = NULL;
-    c.hCursor = LoadCursor(NULL, IDC_ARROW);
-    c.hbrBackground = NULL;
-    c.lpszMenuName = NULL;
+    memset(&c, 0, sizeof(WNDCLASSEX));
+    c.cbSize = sizeof(WNDCLASSEX);
     c.lpszClassName = PH_HEXEDIT_CLASSNAME;
-    c.hIconSm = NULL;
+    c.style = CS_GLOBALCLASS;
+    c.cbWndExtra = sizeof(PVOID);
+    c.hInstance = PhInstanceHandle;
+    c.lpfnWndProc = PhpHexEditWndProc;
+    c.hCursor = LoadCursor(NULL, IDC_ARROW);
 
     if (!RegisterClassEx(&c))
         return FALSE;
@@ -99,7 +95,7 @@ VOID PhpFreeHexEditContext(
 {
     if (!Context->UserBuffer && Context->Data) PhFree(Context->Data);
     if (Context->CharBuffer) PhFree(Context->CharBuffer);
-    if (Context->Font) DeleteObject(Context->Font);
+    if (Context->Font) DeleteFont(Context->Font);
     PhFree(Context);
 }
 
@@ -132,6 +128,7 @@ LRESULT CALLBACK PhpHexEditWndProc(
         break;
     case WM_DESTROY:
         {
+            SetWindowLongPtr(hwnd, 0, (LONG_PTR)NULL);
             PhpFreeHexEditContext(context);
         }
         break;
@@ -209,10 +206,15 @@ LRESULT CALLBACK PhpHexEditWndProc(
                 case SB_PAGEDOWN:
                     if (context->TopIndex < context->Length - mult)
                     {
+                        LONG pageEnd = 0;
+
+                        while (pageEnd < context->Length - mult)
+                            pageEnd += context->BytesPerRow;
+
                         context->TopIndex += mult;
 
-                        if (context->TopIndex > context->Length - mult)
-                            context->TopIndex = context->Length - mult;
+                        if (context->TopIndex > pageEnd)
+                            context->TopIndex = pageEnd;
 
                         REDRAW_WINDOW(hwnd);
                     }
@@ -230,6 +232,15 @@ LRESULT CALLBACK PhpHexEditWndProc(
                     break;
                 case SB_THUMBTRACK:
                     context->TopIndex = currentPosition * context->BytesPerRow;
+                    REDRAW_WINDOW(hwnd);
+                    break;
+                case SB_TOP:
+                    context->TopIndex = 0;
+                    REDRAW_WINDOW(hwnd);
+                    break;
+                case SB_BOTTOM:
+                    while (context->TopIndex < context->Length - mult)
+                        context->TopIndex += context->BytesPerRow;
                     REDRAW_WINDOW(hwnd);
                     break;
                 }
@@ -284,8 +295,8 @@ LRESULT CALLBACK PhpHexEditWndProc(
             ULONG flags = (ULONG)wParam;
             POINT cursorPos;
 
-            cursorPos.x = (LONG)(SHORT)LOWORD(lParam);
-            cursorPos.y = (LONG)(SHORT)HIWORD(lParam);
+            cursorPos.x = GET_X_LPARAM(lParam);
+            cursorPos.y = GET_Y_LPARAM(lParam);
 
             SetFocus(hwnd);
 
@@ -363,8 +374,8 @@ LRESULT CALLBACK PhpHexEditWndProc(
             ULONG flags = (ULONG)wParam;
             POINT cursorPos;
 
-            cursorPos.x = (LONG)(SHORT)LOWORD(lParam);
-            cursorPos.y = (LONG)(SHORT)HIWORD(lParam);
+            cursorPos.x = GET_X_LPARAM(lParam);
+            cursorPos.y = GET_Y_LPARAM(lParam);
 
             if (
                 context->Data &&
@@ -871,10 +882,26 @@ LRESULT CALLBACK PhpHexEditWndProc(
             }
         }
         return TRUE;
+    case HEM_SETEXTENDEDUNICODE:
+        {
+            context->ExtendedUnicode = !!(LONG)wParam;
+        }
+        return TRUE;
     }
 
 DefaultHandler:
     return DefWindowProc(hwnd, uMsg, wParam, lParam);
+}
+
+FORCEINLINE INT PhpIsPrintable(
+    _In_ PPHP_HEXEDIT_CONTEXT Context,
+    _In_ UCHAR Byte
+    )
+{
+    if (Context->ExtendedUnicode)
+        return iswctype(Byte, _PUNCT | _ALPHA | _DIGIT); // iswprint
+    else
+        return ((ULONG)((Byte)-' ') <= (ULONG)('~' - ' '));
 }
 
 FORCEINLINE VOID PhpPrintHex(
@@ -914,7 +941,7 @@ FORCEINLINE VOID PhpPrintAscii(
 {
     WCHAR c;
 
-    c = IS_PRINTABLE(Byte) ? Byte : '.';
+    c = PhpIsPrintable(Context, Byte) ? Byte : '.';
     TextOut(hdc, *X, *Y, &c, 1);
     *X += Context->NullWidth;
     (*N)++;
@@ -973,7 +1000,7 @@ VOID PhpHexEditUpdateMetrics(
     if (!hdc && UpdateLineHeight)
     {
         hdc = CreateCompatibleDC(hdc);
-        SelectObject(hdc, Context->Font);
+        SelectFont(hdc, Context->Font);
         freeHdc = TRUE;
     }
 
@@ -1032,11 +1059,11 @@ VOID PhpHexEditOnPaint(
 
     bufferDc = CreateCompatibleDC(hdc);
     bufferBitmap = CreateCompatibleBitmap(hdc, clientRect.right, clientRect.bottom);
-    oldBufferBitmap = SelectObject(bufferDc, bufferBitmap);
+    oldBufferBitmap = SelectBitmap(bufferDc, bufferBitmap);
 
     SetDCBrushColor(bufferDc, GetSysColor(COLOR_WINDOW));
-    FillRect(bufferDc, &clientRect, GetStockObject(DC_BRUSH));
-    SelectObject(bufferDc, Context->Font);
+    FillRect(bufferDc, &clientRect, GetStockBrush(DC_BRUSH));
+    SelectFont(bufferDc, Context->Font);
     SetBoundsRect(bufferDc, &clientRect, DCB_DISABLE);
 
     requiredBufferLength = (max(8, Context->BytesPerRow * 3) + 1) * sizeof(WCHAR);
@@ -1262,7 +1289,7 @@ VOID PhpHexEditOnPaint(
 
                     for (n = 0; n < Context->BytesPerRow && i < Context->Length; n++)
                     {
-                        *p++ = IS_PRINTABLE(Context->Data[i]) ? Context->Data[i] : '.'; // 1
+                        *p++ = PhpIsPrintable(Context, Context->Data[i]) ? Context->Data[i] : '.'; // 1
                         i++;
                     }
 
@@ -1274,8 +1301,8 @@ VOID PhpHexEditOnPaint(
     }
 
     BitBlt(hdc, 0, 0, clientRect.right, clientRect.bottom, bufferDc, 0, 0, SRCCOPY);
-    SelectObject(bufferDc, oldBufferBitmap);
-    DeleteObject(bufferBitmap);
+    SelectBitmap(bufferDc, oldBufferBitmap);
+    DeleteBitmap(bufferBitmap);
     DeleteDC(bufferDc);
 }
 
@@ -1288,12 +1315,12 @@ VOID PhpHexEditUpdateScrollbars(
 
     si.fMask = SIF_ALL;
     si.nMin = 0;
-    si.nMax = (Context->Length / Context->BytesPerRow) - 1;
+    si.nMax = Context->Length / Context->BytesPerRow;
     si.nPage = Context->LinesPerPage;
     si.nPos = Context->TopIndex / Context->BytesPerRow;
     SetScrollInfo(hwnd, SB_VERT, &si, TRUE);
 
-    if (si.nMax > (LONG)si.nPage)
+    if (si.nMax > (LONG)si.nPage - 1)
         EnableScrollBar(hwnd, SB_VERT, ESB_ENABLE_BOTH);
 
     // No horizontal scrollbar please.
@@ -1640,7 +1667,7 @@ VOID PhpHexEditCopyEdit(
 
                     for (i = 0; i < length; i++)
                     {
-                        if (!IS_PRINTABLE(*p))
+                        if (!PhpIsPrintable(Context, *p))
                             *p = '.';
                         p++;
                     }

@@ -2,7 +2,7 @@
  * Process Hacker Plugins -
  *   Update Checker Plugin
  *
- * Copyright (C) 2011-2016 dmex
+ * Copyright (C) 2011-2019 dmex
  *
  * This file is part of Process Hacker.
  *
@@ -49,10 +49,10 @@ VOID NTAPI MainMenuInitializingCallback(
     PPH_PLUGIN_MENU_INFORMATION menuInfo = Parameter;
 
     // Check this menu is the Help menu
-    if (!menuInfo || menuInfo->u.MainMenu.SubMenuIndex != 4)
+    if (!menuInfo || menuInfo->u.MainMenu.SubMenuIndex != PH_MENU_ITEM_LOCATION_HELP)
         return;
 
-    PhInsertEMenuItem(menuInfo->Menu, PhPluginCreateEMenuItem(PluginInstance, 0, UPDATE_MENUITEM, L"Check for updates", NULL), 0);
+    PhInsertEMenuItem(menuInfo->Menu, PhPluginCreateEMenuItem(PluginInstance, 0, UPDATE_MENUITEM, L"Check for &updates", NULL), 0);
 }
 
 VOID NTAPI MenuItemCallback(
@@ -73,7 +73,18 @@ VOID NTAPI ShowOptionsCallback(
     _In_opt_ PVOID Context
     )
 {
-    ShowOptionsDialog((HWND)Parameter);
+    PPH_PLUGIN_OPTIONS_POINTERS optionsEntry = (PPH_PLUGIN_OPTIONS_POINTERS)Parameter;
+
+    if (!optionsEntry)
+        return;
+
+    optionsEntry->CreateSection(
+        L"Updater",
+        PluginInstance->DllBase,
+        MAKEINTRESOURCE(IDD_OPTIONS),
+        OptionsDlgProc,
+        NULL
+        );
 }
 
 LOGICAL DllMain(
@@ -90,7 +101,11 @@ LOGICAL DllMain(
             PH_SETTING_CREATE settings[] =
             {
                 { IntegerSettingType, SETTING_NAME_AUTO_CHECK, L"1" },
-                { StringSettingType, SETTING_NAME_LAST_CHECK, L"0" }
+                { StringSettingType, SETTING_NAME_LAST_CHECK, L"0" },
+                { IntegerPairSettingType, SETTING_NAME_CHANGELOG_WINDOW_POSITION, L"0,0" },
+                { ScalableIntegerPairSettingType, SETTING_NAME_CHANGELOG_WINDOW_SIZE, L"@96|420,250" },
+                { StringSettingType, SETTING_NAME_CHANGELOG_COLUMNS, L"" },
+                { StringSettingType, SETTING_NAME_CHANGELOG_SORTCOLUMN, L"" },
             };
 
             PluginInstance = PhRegisterPlugin(PLUGIN_NAME, Instance, &info);
@@ -102,7 +117,6 @@ LOGICAL DllMain(
             info->Author = L"dmex";
             info->Description = L"Plugin for checking new Process Hacker releases via the Help menu.";
             info->Url = L"https://wj32.org/processhacker/forums/viewtopic.php?t=1121";
-            info->HasOptions = TRUE;
 
             PhRegisterCallback(
                 PhGetGeneralCallback(GeneralCallbackMainWindowShowing),
@@ -123,13 +137,13 @@ LOGICAL DllMain(
                 &PluginMenuItemCallbackRegistration
                 );
             PhRegisterCallback(
-                PhGetPluginCallback(PluginInstance, PluginCallbackShowOptions),
+                PhGetGeneralCallback(GeneralCallbackOptionsWindowInitializing),
                 ShowOptionsCallback,
                 NULL,
                 &PluginShowOptionsCallbackRegistration
                 );
 
-            PhAddSettings(settings, ARRAYSIZE(settings));
+            PhAddSettings(settings, RTL_NUMBER_OF(settings));
         }
         break;
     }

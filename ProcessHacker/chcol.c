@@ -3,6 +3,7 @@
  *   column chooser
  *
  * Copyright (C) 2010 wj32
+ * Copyright (C) 2017-2018 dmex
  *
  * This file is part of Process Hacker.
  *
@@ -21,10 +22,9 @@
  */
 
 #include <phapp.h>
-
-#include <windowsx.h>
-
 #include <settings.h>
+
+#include <phsettings.h>
 
 typedef struct _COLUMNS_DIALOG_CONTEXT
 {
@@ -110,11 +110,11 @@ INT_PTR CALLBACK PhpColumnsDlgProc(
     if (uMsg == WM_INITDIALOG)
     {
         context = (PCOLUMNS_DIALOG_CONTEXT)lParam;
-        SetProp(hwndDlg, PhMakeContextAtom(), (HANDLE)context);
+        PhSetWindowContext(hwndDlg, PH_WINDOW_CONTEXT_DEFAULT, context);
     }
     else
     {
-        context = (PCOLUMNS_DIALOG_CONTEXT)GetProp(hwndDlg, PhMakeContextAtom());
+        context = PhGetWindowContext(hwndDlg, PH_WINDOW_CONTEXT_DEFAULT);
     }
 
     if (!context)
@@ -131,6 +131,7 @@ INT_PTR CALLBACK PhpColumnsDlgProc(
 
             context->InactiveList = GetDlgItem(hwndDlg, IDC_INACTIVE);
             context->ActiveList = GetDlgItem(hwndDlg, IDC_ACTIVE);
+            PhCenterWindow(hwndDlg, GetParent(hwndDlg));
 
             if (context->Type == PH_CONTROL_TYPE_TREE_NEW)
             {
@@ -192,6 +193,8 @@ INT_PTR CALLBACK PhpColumnsDlgProc(
 
             SendMessage(hwndDlg, WM_COMMAND, MAKEWPARAM(IDC_INACTIVE, LBN_SELCHANGE), (LPARAM)context->InactiveList);
             SendMessage(hwndDlg, WM_COMMAND, MAKEWPARAM(IDC_ACTIVE, LBN_SELCHANGE), (LPARAM)context->ActiveList);
+
+            PhInitializeWindowTheme(hwndDlg, PhEnableThemeSupport);
         }
         break;
     case WM_DESTROY:
@@ -201,19 +204,19 @@ INT_PTR CALLBACK PhpColumnsDlgProc(
             for (i = 0; i < context->Columns->Count; i++)
                 PhFree(context->Columns->Items[i]);
 
-            RemoveProp(hwndDlg, PhMakeContextAtom());
+            PhRemoveWindowContext(hwndDlg, PH_WINDOW_CONTEXT_DEFAULT);
         }
         break;
     case WM_COMMAND:
         {
-            switch (LOWORD(wParam))
+            switch (GET_WM_COMMAND_ID(wParam, lParam))
             {
             case IDCANCEL:
                 EndDialog(hwndDlg, IDCANCEL);
                 break;
             case IDOK:
                 {
-#define ORDER_LIMIT 100
+#define ORDER_LIMIT 200
                     PPH_LIST activeList;
                     ULONG activeCount;
                     ULONG i;

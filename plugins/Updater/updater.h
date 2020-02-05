@@ -1,8 +1,8 @@
-/*
+﻿/*
  * Process Hacker Plugins -
  *   Update Checker Plugin
  *
- * Copyright (C) 2011-2015 dmex
+ * Copyright (C) 2011-2019 dmex
  *
  * This file is part of Process Hacker.
  *
@@ -23,30 +23,34 @@
 #ifndef __UPDATER_H__
 #define __UPDATER_H__
 
-#define CINTERFACE
-#define COBJMACROS
-#define INITGUID
 #include <phdk.h>
 #include <phappresource.h>
+#include <json.h>
 #include <verify.h>
-#include <mxml.h>
-#include <windowsx.h>
-#include <winhttp.h>
+#include <settings.h>
+#include <workqueue.h>
+
+#include <shlobj.h>
+
+#include <commonutil.h>
 
 #include "resource.h"
 
-#define UPDATE_MENUITEM    1001
-#define PH_UPDATEISERRORED (WM_APP + 501)
-#define PH_UPDATEAVAILABLE (WM_APP + 502)
-#define PH_UPDATEISCURRENT (WM_APP + 503)
-#define PH_UPDATENEWER     (WM_APP + 504)
-#define PH_UPDATESUCCESS   (WM_APP + 505)
-#define PH_UPDATEFAILURE   (WM_APP + 506)
-#define WM_SHOWDIALOG      (WM_APP + 550)
+#define UPDATE_MENUITEM 1001
+#define PH_SHOWDIALOG (WM_APP + 501)
+#define PH_SHOWLATEST (WM_APP + 502)
+#define PH_SHOWNEWEST (WM_APP + 503)
+#define PH_SHOWUPDATE (WM_APP + 504)
+#define PH_SHOWINSTALL (WM_APP + 505)
+#define PH_SHOWERROR (WM_APP + 506)
 
 #define PLUGIN_NAME L"ProcessHacker.UpdateChecker"
 #define SETTING_NAME_AUTO_CHECK (PLUGIN_NAME L".PromptStart")
 #define SETTING_NAME_LAST_CHECK (PLUGIN_NAME L".LastUpdateCheckTime")
+#define SETTING_NAME_CHANGELOG_WINDOW_POSITION (PLUGIN_NAME L".ChangelogWindowPosition")
+#define SETTING_NAME_CHANGELOG_WINDOW_SIZE (PLUGIN_NAME L".ChangelogWindowSize")
+#define SETTING_NAME_CHANGELOG_COLUMNS (PLUGIN_NAME L".ChangelogListColumns")
+#define SETTING_NAME_CHANGELOG_SORTCOLUMN (PLUGIN_NAME L".ChangelogListSort")
 
 #define MAKE_VERSION_ULONGLONG(major, minor, build, revision) \
     (((ULONGLONG)(major) << 48) | \
@@ -59,8 +63,6 @@
 //#define FORCE_UPDATE_CHECK
 // Force update check to show the current version as the latest version.
 //#define FORCE_LATEST_VERSION
-// Disable startup update check.
-//#define DISABLE_STARTUP_CHECK
 #endif
 
 extern HWND UpdateDialogHandle;
@@ -69,31 +71,47 @@ extern PPH_PLUGIN PluginInstance;
 
 typedef struct _PH_UPDATER_CONTEXT
 {
-    BOOLEAN StartupCheck;
-    BOOLEAN HaveData;
-    BOOLEAN FixedWindowStyles;
+    union
+    {
+        BOOLEAN Flags;
+        struct
+        {
+            BOOLEAN StartupCheck : 1;
+            BOOLEAN HaveData : 1;
+            BOOLEAN FixedWindowStyles : 1;
+            BOOLEAN Spare : 5;
+        };
+    };
 
     HICON IconSmallHandle;
     HICON IconLargeHandle;
 
     HWND DialogHandle;
+    WNDPROC DefaultWindowProc;
 
-    ULONG MinorVersion;
-    ULONG MajorVersion;
-    ULONG RevisionVersion;
-    ULONG CurrentMinorVersion;
-    ULONG CurrentMajorVersion;
-    ULONG CurrentRevisionVersion;
-    PPH_STRING Version;
-    PPH_STRING RevVersion;
-    PPH_STRING RelDate;
-    PPH_STRING Size;
-    PPH_STRING Hash;
-    PPH_STRING Signature;
-    PPH_STRING ReleaseNotesUrl;
-    PPH_STRING SetupFileDownloadUrl;
+    ULONG ErrorCode;
+    ULONG64 CurrentVersion;
+    ULONG64 LatestVersion;
     PPH_STRING SetupFilePath;
+    PPH_STRING CurrentVersionString;
+    PPH_STRING Version;
+    PPH_STRING RelDate;
+
+    PPH_STRING SetupFileLength;
+    PPH_STRING SetupFileDownloadUrl;
+    PPH_STRING SetupFileHash;
+    PPH_STRING SetupFileSignature;
+    
+    // Nightly builds only
+    PPH_STRING BuildMessage;
+    PPH_STRING CommitHash;
 } PH_UPDATER_CONTEXT, *PPH_UPDATER_CONTEXT;
+
+// TDM_NAVIGATE_PAGE can not be called from other threads without comctl32.dll throwing access violations 
+// after navigating to the page and you press keys such as ctrl, alt, home and insert. (dmex)
+#define TaskDialogNavigatePage(WindowHandle, Config) \
+    assert(HandleToUlong(NtCurrentThreadId()) == GetWindowThreadProcessId(WindowHandle, NULL)); \
+    SendMessage(WindowHandle, TDM_NAVIGATE_PAGE, 0, (LPARAM)Config);
 
 VOID TaskDialogLinkClicked(
     _In_ PPH_UPDATER_CONTEXT Context
@@ -161,10 +179,24 @@ BOOLEAN UpdaterInstalledUsingSetup(
     VOID
     );
 
+ULONG64 ParseVersionString(
+    _Inout_ PPH_STRING VersionString
+    );
+
 // options.c
 
-VOID ShowOptionsDialog(
-    _In_opt_ HWND Parent
+INT_PTR CALLBACK OptionsDlgProc(
+    _In_ HWND hwndDlg,
+    _In_ UINT uMsg,
+    _In_ WPARAM wParam,
+    _In_ LPARAM lParam
+    );
+
+INT_PTR CALLBACK TextDlgProc(
+    _In_ HWND hwndDlg,
+    _In_ UINT uMsg,
+    _In_ WPARAM wParam,
+    _In_ LPARAM lParam
     );
 
 // verify.c
@@ -181,8 +213,8 @@ typedef struct _UPDATER_HASH_CONTEXT
     PVOID Hash;
 } UPDATER_HASH_CONTEXT, *PUPDATER_HASH_CONTEXT;
 
-BOOLEAN UpdaterInitializeHash(
-    _Out_ PUPDATER_HASH_CONTEXT *Context
+PUPDATER_HASH_CONTEXT UpdaterInitializeHash(
+    VOID
     );
 
 BOOLEAN UpdaterUpdateHash(
@@ -202,7 +234,7 @@ BOOLEAN UpdaterVerifySignature(
     );
 
 VOID UpdaterDestroyHash(
-    _Inout_ PUPDATER_HASH_CONTEXT Context
+    _Frees_ptr_opt_ PUPDATER_HASH_CONTEXT Context
     );
 
 #endif

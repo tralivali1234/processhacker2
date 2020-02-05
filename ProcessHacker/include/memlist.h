@@ -53,14 +53,39 @@ typedef struct _PH_MEMORY_NODE
 } PH_MEMORY_NODE, *PPH_MEMORY_NODE;
 // end_phapppub
 
+#define PH_MEMORY_FLAGS_FREE_OPTION 1
+#define PH_MEMORY_FLAGS_RESERVED_OPTION 2
+#define PH_MEMORY_FLAGS_PRIVATE_OPTION 3
+#define PH_MEMORY_FLAGS_SYSTEM_OPTION 4
+#define PH_MEMORY_FLAGS_CFG_OPTION 5
+#define PH_MEMORY_FLAGS_EXECUTE_OPTION 6
+#define PH_MEMORY_FLAGS_GUARD_OPTION 7
+
 typedef struct _PH_MEMORY_LIST_CONTEXT
 {
     HWND ParentWindowHandle;
     HWND TreeNewHandle;
     ULONG TreeNewSortColumn;
+    PH_TN_FILTER_SUPPORT AllocationTreeFilterSupport;
+    PH_TN_FILTER_SUPPORT TreeFilterSupport;
     PH_SORT_ORDER TreeNewSortOrder;
     PH_CM_MANAGER Cm;
-    BOOLEAN HideFreeRegions;
+
+    union
+    {
+        ULONG Flags;
+        struct
+        {
+            ULONG HideFreeRegions : 1;
+            ULONG HideReservedRegions : 1;
+            ULONG HighlightPrivatePages : 1;
+            ULONG HighlightSystemPages : 1;
+            ULONG HighlightCfgPages : 1;
+            ULONG HighlightExecutePages : 1;
+            ULONG HideGuardRegions : 1;
+            ULONG Spare : 25;
+        };
+    };
 
     PPH_LIST AllocationBaseNodeList; // Allocation base nodes (list should always be sorted by base address)
     PPH_LIST RegionNodeList; // Memory region nodes
@@ -86,17 +111,32 @@ VOID PhSaveSettingsMemoryList(
 
 VOID PhSetOptionsMemoryList(
     _Inout_ PPH_MEMORY_LIST_CONTEXT Context,
-    _In_ BOOLEAN HideFreeRegions
+    _In_ ULONG Options
     );
 
 VOID PhReplaceMemoryList(
     _Inout_ PPH_MEMORY_LIST_CONTEXT Context,
-    _In_ PPH_MEMORY_ITEM_LIST List
+    _In_opt_ PPH_MEMORY_ITEM_LIST List
+    );
+
+VOID PhRemoveMemoryNode(
+    _Inout_ PPH_MEMORY_LIST_CONTEXT Context,
+    _In_ PPH_MEMORY_ITEM_LIST List,
+    _In_ PPH_MEMORY_NODE MemoryNode
     );
 
 VOID PhUpdateMemoryNode(
     _In_ PPH_MEMORY_LIST_CONTEXT Context,
     _In_ PPH_MEMORY_NODE MemoryNode
+    );
+
+VOID PhExpandAllMemoryNodes(
+    _In_ PPH_MEMORY_LIST_CONTEXT Context,
+    _In_ BOOLEAN Expand
+    );
+
+PPH_STRING PhGetMemoryRegionUseText(
+    _In_ PPH_MEMORY_ITEM MemoryItem
     );
 
 PPH_MEMORY_NODE PhGetSelectedMemoryNode(

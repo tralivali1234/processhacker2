@@ -57,7 +57,10 @@ typedef struct _PH_TREENEW_CONTEXT
             ULONG DragSelectionActive : 1;
             ULONG SelectionRectangleAlpha : 1; // use alpha blending for the selection rectangle
             ULONG CustomRowHeight : 1;
-            ULONG Spare : 4;
+            ULONG CustomColors : 1;
+            ULONG ContextMenuActive : 1;
+            ULONG ThemeSupport : 1;
+            ULONG Spare : 1;
         };
         ULONG Flags;
     };
@@ -129,11 +132,17 @@ typedef struct _PH_TREENEW_CONTEXT
     HFONT TooltipFont;
     HFONT NewTooltipFont;
     ULONG TooltipColumnId;
-    WNDPROC FixedHeaderOldWndProc;
-    WNDPROC HeaderOldWndProc;
 
     TEXTMETRIC TextMetrics;
     HTHEME ThemeData;
+    COLORREF DefaultBackColor;
+    COLORREF DefaultForeColor;
+
+    // User configurable colors.
+    COLORREF CustomTextColor;
+    COLORREF CustomFocusColor;
+    COLORREF CustomSelectedColor;
+
     LONG SystemBorderX;
     LONG SystemBorderY;
     LONG SystemEdgeX;
@@ -152,6 +161,9 @@ typedef struct _PH_TREENEW_CONTEXT
     HRGN SuspendUpdateRegion;
 
     PH_STRINGREF EmptyText;
+
+    WNDPROC HeaderWindowProc;
+    WNDPROC FixedHeaderWindowProc;
 } PH_TREENEW_CONTEXT, *PPH_TREENEW_CONTEXT;
 
 LRESULT CALLBACK PhTnpWndProc(
@@ -720,10 +732,6 @@ VOID PhTnpGetHeaderTooltipText(
     _In_ BOOLEAN Fixed,
     _In_ PPOINT Point,
     _Out_ PWSTR *Text
-    );
-
-PWSTR PhTnpMakeContextAtom(
-    VOID
     );
 
 LRESULT CALLBACK PhTnpHeaderHookWndProc(

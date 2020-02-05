@@ -16,6 +16,10 @@
 #define ALIGN_UP_POINTER_BY(Pointer, Align) ((PVOID)ALIGN_UP_BY(Pointer, Align))
 #define ALIGN_UP(Address, Type) ALIGN_UP_BY(Address, sizeof(Type))
 #define ALIGN_UP_POINTER(Pointer, Type) ((PVOID)ALIGN_UP(Pointer, Type))
+#define ALIGN_DOWN_BY(Address, Align) ((ULONG_PTR)(Address) & ~((ULONG_PTR)(Align) - 1))
+#define ALIGN_DOWN_POINTER_BY(Pointer, Align) ((PVOID)ALIGN_DOWN_BY(Pointer, Align))
+#define ALIGN_DOWN(Address, Type) ALIGN_DOWN_BY(Address, sizeof(Type))
+#define ALIGN_DOWN_POINTER(Pointer, Type) ((PVOID)ALIGN_DOWN(Pointer, Type))
 
 #define PAGE_SIZE 0x1000
 
@@ -37,6 +41,11 @@
 #define ASSUME_ASSERT(Expression) __assume(Expression)
 #define ASSUME_NO_DEFAULT __assume(FALSE)
 #endif
+
+// Math
+
+#define UInt32Add32To64(a, b)  ((unsigned __int64)((unsigned __int64)(a) + ((unsigned __int64)(b)))) // Avoids warning C26451 (dmex)
+#define UInt32Mul32To64(a, b)  ((unsigned __int64)((unsigned __int64)(a) * ((unsigned __int64)(b))))
 
 // Time
 
@@ -407,6 +416,14 @@ FORCEINLINE VOID PhPrintUInt32(
     _ultow(UInt32, Destination, 10);
 }
 
+FORCEINLINE VOID PhPrintUInt32Hex(
+    _Out_writes_(PH_PTR_STR_LEN_1) PWSTR Destination,
+    _In_ ULONG UInt32
+    )
+{
+    _ultow(UInt32, Destination, 16);
+}
+
 FORCEINLINE VOID PhPrintInt64(
     _Out_writes_(PH_INT64_STR_LEN_1) PWSTR Destination,
     _In_ LONG64 Int64
@@ -454,9 +471,9 @@ FORCEINLINE ULONG PhCountBits(
     return count;
 }
 
-FORCEINLINE ULONG PhRoundNumber(
-    _In_ ULONG Value,
-    _In_ ULONG Granularity
+FORCEINLINE ULONG64 PhRoundNumber(
+    _In_ ULONG64 Value,
+    _In_ ULONG64 Granularity
     )
 {
     return (Value + Granularity / 2) / Granularity * Granularity;
@@ -506,7 +523,7 @@ FORCEINLINE VOID PhProbeAddress(
 }
 
 FORCEINLINE PLARGE_INTEGER PhTimeoutFromMilliseconds(
-    _Out_ PLARGE_INTEGER Timeout,
+    _Inout_ PLARGE_INTEGER Timeout,
     _In_ ULONG Milliseconds
     )
 {
@@ -518,7 +535,12 @@ FORCEINLINE PLARGE_INTEGER PhTimeoutFromMilliseconds(
     return Timeout;
 }
 
-FORCEINLINE NTSTATUS PhGetLastWin32ErrorAsNtStatus()
+#define PhTimeoutFromMillisecondsEx(Milliseconds) \
+    &(LARGE_INTEGER) { -(LONGLONG)UInt32x32To64((Milliseconds), PH_TIMEOUT_MS) }
+
+FORCEINLINE NTSTATUS PhGetLastWin32ErrorAsNtStatus(
+    VOID
+    )
 {
     ULONG win32Result;
 
@@ -526,21 +548,6 @@ FORCEINLINE NTSTATUS PhGetLastWin32ErrorAsNtStatus()
     win32Result = GetLastError();
 
     return NTSTATUS_FROM_WIN32(win32Result);
-}
-
-FORCEINLINE PVOID PhGetModuleProcAddress(
-    _In_ PWSTR ModuleName,
-    _In_ PSTR ProcName
-    )
-{
-    HMODULE module;
-
-    module = GetModuleHandle(ModuleName);
-
-    if (module)
-        return GetProcAddress(module, ProcName);
-    else
-        return NULL;
 }
 
 #endif

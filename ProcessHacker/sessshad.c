@@ -21,11 +21,9 @@
  */
 
 #include <phapp.h>
-
-#include <windowsx.h>
-#include <winsta.h>
-
 #include <settings.h>
+
+#include <winsta.h>
 
 #define SIP(String, Integer) { (String), (PVOID)(Integer) }
 
@@ -110,9 +108,13 @@ VOID PhShowSessionShadowDialog(
     _In_ ULONG SessionId
     )
 {
-    if (SessionId == NtCurrentPeb()->SessionId)
+    ULONG sessionId = ULONG_MAX;
+
+    PhGetProcessSessionId(NtCurrentProcess(), &sessionId);
+
+    if (SessionId == sessionId)
     {
-        PhShowError(ParentWindowHandle, L"You cannot remote control the current session.");
+        PhShowError2(ParentWindowHandle, L"Unable to shadow session.", L"You cannot remote control the current session.");
         return;
     }
 
@@ -141,7 +143,8 @@ INT_PTR CALLBACK PhpSessionShadowDlgProc(
             ULONG i;
             PWSTR stringToSelect;
 
-            SetProp(hwndDlg, L"SessionId", UlongToHandle((ULONG)lParam));
+            PhSetWindowContext(hwndDlg, PH_WINDOW_CONTEXT_DEFAULT, UlongToPtr((ULONG)lParam));
+
             PhCenterWindow(hwndDlg, GetParent(hwndDlg));
 
             hotkey = PhGetIntegerPairSetting(L"SessionShadowHotkey");
@@ -172,7 +175,7 @@ INT_PTR CALLBACK PhpSessionShadowDlgProc(
         break;
     case WM_DESTROY:
         {
-            RemoveProp(hwndDlg, L"SessionId");
+            PhRemoveWindowContext(hwndDlg, PH_WINDOW_CONTEXT_DEFAULT);
         }
         break;
     case WM_COMMAND:
@@ -184,7 +187,7 @@ INT_PTR CALLBACK PhpSessionShadowDlgProc(
                 break;
             case IDOK:
                 {
-                    ULONG sessionId = HandleToUlong(GetProp(hwndDlg, L"SessionId"));
+                    ULONG sessionId = PtrToUlong(PhGetWindowContext(hwndDlg, PH_WINDOW_CONTEXT_DEFAULT));
                     ULONG virtualKey;
                     ULONG modifiers;
                     WCHAR computerName[64];

@@ -3,6 +3,7 @@
  *   handle information
  *
  * Copyright (C) 2010-2015 wj32
+ * Copyright (C) 2017-2018 dmex
  *
  * This file is part of Process Hacker.
  *
@@ -44,7 +45,8 @@ typedef enum _PHP_QUERY_OBJECT_WORK
 {
     NtQueryObjectWork,
     NtQuerySecurityObjectWork,
-    NtSetSecurityObjectWork
+    NtSetSecurityObjectWork,
+    NtQueryFileInformationWork
 } PHP_QUERY_OBJECT_WORK;
 
 typedef struct _PHP_QUERY_OBJECT_COMMON_CONTEXT
@@ -76,6 +78,13 @@ typedef struct _PHP_QUERY_OBJECT_COMMON_CONTEXT
             SECURITY_INFORMATION SecurityInformation;
             PSECURITY_DESCRIPTOR SecurityDescriptor;
         } NtSetSecurityObject;
+        struct
+        {
+            HANDLE Handle;
+            FILE_INFORMATION_CLASS FileInformationClass;
+            PVOID FileInformation;
+            ULONG FileInformationLength;
+        } NtQueryFileInformation;
     } u;
 } PHP_QUERY_OBJECT_COMMON_CONTEXT, *PPHP_QUERY_OBJECT_COMMON_CONTEXT;
 
@@ -122,7 +131,10 @@ NTSTATUS PhpGetObjectBasicInformation(
 {
     NTSTATUS status;
 
-    if (KphIsConnected())
+    // TODO: KphIsVerified() fixes a bug on Windows 10 but this should be removed
+    // since KphQueryInformationObject doesn't require verification. (dmex)
+
+    if (KphIsConnected() && KphIsVerified())
     {
         status = KphQueryInformationObject(
             ProcessHandle,
@@ -142,12 +154,14 @@ NTSTATUS PhpGetObjectBasicInformation(
     }
     else
     {
+        ULONG returnLength;
+
         status = NtQueryObject(
             Handle,
             ObjectBasicInformation,
             BasicInformation,
             sizeof(OBJECT_BASIC_INFORMATION),
-            NULL
+            &returnLength
             );
 
         if (NT_SUCCESS(status))
@@ -172,9 +186,40 @@ NTSTATUS PhpGetObjectTypeName(
     NTSTATUS status = STATUS_SUCCESS;
     PPH_STRING typeName = NULL;
 
+    // dmex: Enumerate the available object types and pre-cache the object type name.
+    if (WindowsVersion >= WINDOWS_8_1)
+    {
+        static PH_INITONCE initOnce = PH_INITONCE_INIT;
+
+        if (PhBeginInitOnce(&initOnce))
+        {
+            POBJECT_TYPES_INFORMATION objectTypes;
+            POBJECT_TYPE_INFORMATION objectType;
+
+            if (NT_SUCCESS(PhEnumObjectTypes(&objectTypes)))
+            {
+                objectType = PH_FIRST_OBJECT_TYPE(objectTypes);
+
+                for (ULONG i = 0; i < objectTypes->NumberOfTypes; i++)
+                {
+                    PhMoveReference(
+                        &PhObjectTypeNames[objectType->TypeIndex], 
+                        PhCreateStringFromUnicodeString(&objectType->TypeName)
+                        );
+
+                    objectType = PH_NEXT_OBJECT_TYPE(objectType);
+                }
+
+                PhFree(objectTypes);
+            }
+
+            PhEndInitOnce(&initOnce);
+        }
+    }
+
     // If the cache contains the object type name, use it. Otherwise, query the type name.
 
-    if (ObjectTypeNumber != -1 && ObjectTypeNumber < MAX_OBJECT_TYPE_NUMBER)
+    if (ObjectTypeNumber != ULONG_MAX && ObjectTypeNumber < MAX_OBJECT_TYPE_NUMBER)
         typeName = PhObjectTypeNames[ObjectTypeNumber];
 
     if (typeName)
@@ -246,7 +291,7 @@ NTSTATUS PhpGetObjectTypeName(
         // Create a copy of the type name.
         typeName = PhCreateStringFromUnicodeString(&buffer->TypeName);
 
-        if (ObjectTypeNumber != -1 && ObjectTypeNumber < MAX_OBJECT_TYPE_NUMBER)
+        if (ObjectTypeNumber != ULONG_MAX && ObjectTypeNumber < MAX_OBJECT_TYPE_NUMBER)
         {
             // Try to store the type name in the cache.
             oldTypeName = _InterlockedCompareExchangePointer(
@@ -255,8 +300,7 @@ NTSTATUS PhpGetObjectTypeName(
                 NULL
                 );
 
-            // Add a reference if we stored the type name
-            // successfully.
+            // Add a reference if we stored the type name successfully.
             if (!oldTypeName)
                 PhReferenceObject(typeName);
         }
@@ -346,6 +390,32 @@ NTSTATUS PhpGetObjectName(
     return status;
 }
 
+NTSTATUS PhpGetEtwObjectName(
+    _In_ HANDLE ProcessHandle,
+    _In_ HANDLE Handle,
+    _Out_ PPH_STRING *ObjectName
+    )
+{
+    NTSTATUS status;
+    ETWREG_BASIC_INFORMATION basicInfo;
+
+    status = KphQueryInformationObject(
+        ProcessHandle,
+        Handle,
+        KphObjectEtwRegBasicInformation,
+        &basicInfo,
+        sizeof(ETWREG_BASIC_INFORMATION),
+        NULL
+        );
+
+    if (NT_SUCCESS(status))
+    {
+        *ObjectName = PhFormatGuid(&basicInfo.Guid);
+    }
+
+    return status;
+}
+
 PPH_STRING PhFormatNativeKeyName(
     _In_ PPH_STRING Name
     )
@@ -369,16 +439,10 @@ PPH_STRING PhFormatNativeKeyName(
 
     if (PhBeginInitOnce(&initOnce))
     {
-        HANDLE currentTokenHandle;
         PTOKEN_USER tokenUser;
         PPH_STRING stringSid = NULL;
 
-        currentTokenHandle = PhGetOwnTokenAttributes().TokenHandle;
-
-        if (currentTokenHandle && NT_SUCCESS(PhGetTokenUser(
-            currentTokenHandle,
-            &tokenUser
-            )))
+        if (NT_SUCCESS(PhGetTokenUser(PhGetOwnTokenAttributes().TokenHandle, &tokenUser)))
         {
             stringSid = PhSidToStringSid(tokenUser->User.Sid);
             PhFree(tokenUser);
@@ -478,15 +542,15 @@ _Callback_ PPH_STRING PhStdGetClientIdName(
 {
     static PH_QUEUED_LOCK cachedProcessesLock = PH_QUEUED_LOCK_INIT;
     static PVOID processes = NULL;
-    static ULONG lastProcessesTickCount = 0;
+    static ULONG64 lastProcessesTickCount = 0;
 
     PPH_STRING name;
-    ULONG tickCount;
+    ULONG64 tickCount;
     PSYSTEM_PROCESS_INFORMATION processInfo;
 
     // Get a new process list only if 2 seconds have passed since the last update.
 
-    tickCount = GetTickCount();
+    tickCount = NtGetTickCount64();
 
     if (tickCount - lastProcessesTickCount >= 2000)
     {
@@ -530,8 +594,8 @@ _Callback_ PPH_STRING PhStdGetClientIdName(
         if (processInfo)
         {
             name = PhFormatString(
-                L"%.*s (%u): %u",
-                processInfo->ImageName.Length / 2,
+                L"%.*s (%lu): %lu",
+                processInfo->ImageName.Length / sizeof(WCHAR),
                 processInfo->ImageName.Buffer,
                 HandleToUlong(ClientId->UniqueProcess),
                 HandleToUlong(ClientId->UniqueThread)
@@ -540,7 +604,7 @@ _Callback_ PPH_STRING PhStdGetClientIdName(
         else
         {
             name = PhFormatString(
-                L"Non-existent process (%u): %u",
+                L"Non-existent process (%lu): %lu",
                 HandleToUlong(ClientId->UniqueProcess),
                 HandleToUlong(ClientId->UniqueThread)
                 );
@@ -551,15 +615,15 @@ _Callback_ PPH_STRING PhStdGetClientIdName(
         if (processInfo)
         {
             name = PhFormatString(
-                L"%.*s (%u)",
-                processInfo->ImageName.Length / 2,
+                L"%.*s (%lu)",
+                processInfo->ImageName.Length / sizeof(WCHAR),
                 processInfo->ImageName.Buffer,
                 HandleToUlong(ClientId->UniqueProcess)
                 );
         }
         else
         {
-            name = PhFormatString(L"Non-existent process (%u)", HandleToUlong(ClientId->UniqueProcess));
+            name = PhFormatString(L"Non-existent process (%lu)", HandleToUlong(ClientId->UniqueProcess));
         }
     }
 
@@ -682,60 +746,66 @@ NTSTATUS PhpGetBestObjectName(
             }
         }
     }
-    else if (PhEqualString2(TypeName, L"Job", TRUE))
-    {
-        HANDLE dupHandle;
-        PJOBOBJECT_BASIC_PROCESS_ID_LIST processIdList;
-
-        status = NtDuplicateObject(
-            ProcessHandle,
-            Handle,
-            NtCurrentProcess(),
-            &dupHandle,
-            JOB_OBJECT_QUERY,
-            0,
-            0
-            );
-
-        if (!NT_SUCCESS(status))
-            goto CleanupExit;
-
-        if (handleGetClientIdName && NT_SUCCESS(PhGetJobProcessIdList(dupHandle, &processIdList)))
-        {
-            PH_STRING_BUILDER sb;
-            ULONG i;
-            CLIENT_ID clientId;
-            PPH_STRING name;
-
-            PhInitializeStringBuilder(&sb, 40);
-            clientId.UniqueThread = NULL;
-
-            for (i = 0; i < processIdList->NumberOfProcessIdsInList; i++)
-            {
-                clientId.UniqueProcess = (HANDLE)processIdList->ProcessIdList[i];
-                name = handleGetClientIdName(&clientId);
-
-                if (name)
-                {
-                    PhAppendStringBuilder(&sb, &name->sr);
-                    PhAppendStringBuilder2(&sb, L"; ");
-                    PhDereferenceObject(name);
-                }
-            }
-
-            PhFree(processIdList);
-
-            if (sb.String->Length != 0)
-                PhRemoveEndStringBuilder(&sb, 2);
-
-            if (sb.String->Length == 0)
-                PhAppendStringBuilder2(&sb, L"(No processes)");
-
-            bestObjectName = PhFinalStringBuilderString(&sb);
-        }
-
-        NtClose(dupHandle);
-    }
+    // Note: Uncomment below code if we want to return job names identical to Process Explorer.
+    // Todo: Should we remove since it's not the actual job name? -dmex
+    //else if (PhEqualString2(TypeName, L"Job", TRUE))
+    //{
+    //    HANDLE dupHandle;
+    //    PJOBOBJECT_BASIC_PROCESS_ID_LIST processIdList;
+    //
+    //    // dmex: Don't do anything when we already have a valid job object name.
+    //    if (!PhIsNullOrEmptyString(ObjectName))
+    //        goto CleanupExit;
+    //
+    //    status = NtDuplicateObject(
+    //        ProcessHandle,
+    //        Handle,
+    //        NtCurrentProcess(),
+    //        &dupHandle,
+    //        JOB_OBJECT_QUERY,
+    //        0,
+    //        0
+    //        );
+    //
+    //    if (!NT_SUCCESS(status))
+    //        goto CleanupExit;
+    //
+    //    if (handleGetClientIdName && NT_SUCCESS(PhGetJobProcessIdList(dupHandle, &processIdList)))
+    //    {
+    //        PH_STRING_BUILDER sb;
+    //        ULONG i;
+    //        CLIENT_ID clientId;
+    //        PPH_STRING name;
+    //
+    //        PhInitializeStringBuilder(&sb, 40);
+    //        clientId.UniqueThread = NULL;
+    //
+    //        for (i = 0; i < processIdList->NumberOfProcessIdsInList; i++)
+    //        {
+    //            clientId.UniqueProcess = (HANDLE)processIdList->ProcessIdList[i];
+    //            name = handleGetClientIdName(&clientId);
+    //
+    //            if (name)
+    //            {
+    //                PhAppendStringBuilder(&sb, &name->sr);
+    //                PhAppendStringBuilder2(&sb, L"; ");
+    //                PhDereferenceObject(name);
+    //            }
+    //        }
+    //
+    //        PhFree(processIdList);
+    //
+    //        if (sb.String->Length != 0)
+    //            PhRemoveEndStringBuilder(&sb, 2);
+    //
+    //        if (sb.String->Length == 0)
+    //            PhAppendStringBuilder2(&sb, L"(No processes)");
+    //
+    //        bestObjectName = PhFinalStringBuilderString(&sb);
+    //    }
+    //
+    //    NtClose(dupHandle);
+    //}
     else if (PhEqualString2(TypeName, L"Key", TRUE))
     {
         bestObjectName = PhFormatNativeKeyName(ObjectName);
@@ -774,7 +844,7 @@ NTSTATUS PhpGetBestObjectName(
                 Handle,
                 NtCurrentProcess(),
                 &dupHandle,
-                ProcessQueryAccess,
+                PROCESS_QUERY_LIMITED_INFORMATION,
                 0,
                 0
                 );
@@ -882,7 +952,7 @@ NTSTATUS PhpGetBestObjectName(
                 Handle,
                 NtCurrentProcess(),
                 &dupHandle,
-                ThreadQueryAccess,
+                THREAD_QUERY_LIMITED_INFORMATION,
                 0,
                 0
                 );
@@ -1227,7 +1297,7 @@ NTSTATUS PhGetHandleInformationEx(
 
     if (Handle == NULL || Handle == NtCurrentProcess() || Handle == NtCurrentThread())
         return STATUS_INVALID_HANDLE;
-    if (ObjectTypeNumber != -1 && ObjectTypeNumber >= MAX_OBJECT_TYPE_NUMBER)
+    if (ObjectTypeNumber != ULONG_MAX && ObjectTypeNumber >= MAX_OBJECT_TYPE_NUMBER)
         return STATUS_INVALID_PARAMETER_3;
 
     // Duplicate the handle if we're not using KPH.
@@ -1292,31 +1362,20 @@ NTSTATUS PhGetHandleInformationEx(
     // If we're dealing with a file handle we must take special precautions so we don't hang.
     if (PhEqualString2(typeName, L"File", TRUE) && !KphIsConnected())
     {
-#define QUERY_NORMALLY 0
-#define QUERY_WITH_TIMEOUT 1
-#define QUERY_FAIL 2
-
-        ULONG hackLevel = QUERY_WITH_TIMEOUT;
-
-        // We can't use the timeout method on XP because hanging threads can't even be terminated!
-        if (WindowsVersion <= WINDOWS_XP)
-            hackLevel = QUERY_FAIL;
-
-        if (hackLevel == QUERY_NORMALLY || hackLevel == QUERY_WITH_TIMEOUT)
-        {
-            status = PhpGetObjectName(
-                ProcessHandle,
-                KphIsConnected() ? Handle : dupHandle,
-                hackLevel == QUERY_WITH_TIMEOUT,
-                &objectName
-                );
-        }
-        else
-        {
-            // Pretend the file object has no name.
-            objectName = PhReferenceEmptyString();
-            status = STATUS_SUCCESS;
-        }
+        status = PhpGetObjectName(
+            ProcessHandle,
+            KphIsConnected() ? Handle : dupHandle,
+            TRUE,
+            &objectName
+            );
+    }
+    else if (PhEqualString2(typeName, L"EtwRegistration", TRUE) && KphIsConnected())
+    {
+        status = PhpGetEtwObjectName(
+            ProcessHandle,
+            Handle,
+            &objectName
+            );
     }
     else
     {
@@ -1395,6 +1454,7 @@ NTSTATUS PhEnumObjectTypes(
     NTSTATUS status;
     PVOID buffer;
     ULONG bufferSize;
+    ULONG returnLength;
 
     bufferSize = 0x1000;
     buffer = PhAllocate(bufferSize);
@@ -1404,7 +1464,7 @@ NTSTATUS PhEnumObjectTypes(
         ObjectTypesInformation,
         buffer,
         bufferSize,
-        NULL
+        &returnLength
         )) == STATUS_INFO_LENGTH_MISMATCH)
     {
         PhFree(buffer);
@@ -1434,6 +1494,7 @@ ULONG PhGetObjectTypeNumber(
 {
     POBJECT_TYPES_INFORMATION objectTypes;
     POBJECT_TYPE_INFORMATION objectType;
+    ULONG objectIndex = ULONG_MAX;
     ULONG i;
 
     if (NT_SUCCESS(PhEnumObjectTypes(&objectTypes)))
@@ -1445,11 +1506,15 @@ ULONG PhGetObjectTypeNumber(
             if (RtlEqualUnicodeString(&objectType->TypeName, TypeName, TRUE))
             {
                 if (WindowsVersion >= WINDOWS_8_1)
-                    return objectType->TypeIndex;
-                else if (WindowsVersion >= WINDOWS_7)
-                    return i + 2;
+                {
+                    objectIndex = objectType->TypeIndex;
+                    break;
+                }
                 else
-                    return i + 1;
+                {
+                    objectIndex = i + 2;
+                    break;
+                }
             }
 
             objectType = PH_NEXT_OBJECT_TYPE(objectType);
@@ -1458,7 +1523,53 @@ ULONG PhGetObjectTypeNumber(
         PhFree(objectTypes);
     }
 
-    return -1;
+    return objectIndex;
+}
+
+PPH_STRING PhGetObjectTypeName(
+    _In_ ULONG TypeIndex
+    )
+{
+    static PH_INITONCE initOnce = PH_INITONCE_INIT;
+    static POBJECT_TYPES_INFORMATION objectTypes = NULL;
+    POBJECT_TYPE_INFORMATION objectType;
+    PPH_STRING objectTypeName = NULL;
+    ULONG i;
+
+    if (PhBeginInitOnce(&initOnce))
+    {
+        PhEnumObjectTypes(&objectTypes);
+        PhEndInitOnce(&initOnce);
+    }
+
+    if (objectTypes)
+    {
+        objectType = PH_FIRST_OBJECT_TYPE(objectTypes);
+
+        for (i = 0; i < objectTypes->NumberOfTypes; i++)
+        {
+            if (WindowsVersion >= WINDOWS_8_1)
+            {
+                if (TypeIndex == objectType->TypeIndex)
+                {
+                    objectTypeName = PhCreateStringFromUnicodeString(&objectType->TypeName);
+                    break;
+                }
+            }
+            else
+            {
+                if (TypeIndex == (i + 2))
+                {
+                    objectTypeName = PhCreateStringFromUnicodeString(&objectType->TypeName);
+                    break;
+                }
+            }
+
+            objectType = PH_NEXT_OBJECT_TYPE(objectType);
+        }
+    }
+
+    return objectTypeName;
 }
 
 PPHP_CALL_WITH_TIMEOUT_THREAD_CONTEXT PhpAcquireCallWithTimeoutThread(
@@ -1466,7 +1577,6 @@ PPHP_CALL_WITH_TIMEOUT_THREAD_CONTEXT PhpAcquireCallWithTimeoutThread(
     )
 {
     static PH_INITONCE initOnce = PH_INITONCE_INIT;
-
     PPHP_CALL_WITH_TIMEOUT_THREAD_CONTEXT threadContext;
     PSLIST_ENTRY listEntry;
     PH_QUEUED_WAIT_BLOCK waitBlock;
@@ -1677,6 +1787,19 @@ NTSTATUS PhpCommonQueryObjectRoutine(
             context->u.NtSetSecurityObject.SecurityDescriptor
             );
         break;
+    case NtQueryFileInformationWork:
+        {
+            IO_STATUS_BLOCK isb;
+
+            context->Status = NtQueryInformationFile(
+                context->u.NtQueryFileInformation.Handle,
+                &isb,
+                context->u.NtQueryFileInformation.FileInformation,
+                context->u.NtQueryFileInformation.FileInformationLength,
+                context->u.NtQueryFileInformation.FileInformationClass
+                );
+        }
+        break;
     default:
         context->Status = STATUS_INVALID_PARAMETER;
         break;
@@ -1692,7 +1815,7 @@ NTSTATUS PhpCommonQueryObjectWithTimeout(
     NTSTATUS status;
     LARGE_INTEGER timeout;
 
-    timeout.QuadPart = -1 * PH_TIMEOUT_SEC;
+    timeout.QuadPart = -(LONGLONG)UInt32x32To64(1, PH_TIMEOUT_SEC);
     status = PhCallWithTimeout(PhpCommonQueryObjectRoutine, Context, NULL, &timeout);
 
     if (NT_SUCCESS(status))
@@ -1761,6 +1884,26 @@ NTSTATUS PhCallNtSetSecurityObjectWithTimeout(
     context->u.NtSetSecurityObject.Handle = Handle;
     context->u.NtSetSecurityObject.SecurityInformation = SecurityInformation;
     context->u.NtSetSecurityObject.SecurityDescriptor = SecurityDescriptor;
+
+    return PhpCommonQueryObjectWithTimeout(context);
+}
+
+NTSTATUS PhCallNtQueryFileInformationWithTimeout(
+    _In_ HANDLE Handle,
+    _In_ FILE_INFORMATION_CLASS FileInformationClass,
+    _Out_writes_bytes_opt_(FileInformationLength) PVOID FileInformation,
+    _In_ ULONG FileInformationLength
+    )
+{
+    PPHP_QUERY_OBJECT_COMMON_CONTEXT context;
+
+    context = PhAllocate(sizeof(PHP_QUERY_OBJECT_COMMON_CONTEXT));
+    context->Work = NtQueryFileInformationWork;
+    context->Status = STATUS_UNSUCCESSFUL;
+    context->u.NtQueryFileInformation.Handle = Handle;
+    context->u.NtQueryFileInformation.FileInformationClass = FileInformationClass;
+    context->u.NtQueryFileInformation.FileInformation = FileInformation;
+    context->u.NtQueryFileInformation.FileInformationLength = FileInformationLength;
 
     return PhpCommonQueryObjectWithTimeout(context);
 }

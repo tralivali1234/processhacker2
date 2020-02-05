@@ -3,6 +3,7 @@
  *   about dialog
  *
  * Copyright (C) 2010-2016 wj32
+ * Copyright (C) 2017-2018 dmex
  *
  * This file is part of Process Hacker.
  *
@@ -21,17 +22,22 @@
  */
 
 #include <phapp.h>
-
 #include <symprv.h>
 
 #include <hndlprv.h>
+#include <mainwnd.h>
 #include <memprv.h>
 #include <modprv.h>
 #include <netprv.h>
 #include <phappres.h>
+#include <phsettings.h>
 #include <procprv.h>
 #include <srvprv.h>
 #include <thrdprv.h>
+
+#include <uxtheme.h>
+
+static HWND PhAboutWindowHandle = NULL;
 
 static INT_PTR CALLBACK PhpAboutDlgProc(
     _In_ HWND hwndDlg,
@@ -46,52 +52,65 @@ static INT_PTR CALLBACK PhpAboutDlgProc(
         {
             PPH_STRING appName;
 
-            PhCenterWindow(hwndDlg, GetParent(hwndDlg));
+            SendMessage(hwndDlg, WM_SETICON, ICON_SMALL, (LPARAM)PH_LOAD_SHARED_ICON_SMALL(PhInstanceHandle, MAKEINTRESOURCE(IDI_PROCESSHACKER)));
+            SendMessage(hwndDlg, WM_SETICON, ICON_BIG, (LPARAM)PH_LOAD_SHARED_ICON_LARGE(PhInstanceHandle, MAKEINTRESOURCE(IDI_PROCESSHACKER)));
+
+            PhCenterWindow(hwndDlg, PhMainWndHandle);
 
 #if (PHAPP_VERSION_REVISION != 0)
             appName = PhFormatString(
-                L"Process Hacker %u.%u.%u",
+                L"Process Hacker %lu.%lu.%lu (%hs)",
                 PHAPP_VERSION_MAJOR,
                 PHAPP_VERSION_MINOR,
-                PHAPP_VERSION_REVISION
+                PHAPP_VERSION_REVISION,
+                PHAPP_VERSION_COMMIT
                 );
 #else
             appName = PhFormatString(
-                L"Process Hacker %u.%u",
+                L"Process Hacker %lu.%lu",
                 PHAPP_VERSION_MAJOR,
                 PHAPP_VERSION_MINOR
                 );
 #endif
 
-            SetDlgItemText(hwndDlg, IDC_ABOUT_NAME, appName->Buffer);
+            PhSetDialogItemText(hwndDlg, IDC_ABOUT_NAME, appName->Buffer);
             PhDereferenceObject(appName);
 
-            SetDlgItemText(hwndDlg, IDC_CREDITS,
-                L"    Installer by XhmikosR\n"
+            PhSetDialogItemText(hwndDlg, IDC_CREDITS,
                 L"Thanks to:\n"
-                L"    dmex\n"
-                L"    Donors - thank you for your support!\n"
-                L"    <a href=\"http://forum.sysinternals.com\">Sysinternals Forums</a>\n"
-                L"    <a href=\"http://www.reactos.org\">ReactOS</a>\n"
+                L"    <a href=\"https://github.com/wj32\">wj32</a> - Wen Jia Liu\n"
+                L"    <a href=\"https://github.com/dmex\">dmex</a> - Steven G\n"
+                L"    <a href=\"https://github.com/xhmikosr\">XhmikosR</a>\n"
+                L"    <a href=\"https://github.com/processhacker/processhacker/graphs/contributors\">Contributors</a> - thank you for your additions!\n"
+                L"    Donors - thank you for your support!\n\n"
                 L"Process Hacker uses the following components:\n"
-                L"    <a href=\"http://www.minixml.org\">Mini-XML</a> by Michael Sweet\n"
-                L"    <a href=\"http://www.pcre.org\">PCRE</a>\n"
+                L"    <a href=\"https://github.com/michaelrsweet/mxml\">Mini-XML</a> by Michael Sweet\n"
+                L"    <a href=\"https://www.pcre.org\">PCRE</a>\n"
+                L"    <a href=\"https://github.com/json-c/json-c\">json-c</a>\n"
                 L"    MD5 code by Jouni Malinen\n"
                 L"    SHA1 code by Filip Navara, based on code by Steve Reid\n"
                 L"    <a href=\"http://www.famfamfam.com/lab/icons/silk\">Silk icons</a>\n"
-                L"    <a href=\"http://www.fatcow.com/free-icons\">Farm-fresh web icons</a>\n"
+                L"    <a href=\"https://www.fatcow.com/free-icons\">Farm-fresh web icons</a>\n"
                 );
 
-            SendMessage(hwndDlg, WM_NEXTDLGCTL, (LPARAM)GetDlgItem(hwndDlg, IDOK), TRUE);
+            PhSetDialogFocus(hwndDlg, GetDlgItem(hwndDlg, IDOK));
+
+            PhInitializeWindowTheme(hwndDlg, PhEnableThemeSupport);
+        }
+        break;
+    case WM_DESTROY:
+        {
+            PhUnregisterDialog(PhAboutWindowHandle);
+            PhAboutWindowHandle = NULL;
         }
         break;
     case WM_COMMAND:
         {
-            switch (LOWORD(wParam))
+            switch (GET_WM_COMMAND_ID(wParam, lParam))
             {
             case IDCANCEL:
             case IDOK:
-                EndDialog(hwndDlg, IDOK);
+                DestroyWindow(hwndDlg);
                 break;
             case IDC_DIAGNOSTICS:
                 {
@@ -127,15 +146,25 @@ static INT_PTR CALLBACK PhpAboutDlgProc(
 }
 
 VOID PhShowAboutDialog(
-    _In_ HWND ParentWindowHandle
+    VOID
     )
 {
-    DialogBox(
-        PhInstanceHandle,
-        MAKEINTRESOURCE(IDD_ABOUT),
-        ParentWindowHandle,
-        PhpAboutDlgProc
-        );
+    if (!PhAboutWindowHandle)
+    {
+        PhAboutWindowHandle = CreateDialog(
+            PhInstanceHandle,
+            MAKEINTRESOURCE(IDD_ABOUT),
+            NULL,
+            PhpAboutDlgProc
+            );
+        PhRegisterDialog(PhAboutWindowHandle);
+        ShowWindow(PhAboutWindowHandle, SW_SHOW);
+    }
+
+    if (IsMinimized(PhAboutWindowHandle))
+        ShowWindow(PhAboutWindowHandle, SW_RESTORE);
+    else
+        SetForegroundWindow(PhAboutWindowHandle);
 }
 
 FORCEINLINE ULONG PhpGetObjectTypeObjectCount(
@@ -144,7 +173,8 @@ FORCEINLINE ULONG PhpGetObjectTypeObjectCount(
 {
     PH_OBJECT_TYPE_INFORMATION info;
 
-    PhGetObjectTypeInformation(ObjectType, &info);
+    memset(&info, 0, sizeof(PH_OBJECT_TYPE_INFORMATION));
+    if (ObjectType) PhGetObjectTypeInformation(ObjectType, &info);
 
     return info.NumberOfObjects;
 }
@@ -160,7 +190,7 @@ PPH_STRING PhGetDiagnosticsString(
     PhAppendFormatStringBuilder(&stringBuilder, L"OBJECT INFORMATION\r\n");
 
 #define OBJECT_TYPE_COUNT(Type) PhAppendFormatStringBuilder(&stringBuilder, \
-    L#Type L": %u objects\r\n", PhpGetObjectTypeObjectCount(Type))
+    L#Type L": %lu objects\r\n", PhpGetObjectTypeObjectCount(Type))
 
     // ref
     OBJECT_TYPE_COUNT(PhObjectTypeObject);

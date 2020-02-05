@@ -120,6 +120,7 @@ typedef enum _KEY_SET_INFORMATION_CLASS
     KeySetVirtualizationInformation, // KEY_SET_VIRTUALIZATION_INFORMATION
     KeySetDebugInformation,
     KeySetHandleTagsInformation, // KEY_HANDLE_TAGS_INFORMATION
+    KeySetLayerInformation, // KEY_SET_LAYER_INFORMATION
     MaxKeySetInfoClass
 } KEY_SET_INFORMATION_CLASS;
 
@@ -137,6 +138,15 @@ typedef struct _KEY_HANDLE_TAGS_INFORMATION
 {
     ULONG HandleTags;
 } KEY_HANDLE_TAGS_INFORMATION, *PKEY_HANDLE_TAGS_INFORMATION;
+
+typedef struct _KEY_SET_LAYER_INFORMATION
+{
+    ULONG IsTombstone : 1;
+    ULONG IsSupersedeLocal : 1;
+    ULONG IsSupersedeTree : 1;
+    ULONG ClassIsInherited : 1;
+    ULONG Reserved : 28;
+} KEY_SET_LAYER_INFORMATION, *PKEY_SET_LAYER_INFORMATION;
 
 typedef struct _KEY_CONTROL_FLAGS_INFORMATION
 {
@@ -229,7 +239,7 @@ typedef struct _REG_NOTIFY_INFORMATION
 
 typedef struct _KEY_PID_ARRAY
 {
-    HANDLE PID;
+    HANDLE ProcessId;
     UNICODE_STRING KeyName;
 } KEY_PID_ARRAY, *PKEY_PID_ARRAY;
 
@@ -524,6 +534,12 @@ NtUnloadKey(
     _In_ POBJECT_ATTRIBUTES TargetKey
     );
 
+//
+// NtUnloadKey2 Flags (from winnt.h)
+//
+//#define REG_FORCE_UNLOAD            1
+//#define REG_UNLOAD_LEGAL_FLAGS      (REG_FORCE_UNLOAD)
+
 NTSYSCALLAPI
 NTSTATUS
 NTAPI
@@ -588,7 +604,7 @@ NTAPI
 NtQueryOpenSubKeysEx(
     _In_ POBJECT_ATTRIBUTES TargetKey,
     _In_ ULONG BufferLength,
-    _Out_writes_bytes_(BufferLength) PVOID Buffer,
+    _Out_writes_bytes_opt_(BufferLength) PVOID Buffer,
     _Out_ PULONG RequiredSize
     );
 

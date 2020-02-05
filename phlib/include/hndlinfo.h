@@ -70,10 +70,10 @@ PhGetHandleInformationEx(
     );
 
 #define PH_FIRST_OBJECT_TYPE(ObjectTypes) \
-    (POBJECT_TYPE_INFORMATION)((PCHAR)(ObjectTypes) + ALIGN_UP(sizeof(OBJECT_TYPES_INFORMATION), ULONG_PTR))
+    PTR_ADD_OFFSET(ObjectTypes, ALIGN_UP(sizeof(OBJECT_TYPES_INFORMATION), ULONG_PTR))
 
 #define PH_NEXT_OBJECT_TYPE(ObjectType) \
-    (POBJECT_TYPE_INFORMATION)((PCHAR)(ObjectType) + sizeof(OBJECT_TYPE_INFORMATION) + \
+    PTR_ADD_OFFSET(ObjectType, sizeof(OBJECT_TYPE_INFORMATION) + \
     ALIGN_UP(ObjectType->TypeName.MaximumLength, ULONG_PTR))
 
 PHLIBAPI
@@ -88,6 +88,13 @@ ULONG
 NTAPI
 PhGetObjectTypeNumber(
     _In_ PUNICODE_STRING TypeName
+    );
+
+PHLIBAPI
+PPH_STRING
+NTAPI
+PhGetObjectTypeName(
+    _In_ ULONG TypeIndex
     );
 
 PHLIBAPI
@@ -129,6 +136,16 @@ PhCallNtSetSecurityObjectWithTimeout(
     _In_ HANDLE Handle,
     _In_ SECURITY_INFORMATION SecurityInformation,
     _In_ PSECURITY_DESCRIPTOR SecurityDescriptor
+    );
+
+PHLIBAPI
+NTSTATUS
+NTAPI
+PhCallNtQueryFileInformationWithTimeout(
+    _In_ HANDLE Handle,
+    _In_ FILE_INFORMATION_CLASS FileInformationClass,
+    _Out_writes_bytes_opt_(FileInformationLength) PVOID FileInformation,
+    _In_ ULONG FileInformationLength
     );
 
 #ifdef __cplusplus

@@ -30,7 +30,7 @@
     <ClCompile Include="wndprp.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="hook.c">
+    <ClCompile Include="prpsh.c">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
@@ -42,6 +42,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="wndtree.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="prpsh.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

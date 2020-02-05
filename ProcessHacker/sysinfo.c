@@ -3,6 +3,7 @@
  *   System Information window
  *
  * Copyright (C) 2011-2016 wj32
+ * Copyright (C) 2017-2019 dmex
  *
  * This file is part of Process Hacker.
  *
@@ -45,24 +46,23 @@
  */
 
 #include <phapp.h>
+#include <settings.h>
 #include <sysinfo.h>
 #include <sysinfop.h>
 
 #include <uxtheme.h>
 #include <vssym32.h>
-#include <windowsx.h>
 
 #include <mainwnd.h>
 #include <phplug.h>
+#include <phsettings.h>
 #include <procprv.h>
-#include <settings.h>
 
 static HANDLE PhSipThread = NULL;
 HWND PhSipWindow = NULL;
 static PPH_LIST PhSipDialogList = NULL;
 static PH_EVENT InitializedEvent = PH_EVENT_INIT;
 static PWSTR InitialSectionName;
-static PH_LAYOUT_MANAGER WindowLayoutManager;
 static RECT MinimumSize;
 static PH_CALLBACK_REGISTRATION ProcessesUpdatedRegistration;
 
@@ -76,11 +76,8 @@ static HWND RestoreSummaryControl;
 static WNDPROC RestoreSummaryControlOldWndProc;
 static BOOLEAN RestoreSummaryControlHot;
 static BOOLEAN RestoreSummaryControlHasFocus;
-
 static HTHEME ThemeData;
 static BOOLEAN ThemeHasItemBackground;
-
-static BOOLEAN AlwaysOnTop;
 
 VOID PhShowSystemInformationDialog(
     _In_opt_ PWSTR SectionName
@@ -88,11 +85,11 @@ VOID PhShowSystemInformationDialog(
 {
     InitialSectionName = SectionName;
 
-    if (!PhSipWindow)
+    if (!PhSipThread)
     {
-        if (!(PhSipThread = PhCreateThread(0, PhSipSysInfoThreadStart, NULL)))
+        if (!NT_SUCCESS(PhCreateThreadEx(&PhSipThread, PhSipSysInfoThreadStart, NULL)))
         {
-            PhShowStatus(PhMainWndHandle, L"Unable to create the system information window", 0, GetLastError());
+            PhShowError(PhMainWndHandle, L"Unable to create the window.");
             return;
         }
 
@@ -208,11 +205,6 @@ INT_PTR CALLBACK PhSipSysInfoDialogProc(
             PhSipOnNcDestroy();
         }
         break;
-    case WM_SHOWWINDOW:
-        {
-            PhSipOnShowWindow(!!wParam, (ULONG)lParam);
-        }
-        break;
     case WM_SYSCOMMAND:
         {
             if (PhSipOnSysCommand((ULONG)wParam, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)))
@@ -236,7 +228,7 @@ INT_PTR CALLBACK PhSipSysInfoDialogProc(
         break;
     case WM_COMMAND:
         {
-            PhSipOnCommand(LOWORD(wParam), HIWORD(wParam));
+            PhSipOnCommand((HWND)lParam, LOWORD(wParam), HIWORD(wParam));
         }
         break;
     case WM_NOTIFY:
@@ -256,6 +248,30 @@ INT_PTR CALLBACK PhSipSysInfoDialogProc(
                 return TRUE;
         }
         break;
+    //case WM_CTLCOLORBTN: // TODO: theme subclass sysinfo window.
+    //case WM_CTLCOLORDLG:
+    //case WM_CTLCOLORSTATIC:
+    //    {
+    //        if (!PhEnableThemeSupport)
+    //            break;
+    //
+    //        SetBkMode((HDC)wParam, TRANSPARENT);
+    //
+    //        switch (PhCsGraphColorMode)
+    //        {
+    //        case 0: // New colors
+    //            SetTextColor((HDC)wParam, RGB(0x0, 0x0, 0x0));
+    //            SetDCBrushColor((HDC)wParam, RGB(0xef, 0xef, 0xef)); // GetSysColor(COLOR_WINDOW)
+    //            break;
+    //        case 1: // Old colors
+    //            SetTextColor((HDC)wParam, RGB(0xff, 0xff, 0xff));
+    //            SetDCBrushColor((HDC)wParam, RGB(30, 30, 30));
+    //            break;
+    //        }
+    //
+    //        return (INT_PTR)GetStockBrush(DC_BRUSH);
+    //    }
+    //    break;
     }
 
     if (uMsg >= SI_MSG_SYSINFO_FIRST && uMsg <= SI_MSG_SYSINFO_LAST)
@@ -273,6 +289,39 @@ INT_PTR CALLBACK PhSipContainerDialogProc(
     _In_ LPARAM lParam
     )
 {
+    switch (uMsg)
+    {
+    //case WM_CTLCOLORBTN: // TODO: theme subclass sysinfo window.
+    //case WM_CTLCOLORDLG:
+    //case WM_CTLCOLORSTATIC:
+    //    {
+    //        SetBkMode((HDC)wParam, TRANSPARENT);
+
+    //        if (PhEnableThemeSupport)
+    //        {
+    //            switch (PhCsGraphColorMode)
+    //            {
+    //            case 0: // New colors
+    //                SetTextColor((HDC)wParam, RGB(0x0, 0x0, 0x0));
+    //                SetDCBrushColor((HDC)wParam, GetSysColor(COLOR_WINDOW));
+    //                break;
+    //            case 1: // Old colors
+    //                SetTextColor((HDC)wParam, RGB(0xff, 0xff, 0xff));
+    //                SetDCBrushColor((HDC)wParam, RGB(30, 30, 30));
+    //                break;
+    //            }
+    //        }
+    //        else
+    //        {
+    //            SetTextColor((HDC)wParam, RGB(0x0, 0x0, 0x0));
+    //            SetDCBrushColor((HDC)wParam, GetSysColor(COLOR_WINDOW));
+    //        }
+
+    //        return (INT_PTR)GetStockBrush(DC_BRUSH);
+    //    }
+    //    break;
+    }
+
     return FALSE;
 }
 
@@ -280,14 +329,16 @@ VOID PhSipOnInitDialog(
     VOID
     )
 {
-    PhInitializeLayoutManager(&WindowLayoutManager, PhSipWindow);
+    RECT clientRect;
+    PH_STRINGREF sectionName;
+    PPH_SYSINFO_SECTION section;
 
-    PhAddLayoutItem(&WindowLayoutManager, GetDlgItem(PhSipWindow, IDC_INSTRUCTION), NULL, PH_ANCHOR_LEFT | PH_ANCHOR_BOTTOM);
-    PhAddLayoutItem(&WindowLayoutManager, GetDlgItem(PhSipWindow, IDC_ALWAYSONTOP), NULL, PH_ANCHOR_RIGHT | PH_ANCHOR_BOTTOM);
-    PhAddLayoutItem(&WindowLayoutManager, GetDlgItem(PhSipWindow, IDOK), NULL, PH_ANCHOR_RIGHT | PH_ANCHOR_BOTTOM);
+    PhSetControlTheme(PhSipWindow, L"explorer");
+    SendMessage(PhSipWindow, WM_SETICON, ICON_SMALL, (LPARAM)PH_LOAD_SHARED_ICON_SMALL(PhInstanceHandle, MAKEINTRESOURCE(IDI_PROCESSHACKER)));
+    SendMessage(PhSipWindow, WM_SETICON, ICON_BIG, (LPARAM)PH_LOAD_SHARED_ICON_LARGE(PhInstanceHandle, MAKEINTRESOURCE(IDI_PROCESSHACKER)));
 
     PhRegisterCallback(
-        &PhProcessesUpdatedEvent,
+        PhGetGeneralCallback(GeneralCallbackProcessProviderUpdatedEvent),
         PhSipSysInfoUpdateHandler,
         NULL,
         &ProcessesUpdatedRegistration
@@ -300,25 +351,137 @@ VOID PhSipOnInitDialog(
         PhSipContainerDialogProc
         );
 
-    PhSetControlTheme(PhSipWindow, L"explorer");
     PhSipUpdateThemeData();
+
+    if (SectionList) // TODO: Remove (dmex)
+    {
+        ULONG i;
+        PPH_SYSINFO_SECTION section;
+
+        for (i = 0; i < SectionList->Count; i++)
+        {
+            section = SectionList->Items[i];
+            PhSipDestroySection(section);
+        }
+
+        PhDereferenceObject(SectionList);
+    }
+
+    SectionList = PhCreateList(8);
+    PhSipInitializeParameters();
+    CurrentView = SysInfoSummaryView;
+    CurrentSection = NULL;
+
+    PhSipCreateInternalSection(L"CPU", 0, PhSipCpuSectionCallback);
+    PhSipCreateInternalSection(L"Memory", 0, PhSipMemorySectionCallback);
+    PhSipCreateInternalSection(L"I/O", 0, PhSipIoSectionCallback);
+
+    if (PhPluginsEnabled)
+    {
+        PH_PLUGIN_SYSINFO_POINTERS pointers;
+
+        pointers.WindowHandle = PhSipWindow;
+        pointers.CreateSection = PhSipCreateSection;
+        pointers.FindSection = PhSipFindSection;
+        pointers.EnterSectionView = PhSipEnterSectionView;
+        pointers.RestoreSummaryView = PhSipRestoreSummaryView;
+        PhInvokeCallback(PhGetGeneralCallback(GeneralCallbackSystemInformationInitializing), &pointers);
+    }
+
+    SeparatorControl = CreateWindow(
+        WC_STATIC,
+        NULL,
+        WS_CHILD | SS_OWNERDRAW,
+        0,
+        0,
+        3,
+        3,
+        PhSipWindow,
+        NULL,
+        PhInstanceHandle,
+        NULL
+        );
+    RestoreSummaryControl = CreateWindow(
+        WC_STATIC,
+        NULL,
+        WS_CHILD | WS_TABSTOP | SS_OWNERDRAW | SS_NOTIFY,
+        0,
+        0,
+        3,
+        3,
+        PhSipWindow,
+        NULL,
+        PhInstanceHandle,
+        NULL
+        );
+
+    RestoreSummaryControlOldWndProc = (WNDPROC)GetWindowLongPtr(RestoreSummaryControl, GWLP_WNDPROC);
+    SetWindowLongPtr(RestoreSummaryControl, GWLP_WNDPROC, (LONG_PTR)PhSipPanelHookWndProc);
+    RestoreSummaryControlHot = FALSE;
+
+    GetClientRect(PhSipWindow, &clientRect);
+    MinimumSize.left = 0;
+    MinimumSize.top = 0;
+    MinimumSize.right = 430;
+    MinimumSize.bottom = 290;
+    MapDialogRect(PhSipWindow, &MinimumSize);
+
+    MinimumSize.right += CurrentParameters.PanelWidth;
+    MinimumSize.right += GetSystemMetrics(SM_CXFRAME) * 2;
+    MinimumSize.bottom += GetSystemMetrics(SM_CYFRAME) * 2;
+
+    if (SectionList->Count != 0)
+    {
+        //ULONG newMinimumHeight;
+        //
+        //newMinimumHeight =
+        //    GetSystemMetrics(SM_CYCAPTION) +
+        //    CurrentParameters.WindowPadding +
+        //    CurrentParameters.MinimumGraphHeight * SectionList->Count +
+        //    CurrentParameters.MinimumGraphHeight + // Back button
+        //    CurrentParameters.GraphPadding * SectionList->Count +
+        //    CurrentParameters.WindowPadding +
+        //    clientRect.bottom - buttonRect.top +
+        //    GetSystemMetrics(SM_CYFRAME) * 2;
+        //
+        //if (newMinimumHeight > (ULONG)MinimumSize.bottom)
+        //    MinimumSize.bottom = newMinimumHeight;
+    }
+
+    PhLoadWindowPlacementFromSetting(L"SysInfoWindowPosition", L"SysInfoWindowSize", PhSipWindow);
+
+    if (PhGetIntegerSetting(L"SysInfoWindowState") == SW_MAXIMIZE)
+        ShowWindow(PhSipWindow, SW_MAXIMIZE);
+
+    if (InitialSectionName)
+        PhInitializeStringRefLongHint(&sectionName, InitialSectionName);
+    else
+        sectionName = PhaGetStringSetting(L"SysInfoWindowSection")->sr;
+
+    if (sectionName.Length != 0 && (section = PhSipFindSection(&sectionName)))
+    {
+        PhSipEnterSectionView(section);
+    }
+
+    PhRegisterWindowCallback(PhSipWindow, PH_PLUGIN_WINDOW_EVENT_TYPE_TOPMOST, NULL);
+
+    PhInitializeWindowTheme(PhSipWindow, PhEnableThemeSupport);
+
+    PhSipOnSize();
+    PhSipOnUserMessage(SI_MSG_SYSINFO_UPDATE, 0, 0);
 }
 
 VOID PhSipOnDestroy(
     VOID
     )
 {
-    PhUnregisterCallback(
-        &PhProcessesUpdatedEvent,
-        &ProcessesUpdatedRegistration
-        );
+    PhUnregisterWindowCallback(PhSipWindow);
+    PhUnregisterCallback(PhGetGeneralCallback(GeneralCallbackProcessProviderUpdatedEvent), &ProcessesUpdatedRegistration);
 
     if (CurrentSection)
         PhSetStringSetting2(L"SysInfoWindowSection", &CurrentSection->Name);
     else
         PhSetStringSetting(L"SysInfoWindowSection", L"");
-
-    PhSetIntegerSetting(L"SysInfoWindowAlwaysOnTop", AlwaysOnTop);
 
     PhSaveWindowPlacementToSetting(L"SysInfoWindowPosition", L"SysInfoWindowSize", PhSipWindow);
     PhSipSaveWindowState();
@@ -347,130 +510,7 @@ VOID PhSipOnNcDestroy(
         ThemeData = NULL;
     }
 
-    PhDeleteLayoutManager(&WindowLayoutManager);
     PostQuitMessage(0);
-}
-
-VOID PhSipOnShowWindow(
-    _In_ BOOLEAN Showing,
-    _In_ ULONG State
-    )
-{
-    RECT buttonRect;
-    RECT clientRect;
-    PH_STRINGREF sectionName;
-    PPH_SYSINFO_SECTION section;
-
-    if (SectionList)
-        return;
-
-    SectionList = PhCreateList(8);
-    PhSipInitializeParameters();
-    CurrentView = SysInfoSummaryView;
-    CurrentSection = NULL;
-
-    PhSipCreateInternalSection(L"CPU", 0, PhSipCpuSectionCallback);
-    PhSipCreateInternalSection(L"Memory", 0, PhSipMemorySectionCallback);
-    PhSipCreateInternalSection(L"I/O", 0, PhSipIoSectionCallback);
-
-    if (PhPluginsEnabled)
-    {
-        PH_PLUGIN_SYSINFO_POINTERS pointers;
-
-        pointers.WindowHandle = PhSipWindow;
-        pointers.CreateSection = PhSipCreateSection;
-        pointers.FindSection = PhSipFindSection;
-        pointers.EnterSectionView = PhSipEnterSectionView;
-        pointers.RestoreSummaryView = PhSipRestoreSummaryView;
-        PhInvokeCallback(PhGetGeneralCallback(GeneralCallbackSystemInformationInitializing), &pointers);
-    }
-
-    SeparatorControl = CreateWindow(
-        L"STATIC",
-        NULL,
-        WS_CHILD | SS_OWNERDRAW,
-        0,
-        0,
-        3,
-        3,
-        PhSipWindow,
-        (HMENU)IDC_SEPARATOR,
-        PhInstanceHandle,
-        NULL
-        );
-
-    RestoreSummaryControl = CreateWindow(
-        L"STATIC",
-        NULL,
-        WS_CHILD | WS_TABSTOP | SS_OWNERDRAW | SS_NOTIFY,
-        0,
-        0,
-        3,
-        3,
-        PhSipWindow,
-        (HMENU)IDC_RESET,
-        PhInstanceHandle,
-        NULL
-        );
-    RestoreSummaryControlOldWndProc = (WNDPROC)GetWindowLongPtr(RestoreSummaryControl, GWLP_WNDPROC);
-    SetWindowLongPtr(RestoreSummaryControl, GWLP_WNDPROC, (LONG_PTR)PhSipPanelHookWndProc);
-    RestoreSummaryControlHot = FALSE;
-
-    EnableThemeDialogTexture(ContainerControl, ETDT_ENABLETAB);
-
-    GetWindowRect(GetDlgItem(PhSipWindow, IDOK), &buttonRect);
-    MapWindowPoints(NULL, PhSipWindow, (POINT *)&buttonRect, 2);
-    GetClientRect(PhSipWindow, &clientRect);
-
-    MinimumSize.left = 0;
-    MinimumSize.top = 0;
-    MinimumSize.right = WindowsVersion >= WINDOWS_VISTA ? 430 : 370; // XP doesn't have the Memory Lists group
-    MinimumSize.bottom = 290;
-    MapDialogRect(PhSipWindow, &MinimumSize);
-
-    MinimumSize.right += CurrentParameters.PanelWidth;
-    MinimumSize.right += GetSystemMetrics(SM_CXFRAME) * 2;
-    MinimumSize.bottom += GetSystemMetrics(SM_CYFRAME) * 2;
-
-    if (SectionList->Count != 0)
-    {
-        ULONG newMinimumHeight;
-
-        newMinimumHeight =
-            GetSystemMetrics(SM_CYCAPTION) +
-            CurrentParameters.WindowPadding +
-            CurrentParameters.MinimumGraphHeight * SectionList->Count +
-            CurrentParameters.MinimumGraphHeight + // Back button
-            CurrentParameters.GraphPadding * SectionList->Count +
-            CurrentParameters.WindowPadding +
-            clientRect.bottom - buttonRect.top +
-            GetSystemMetrics(SM_CYFRAME) * 2;
-
-        if (newMinimumHeight > (ULONG)MinimumSize.bottom)
-            MinimumSize.bottom = newMinimumHeight;
-    }
-
-    PhLoadWindowPlacementFromSetting(L"SysInfoWindowPosition", L"SysInfoWindowSize", PhSipWindow);
-
-    if (PhGetIntegerSetting(L"SysInfoWindowState") == SW_MAXIMIZE)
-        ShowWindow(PhSipWindow, SW_MAXIMIZE);
-
-    if (InitialSectionName)
-        PhInitializeStringRefLongHint(&sectionName, InitialSectionName);
-    else
-        sectionName = PhaGetStringSetting(L"SysInfoWindowSection")->sr;
-
-    if (sectionName.Length != 0 && (section = PhSipFindSection(&sectionName)))
-    {
-        PhSipEnterSectionView(section);
-    }
-
-    AlwaysOnTop = (BOOLEAN)PhGetIntegerSetting(L"SysInfoWindowAlwaysOnTop");
-    Button_SetCheck(GetDlgItem(PhSipWindow, IDC_ALWAYSONTOP), AlwaysOnTop ? BST_CHECKED : BST_UNCHECKED);
-    PhSipSetAlwaysOnTop();
-
-    PhSipOnSize();
-    PhSipOnUserMessage(SI_MSG_SYSINFO_UPDATE, 0, 0);
 }
 
 BOOLEAN PhSipOnSysCommand(
@@ -496,8 +536,6 @@ VOID PhSipOnSize(
     VOID
     )
 {
-    PhLayoutManagerLayout(&WindowLayoutManager);
-
     if (SectionList && SectionList->Count != 0)
     {
         if (CurrentView == SysInfoSummaryView)
@@ -523,6 +561,7 @@ VOID PhSipOnThemeChanged(
 }
 
 VOID PhSipOnCommand(
+    _In_ HWND HwndControl,
     _In_ ULONG Id,
     _In_ ULONG Code
     )
@@ -530,22 +569,7 @@ VOID PhSipOnCommand(
     switch (Id)
     {
     case IDCANCEL:
-    case IDOK:
         DestroyWindow(PhSipWindow);
-        break;
-    case IDC_ALWAYSONTOP:
-        {
-            AlwaysOnTop = Button_GetCheck(GetDlgItem(PhSipWindow, IDC_ALWAYSONTOP)) == BST_CHECKED;
-            PhSipSetAlwaysOnTop();
-        }
-        break;
-    case IDC_RESET:
-        {
-            if (Code == STN_CLICKED)
-            {
-                PhSipRestoreSummaryView();
-            }
-        }
         break;
     case IDC_BACK:
         {
@@ -560,6 +584,40 @@ VOID PhSipOnCommand(
     case IDC_PAUSE:
         {
             ProcessHacker_SetUpdateAutomatically(PhMainWndHandle, !ProcessHacker_GetUpdateAutomatically(PhMainWndHandle));
+        }
+        break;
+    case IDC_MAXSCREEN:
+        {                
+            static WINDOWPLACEMENT windowLayout = { sizeof(WINDOWPLACEMENT) };
+            ULONG windowStyle = (ULONG)GetWindowLongPtr(PhSipWindow, GWL_STYLE);
+
+            if (windowStyle & WS_OVERLAPPEDWINDOW)
+            {
+                MONITORINFO info = { sizeof(MONITORINFO) };
+
+                if (
+                    GetWindowPlacement(PhSipWindow, &windowLayout) &&
+                    GetMonitorInfo(MonitorFromWindow(PhSipWindow, MONITOR_DEFAULTTOPRIMARY), &info)
+                    )
+                {
+                    PhSetWindowStyle(PhSipWindow, WS_OVERLAPPEDWINDOW, 0);
+                    SetWindowPos(
+                        PhSipWindow, 
+                        HWND_TOPMOST, 
+                        info.rcMonitor.left,
+                        info.rcMonitor.top,
+                        (info.rcMonitor.right - info.rcMonitor.left),
+                        (info.rcMonitor.bottom - info.rcMonitor.top),
+                        SWP_NOOWNERZORDER | SWP_FRAMECHANGED
+                        );
+                }
+            }
+            else
+            {
+                PhSetWindowStyle(PhSipWindow, WS_OVERLAPPEDWINDOW, WS_OVERLAPPEDWINDOW);
+                SetWindowPlacement(PhSipWindow, &windowLayout);
+                SetWindowPos(PhSipWindow, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
+            }
         }
         break;
     }
@@ -590,8 +648,17 @@ VOID PhSipOnCommand(
             }
         }
     }
+
+    if (HwndControl == RestoreSummaryControl)
+    {
+        if (Code == STN_CLICKED)
+        {
+            PhSipRestoreSummaryView();
+        }
+    }
 }
 
+_Success_(return)
 BOOLEAN PhSipOnNotify(
     _In_ NMHDR *Header,
     _Out_ LRESULT *Result
@@ -714,20 +781,20 @@ BOOLEAN PhSipOnNotify(
 
 BOOLEAN PhSipOnDrawItem(
     _In_ ULONG_PTR Id,
-    _In_ DRAWITEMSTRUCT *DrawItemStruct
+    _In_ PDRAWITEMSTRUCT DrawItemStruct
     )
 {
     ULONG i;
     PPH_SYSINFO_SECTION section;
 
-    if (Id == IDC_RESET)
+    if (DrawItemStruct->hwndItem == RestoreSummaryControl)
     {
-        PhSipDrawRestoreSummaryPanel(DrawItemStruct->hDC, &DrawItemStruct->rcItem);
+        PhSipDrawRestoreSummaryPanel(DrawItemStruct);
         return TRUE;
     }
-    else if (Id == IDC_SEPARATOR)
+    else if (DrawItemStruct->hwndItem == SeparatorControl)
     {
-        PhSipDrawSeparator(DrawItemStruct->hDC, &DrawItemStruct->rcItem);
+        PhSipDrawSeparator(DrawItemStruct);
         return TRUE;
     }
 
@@ -848,7 +915,7 @@ VOID PhSiSetColorsGraphDrawInfo(
     )
 {
     static PH_QUEUED_LOCK lock = PH_QUEUED_LOCK_INIT;
-    static ULONG lastDpi = -1;
+    static ULONG lastDpi = ULONG_MAX;
     static HFONT iconTitleFont;
 
     // Get the appropriate fonts.
@@ -918,7 +985,7 @@ PPH_STRING PhSiSizeLabelYFunction(
 {
     ULONG64 size;
 
-    size = (ULONG64)(Value * Parameter);
+    size = (ULONG64)((DOUBLE)Value * Parameter);
 
     if (size != 0)
     {
@@ -993,17 +1060,17 @@ VOID PhSipInitializeParameters(
 
     CurrentParameters.ColorSetupFunction = PhSiSetColorsGraphDrawInfo;
 
-    originalFont = SelectObject(hdc, CurrentParameters.Font);
+    originalFont = SelectFont(hdc, CurrentParameters.Font);
     GetTextMetrics(hdc, &textMetrics);
     CurrentParameters.FontHeight = textMetrics.tmHeight;
     CurrentParameters.FontAverageWidth = textMetrics.tmAveCharWidth;
 
-    SelectObject(hdc, CurrentParameters.MediumFont);
+    SelectFont(hdc, CurrentParameters.MediumFont);
     GetTextMetrics(hdc, &textMetrics);
     CurrentParameters.MediumFontHeight = textMetrics.tmHeight;
     CurrentParameters.MediumFontAverageWidth = textMetrics.tmAveCharWidth;
 
-    SelectObject(hdc, originalFont);
+    SelectFont(hdc, originalFont);
 
     // Internal padding and other values
     CurrentParameters.PanelPadding = PH_SCALE_DPI(PH_SYSINFO_PANEL_PADDING);
@@ -1040,11 +1107,11 @@ VOID PhSipDeleteParameters(
     )
 {
     if (CurrentParameters.Font)
-        DeleteObject(CurrentParameters.Font);
+        DeleteFont(CurrentParameters.Font);
     if (CurrentParameters.MediumFont)
-        DeleteObject(CurrentParameters.MediumFont);
+        DeleteFont(CurrentParameters.MediumFont);
     if (CurrentParameters.LargeFont)
-        DeleteObject(CurrentParameters.LargeFont);
+        DeleteFont(CurrentParameters.LargeFont);
 }
 
 VOID PhSipUpdateColorParameters(
@@ -1071,9 +1138,7 @@ PPH_SYSINFO_SECTION PhSipCreateSection(
     PPH_SYSINFO_SECTION section;
     PH_GRAPH_OPTIONS options;
 
-    section = PhAllocate(sizeof(PH_SYSINFO_SECTION));
-    memset(section, 0, sizeof(PH_SYSINFO_SECTION));
-
+    section = PhAllocateZero(sizeof(PH_SYSINFO_SECTION));
     section->Name = Template->Name;
     section->Flags = Template->Flags;
     section->Callback = Template->Callback;
@@ -1100,11 +1165,11 @@ PPH_SYSINFO_SECTION PhSipCreateSection(
     options.FadeOutWidth = CurrentParameters.PanelWidth + PH_SYSINFO_FADE_ADD;
     options.DefaultCursor = LoadCursor(NULL, IDC_HAND);
     Graph_SetOptions(section->GraphHandle, &options);
-    Graph_SetTooltip(section->GraphHandle, TRUE);
+    if (PhEnableTooltipSupport) Graph_SetTooltip(section->GraphHandle, TRUE);
 
     section->PanelId = IDDYNAMIC + SectionList->Count * 2 + 2;
     section->PanelHandle = CreateWindow(
-        L"STATIC",
+        WC_STATIC,
         NULL,
         WS_CHILD | SS_OWNERDRAW | SS_NOTIFY,
         0,
@@ -1112,17 +1177,18 @@ PPH_SYSINFO_SECTION PhSipCreateSection(
         3,
         3,
         PhSipWindow,
-        (HMENU)(ULONG_PTR)section->PanelId,
+        UlongToHandle(section->PanelId),
         PhInstanceHandle,
         NULL
         );
 
-    SetProp(section->GraphHandle, PhMakeContextAtom(), section);
-    section->GraphOldWndProc = (WNDPROC)GetWindowLongPtr(section->GraphHandle, GWLP_WNDPROC);
-    SetWindowLongPtr(section->GraphHandle, GWLP_WNDPROC, (LONG_PTR)PhSipGraphHookWndProc);
+    section->GraphWindowProc = (WNDPROC)GetWindowLongPtr(section->GraphHandle, GWLP_WNDPROC);
+    section->PanelWindowProc = (WNDPROC)GetWindowLongPtr(section->PanelHandle, GWLP_WNDPROC);
 
-    SetProp(section->PanelHandle, PhMakeContextAtom(), section);
-    section->PanelOldWndProc = (WNDPROC)GetWindowLongPtr(section->PanelHandle, GWLP_WNDPROC);
+    PhSetWindowContext(section->GraphHandle, 0xF, section);
+    PhSetWindowContext(section->PanelHandle, 0xF, section);
+
+    SetWindowLongPtr(section->GraphHandle, GWLP_WNDPROC, (LONG_PTR)PhSipGraphHookWndProc);
     SetWindowLongPtr(section->PanelHandle, GWLP_WNDPROC, (LONG_PTR)PhSipPanelHookWndProc);
 
     PhAddItemList(SectionList, section);
@@ -1177,11 +1243,51 @@ PPH_SYSINFO_SECTION PhSipCreateInternalSection(
 }
 
 VOID PhSipDrawRestoreSummaryPanel(
-    _In_ HDC hdc,
-    _In_ PRECT Rect
+    _In_ PDRAWITEMSTRUCT DrawItemStruct
     )
 {
-    FillRect(hdc, Rect, GetSysColorBrush(COLOR_3DFACE));
+    HDC hdc;
+    HDC bufferDc;
+    HBITMAP bufferBitmap;
+    HBITMAP oldBufferBitmap;
+    RECT bufferRect =
+    {
+        0, 0,
+        DrawItemStruct->rcItem.right - DrawItemStruct->rcItem.left,
+        DrawItemStruct->rcItem.bottom - DrawItemStruct->rcItem.top
+    };
+
+    if (!(hdc = GetWindowDC(DrawItemStruct->hwndItem)))
+        return;
+
+    bufferDc = CreateCompatibleDC(hdc);
+    bufferBitmap = CreateCompatibleBitmap(hdc, bufferRect.right, bufferRect.bottom);
+    oldBufferBitmap = SelectBitmap(bufferDc, bufferBitmap);
+    
+    SetBkMode(bufferDc, TRANSPARENT);
+
+    if (PhEnableThemeSupport)
+    {
+        switch (PhCsGraphColorMode)
+        {
+        case 0: // New colors
+            SetTextColor(bufferDc, RGB(0x00, 0x00, 0x00));
+            SetDCBrushColor(bufferDc, RGB(0xff, 0xff, 0xff));
+            FillRect(bufferDc, &bufferRect, GetStockBrush(DC_BRUSH));
+            break;
+        case 1: // Old colors
+            SetTextColor(bufferDc, RGB(0xff, 0xff, 0xff));
+            SetDCBrushColor(bufferDc, RGB(43, 43, 43));
+            FillRect(bufferDc, &bufferRect, GetStockBrush(DC_BRUSH));
+            break;
+        }
+    }
+    else
+    {
+        SetTextColor(bufferDc, RGB(0x00, 0x00, 0x00));
+        SetDCBrushColor(bufferDc, RGB(0xff, 0xff, 0xff));
+        FillRect(bufferDc, &bufferRect, GetStockBrush(DC_BRUSH));
+    }
 
     if (RestoreSummaryControlHot || RestoreSummaryControlHasFocus)
     {
@@ -1189,37 +1295,113 @@ VOID PhSipDrawRestoreSummaryPanel(
         {
             DrawThemeBackground(
                 ThemeData,
-                hdc,
+                bufferDc,
                 TVP_TREEITEM,
                 TREIS_HOT,
-                Rect,
-                Rect
+                &bufferRect,
+                &bufferRect
                 );
         }
         else
         {
-            FillRect(hdc, Rect, GetSysColorBrush(COLOR_WINDOW));
+            FillRect(bufferDc, &bufferRect, GetSysColorBrush(COLOR_WINDOW));
         }
     }
 
-    SetTextColor(hdc, GetSysColor(COLOR_WINDOWTEXT));
-    SetBkMode(hdc, TRANSPARENT);
+    SelectFont(bufferDc, CurrentParameters.MediumFont);
+    DrawText(bufferDc, L"Back", 4, &bufferRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
 
-    SelectObject(hdc, CurrentParameters.MediumFont);
-    DrawText(hdc, L"Back", 4, Rect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+    BitBlt(
+        hdc,
+        DrawItemStruct->rcItem.left,
+        DrawItemStruct->rcItem.top,
+        DrawItemStruct->rcItem.right,
+        DrawItemStruct->rcItem.bottom,
+        bufferDc,
+        0,
+        0,
+        SRCCOPY
+        );
+
+    SelectBitmap(bufferDc, oldBufferBitmap);
+    DeleteBitmap(bufferBitmap);
+    DeleteDC(bufferDc);
+
+    ReleaseDC(DrawItemStruct->hwndItem, hdc);
 }
 
 VOID PhSipDrawSeparator(
-    _In_ HDC hdc,
-    _In_ PRECT Rect
+    _In_ PDRAWITEMSTRUCT DrawItemStruct
     )
 {
-    RECT rect;
+    HDC hdc;
+    HDC bufferDc;
+    HBITMAP bufferBitmap;
+    HBITMAP oldBufferBitmap;
+    RECT bufferRect =
+    {
+        0, 0,
+        DrawItemStruct->rcItem.right - DrawItemStruct->rcItem.left,
+        DrawItemStruct->rcItem.bottom - DrawItemStruct->rcItem.top
+    };
 
-    rect = *Rect;
-    FillRect(hdc, &rect, GetSysColorBrush(COLOR_3DHIGHLIGHT));
-    rect.left += 1;
-    FillRect(hdc, &rect, GetSysColorBrush(COLOR_3DSHADOW));
+    if (!(hdc = GetWindowDC(DrawItemStruct->hwndItem)))
+        return;
+
+    bufferDc = CreateCompatibleDC(hdc);
+    bufferBitmap = CreateCompatibleBitmap(hdc, bufferRect.right, bufferRect.bottom);
+    oldBufferBitmap = SelectBitmap(bufferDc, bufferBitmap);
+
+    SetBkMode(bufferDc, TRANSPARENT);
+
+    if (PhEnableThemeSupport)
+    {
+        switch (PhCsGraphColorMode)
+        {
+        case 0: // New colors
+            {
+                //FillRect(bufferDc, &bufferRect, GetSysColorBrush(COLOR_3DFACE));
+                //bufferRect.left += 1;
+                //F/illRect(bufferDc, &bufferRect, GetSysColorBrush(COLOR_3DSHADOW));
+                //bufferRect.left -= 1;
+            }
+            break;
+        case 1: // Old colors
+            {
+                SetDCBrushColor(bufferDc, RGB(43, 43, 43));
+                FillRect(bufferDc, &bufferRect, GetStockBrush(DC_BRUSH));
+            }
+            break;
+        }
+    }
+    else
+    {
+        //FillRect(bufferDc, &bufferRect, GetSysColorBrush(COLOR_3DHIGHLIGHT));
+        //bufferRect.left += 1;
+        //FillRect(bufferDc, &bufferRect, GetSysColorBrush(COLOR_3DSHADOW));
+        //bufferRect.left -= 1;
+
+        SetDCBrushColor(bufferDc, RGB(0xff, 0xff, 0xff));
+        FillRect(bufferDc, &bufferRect, GetStockBrush(DC_BRUSH));
+    }
+
+    BitBlt(
+        hdc,
+        DrawItemStruct->rcItem.left,
+        DrawItemStruct->rcItem.top,
+        DrawItemStruct->rcItem.right,
+        DrawItemStruct->rcItem.bottom,
+        bufferDc,
+        0,
+        0,
+        SRCCOPY
+        );
+
+    SelectBitmap(bufferDc, oldBufferBitmap);
+    DeleteBitmap(bufferBitmap);
+    DeleteDC(bufferDc);
+
+    ReleaseDC(DrawItemStruct->hwndItem, hdc);
 }
 
 VOID PhSipDrawPanel(
@@ -1231,7 +1413,48 @@ VOID PhSipDrawPanel(
     PH_SYSINFO_DRAW_PANEL sysInfoDrawPanel;
 
     if (CurrentView == SysInfoSectionView)
-        FillRect(hdc, Rect, GetSysColorBrush(COLOR_3DFACE));
+    {
+        if (PhEnableThemeSupport)
+        {
+            switch (PhCsGraphColorMode)
+            {
+            case 0: // New colors
+                SetTextColor(hdc, RGB(0x00, 0x00, 0x00));
+                SetDCBrushColor(hdc, RGB(0xff, 0xff, 0xff));
+                FillRect(hdc, Rect, GetStockBrush(DC_BRUSH));
+                break;
+            case 1: // Old colors
+                SetTextColor(hdc, RGB(0xff, 0xff, 0xff));
+                SetDCBrushColor(hdc, RGB(43, 43, 43));
+                FillRect(hdc, Rect, GetStockBrush(DC_BRUSH));
+                break;
+            }
+        }
+        else
+        {
+            SetTextColor(hdc, RGB(0x00, 0x00, 0x00));
+            SetDCBrushColor(hdc, RGB(0xff, 0xff, 0xff));
+            FillRect(hdc, Rect, GetStockBrush(DC_BRUSH));
+        }
+
+        //if (PhEnableThemeSupport)
+        //{
+        //    switch (PhCsGraphColorMode)
+        //    {
+        //    case 0: // New colors
+        //        FillRect(hdc, Rect, GetSysColorBrush(COLOR_3DFACE));
+        //        break;
+        //    case 1: // Old colors
+        //        SetDCBrushColor(hdc, RGB(30, 30, 30));
+        //        FillRect(hdc, Rect, GetStockBrush(DC_BRUSH));
+        //        break;
+        //    }
+        //}
+        //else
+        //{
+        //    FillRect(hdc, Rect, GetSysColorBrush(COLOR_3DFACE));
+        //}
+    }
 
     sysInfoDrawPanel.hdc = hdc;
     sysInfoDrawPanel.Rect = *Rect;
@@ -1268,7 +1491,21 @@ VOID PhSipDefaultDrawPanel(
 
     if (ThemeHasItemBackground)
     {
-        if (CurrentView == SysInfoSectionView)
+        if (CurrentView == SysInfoSummaryView)
+        {
+            //if (Section->GraphHot)
+            //{
+            //    DrawThemeBackground(
+            //        ThemeData,
+            //        hdc,
+            //        TVP_TREEITEM,
+            //        TREIS_HOT,
+            //        &DrawPanel->Rect,
+            //        &DrawPanel->Rect
+            //        );
+            //}
+        }
+        else if (CurrentView == SysInfoSectionView)
         {
             INT stateId;
 
@@ -1334,17 +1571,44 @@ VOID PhSipDefaultDrawPanel(
 
             if (brush)
             {
-                FillRect(hdc, &DrawPanel->Rect, brush);
+                //FillRect(hdc, &DrawPanel->Rect, brush);
             }
         }
     }
 
-    if (CurrentView == SysInfoSummaryView)
-        SetTextColor(hdc, CurrentParameters.PanelForeColor);
-    else
-        SetTextColor(hdc, GetSysColor(COLOR_WINDOWTEXT));
-
     SetBkMode(hdc, TRANSPARENT);
+
+    if (PhEnableThemeSupport)
+    {
+        switch (PhCsGraphColorMode)
+        {
+        case 0: // New colors
+            SetTextColor(hdc, RGB(0x00, 0x00, 0x00));
+            //SetDCBrushColor(hdc, RGB(0xff, 0xff, 0xff));
+            //FillRect(hdc, Rect, GetStockBrush(DC_BRUSH));
+            break;
+        case 1: // Old colors
+            SetTextColor(hdc, RGB(0xff, 0xff, 0xff));
+            //SetDCBrushColor(hdc, RGB(0xff, 0xff, 0x00));
+            //FillRect(hdc, Rect, GetStockBrush(DC_BRUSH));
+            break;
+        }
+
+        //SetTextColor(hdc, CurrentParameters.PanelForeColor);
+    }
+    else
+    {
+        SetTextColor(hdc, RGB(0x00, 0x00, 0x00));
+
+        if (CurrentView == SysInfoSummaryView)
+        {
+            SetTextColor(hdc, CurrentParameters.PanelForeColor);
+        }
+        else
+        {
+            SetTextColor(hdc, GetSysColor(COLOR_WINDOWTEXT));
+        }
+    }
 
     rect.left = CurrentParameters.SmallGraphPadding + CurrentParameters.PanelPadding;
     rect.top = CurrentParameters.PanelPadding;
@@ -1360,29 +1624,77 @@ VOID PhSipDefaultDrawPanel(
 
     if (DrawPanel->Title)
     {
-        SelectObject(hdc, CurrentParameters.MediumFont);
-        DrawText(hdc, DrawPanel->Title->Buffer, (ULONG)DrawPanel->Title->Length / 2, &rect, flags | DT_SINGLELINE);
+        SelectFont(hdc, CurrentParameters.MediumFont);
+        DrawText(hdc, DrawPanel->Title->Buffer, (ULONG)DrawPanel->Title->Length / sizeof(WCHAR), &rect, flags | DT_SINGLELINE);
     }
 
     if (DrawPanel->SubTitle)
     {
         RECT measureRect;
+        SIZE textSize;
+        LONG lineHeight;
+        LONG lineWidth;
+        LONG rectHeight;
+        LONG rectWidth;
+        LONG textHeight;
+        LONG textWidth;
 
         rect.top += CurrentParameters.MediumFontHeight + CurrentParameters.PanelPadding;
-        SelectObject(hdc, CurrentParameters.Font);
-
         measureRect = rect;
-        DrawText(hdc, DrawPanel->SubTitle->Buffer, (ULONG)DrawPanel->SubTitle->Length / 2, &measureRect, (flags & ~DT_END_ELLIPSIS) | DT_CALCRECT);
 
-        if (measureRect.right <= rect.right || !DrawPanel->SubTitleOverflow)
+        SelectFont(hdc, CurrentParameters.Font);
+        GetTextExtentPoint32(hdc, DrawPanel->SubTitle->Buffer, (ULONG)DrawPanel->SubTitle->Length / sizeof(WCHAR), &textSize);
+        DrawText(hdc, DrawPanel->SubTitle->Buffer, (ULONG)DrawPanel->SubTitle->Length / sizeof(WCHAR), &measureRect, flags | DT_CALCRECT);
+
+        lineHeight = textSize.cy;
+        lineWidth = textSize.cx;
+        rectHeight = rect.bottom - rect.top;
+        rectWidth = rect.right - rect.left;
+        textHeight = measureRect.bottom - measureRect.top;
+        textWidth = measureRect.right - measureRect.left;
+        //dprintf(
+        //    "[rectHeight: %u, rectwidth: %u] [lineHeight: %u, lineWidth: %u] [textHeight: %u, textWidth: %u]\n", 
+        //    rectHeight, rectWidth,
+        //    lineHeight, lineWidth,
+        //    textHeight, textWidth
+        //    );
+
+        if (rectHeight > lineHeight)
         {
-            // Text fits; draw normally.
-            DrawText(hdc, DrawPanel->SubTitle->Buffer, (ULONG)DrawPanel->SubTitle->Length / 2, &rect, flags);
-        }
-        else
-        {
-            // Text doesn't fit; draw the alternative text.
-            DrawText(hdc, DrawPanel->SubTitleOverflow->Buffer, (ULONG)DrawPanel->SubTitleOverflow->Length / 2, &rect, flags);
+            if (rectHeight > textHeight)
+            {
+                if (lineWidth < rectWidth || !DrawPanel->SubTitleOverflow)
+                {
+                    // Text fits; draw normally.
+                    DrawText(hdc, DrawPanel->SubTitle->Buffer, (ULONG)DrawPanel->SubTitle->Length / sizeof(WCHAR), &rect, flags);
+                }
+                else
+                {
+                    // Text doesn't fit; draw the alternative text.
+                    DrawText(hdc, DrawPanel->SubTitleOverflow->Buffer, (ULONG)DrawPanel->SubTitleOverflow->Length / sizeof(WCHAR), &rect, flags);
+                }
+            }
+            else
+            {
+                PH_STRINGREF titlePart;
+                PH_STRINGREF remainingPart;
+
+                // dmex: Multiline text doesn't fit; split the string and draw the first line.
+                if (DrawPanel->SubTitleOverflow)
+                {
+                    if (PhSplitStringRefAtChar(&DrawPanel->SubTitleOverflow->sr, '\n', &titlePart, &remainingPart))
+                        DrawText(hdc, titlePart.Buffer, (ULONG)titlePart.Length / sizeof(WCHAR), &rect, flags);
+                    else
+                        DrawText(hdc, DrawPanel->SubTitleOverflow->Buffer, (ULONG)DrawPanel->SubTitleOverflow->Length / sizeof(WCHAR), &rect, flags);
+                }
+                else
+                {
+                    if (PhSplitStringRefAtChar(&DrawPanel->SubTitle->sr, '\n', &titlePart, &remainingPart))
+                        DrawText(hdc, titlePart.Buffer, (ULONG)titlePart.Length / sizeof(WCHAR), &rect, flags);
+                    else
+                        DrawText(hdc, DrawPanel->SubTitle->Buffer, (ULONG)DrawPanel->SubTitle->Length / sizeof(WCHAR), &rect, flags);
+                }
+            }
         }
     }
 }
@@ -1391,7 +1703,6 @@ VOID PhSipLayoutSummaryView(
     VOID
     )
 {
-    RECT buttonRect;
     RECT clientRect;
     ULONG availableHeight;
     ULONG availableWidth;
@@ -1401,11 +1712,9 @@ VOID PhSipLayoutSummaryView(
     HDWP deferHandle;
     ULONG y;
 
-    GetWindowRect(GetDlgItem(PhSipWindow, IDOK), &buttonRect);
-    MapWindowPoints(NULL, PhSipWindow, (POINT *)&buttonRect, 2);
     GetClientRect(PhSipWindow, &clientRect);
 
-    availableHeight = buttonRect.top - CurrentParameters.WindowPadding * 2;
+    availableHeight = clientRect.bottom - CurrentParameters.WindowPadding * 2;
     availableWidth = clientRect.right - CurrentParameters.WindowPadding * 2;
     graphHeight = (availableHeight - CurrentParameters.GraphPadding * (SectionList->Count - 1)) / SectionList->Count;
 
@@ -1438,7 +1747,6 @@ VOID PhSipLayoutSectionView(
     VOID
     )
 {
-    RECT buttonRect;
     RECT clientRect;
     ULONG availableHeight;
     ULONG availableWidth;
@@ -1449,11 +1757,9 @@ VOID PhSipLayoutSectionView(
     ULONG y;
     ULONG containerLeft;
 
-    GetWindowRect(GetDlgItem(PhSipWindow, IDOK), &buttonRect);
-    MapWindowPoints(NULL, PhSipWindow, (POINT *)&buttonRect, 2);
     GetClientRect(PhSipWindow, &clientRect);
 
-    availableHeight = buttonRect.top - CurrentParameters.WindowPadding * 2;
+    availableHeight = clientRect.bottom - CurrentParameters.WindowPadding * 2;
     availableWidth = clientRect.right - CurrentParameters.WindowPadding * 2;
     graphHeight = (availableHeight - CurrentParameters.SmallGraphPadding * SectionList->Count) / (SectionList->Count + 1);
 
@@ -1565,7 +1871,7 @@ VOID PhSipEnterSectionView(
     oldSection = CurrentSection;
     CurrentSection = NewSection;
 
-    deferHandle = BeginDeferWindowPos(SectionList->Count + 4);
+    deferHandle = BeginDeferWindowPos(SectionList->Count + 3);
     containerDeferHandle = BeginDeferWindowPos(SectionList->Count);
 
     PhSipEnterSectionViewInner(NewSection, fromSummaryView, &deferHandle, &containerDeferHandle);
@@ -1582,7 +1888,6 @@ VOID PhSipEnterSectionView(
     deferHandle = DeferWindowPos(deferHandle, ContainerControl, NULL, 0, 0, 0, 0, SWP_SHOWWINDOW_ONLY);
     deferHandle = DeferWindowPos(deferHandle, RestoreSummaryControl, NULL, 0, 0, 0, 0, SWP_SHOWWINDOW_ONLY);
     deferHandle = DeferWindowPos(deferHandle, SeparatorControl, NULL, 0, 0, 0, 0, SWP_SHOWWINDOW_ONLY);
-    deferHandle = DeferWindowPos(deferHandle, GetDlgItem(PhSipWindow, IDC_INSTRUCTION), NULL, 0, 0, 0, 0, SWP_HIDEWINDOW_ONLY);
 
     EndDeferWindowPos(deferHandle);
     EndDeferWindowPos(containerDeferHandle);
@@ -1653,7 +1958,6 @@ VOID PhSipRestoreSummaryView(
     ShowWindow(ContainerControl, SW_HIDE);
     ShowWindow(RestoreSummaryControl, SW_HIDE);
     ShowWindow(SeparatorControl, SW_HIDE);
-    ShowWindow(GetDlgItem(PhSipWindow, IDC_INSTRUCTION), SW_SHOW);
 
     PhSipLayoutSummaryView();
 }
@@ -1678,6 +1982,8 @@ VOID PhSipCreateSectionDialog(
                 createDialog.DialogProc,
                 createDialog.Parameter
                 );
+
+            PhInitializeWindowTheme(Section->DialogHandle, PhEnableThemeSupport);
         }
     }
 }
@@ -1689,22 +1995,20 @@ LRESULT CALLBACK PhSipGraphHookWndProc(
     _In_ LPARAM lParam
     )
 {
-    WNDPROC oldWndProc;
     PPH_SYSINFO_SECTION section;
+    WNDPROC oldWndProc;
 
-    section = GetProp(hwnd, PhMakeContextAtom());
-
-    if (!section)
+    if (!(section = PhGetWindowContext(hwnd, 0xF)))
         return 0;
 
-    oldWndProc = section->GraphOldWndProc;
+    oldWndProc = section->GraphWindowProc;
 
     switch (uMsg)
     {
     case WM_DESTROY:
         {
-            RemoveProp(hwnd, PhMakeContextAtom());
             SetWindowLongPtr(hwnd, GWLP_WNDPROC, (LONG_PTR)oldWndProc);
+            PhRemoveWindowContext(hwnd, 0xF);
         }
         break;
     case WM_SETFOCUS:
@@ -1787,12 +2091,15 @@ LRESULT CALLBACK PhSipGraphHookWndProc(
             if (!(section->GraphHot || section->PanelHot))
             {
                 section->GraphHot = TRUE;
-                InvalidateRect(section->PanelHandle, NULL, TRUE);
             }
             else
             {
                 section->GraphHot = TRUE;
             }
+
+            Graph_Draw(section->GraphHandle);
+            InvalidateRect(section->GraphHandle, NULL, TRUE);
+            InvalidateRect(section->PanelHandle, NULL, TRUE);
         }
         break;
     case WM_MOUSELEAVE:
@@ -1851,13 +2158,13 @@ LRESULT CALLBACK PhSipPanelHookWndProc(
     _In_ LPARAM lParam
     )
 {
-    WNDPROC oldWndProc;
     PPH_SYSINFO_SECTION section;
+    WNDPROC oldWndProc;
 
-    section = GetProp(hwnd, PhMakeContextAtom());
+    section = PhGetWindowContext(hwnd, 0xF);
 
     if (section)
-        oldWndProc = section->PanelOldWndProc;
+        oldWndProc = section->PanelWindowProc;
     else
         oldWndProc = RestoreSummaryControlOldWndProc;
 
@@ -1865,8 +2172,8 @@ LRESULT CALLBACK PhSipPanelHookWndProc(
     {
     case WM_DESTROY:
         {
-            RemoveProp(hwnd, PhMakeContextAtom());
             SetWindowLongPtr(hwnd, GWLP_WNDPROC, (LONG_PTR)oldWndProc);
+            PhRemoveWindowContext(hwnd, 0xF);
         }
         break;
     case WM_SETFOCUS:
@@ -1984,7 +2291,7 @@ VOID PhSipUpdateThemeData(
         ThemeData = NULL;
     }
 
-    ThemeData = OpenThemeData(PhSipWindow, L"TREEVIEW");
+    ThemeData = OpenThemeData(PhSipWindow, VSCLASS_TREEVIEW);
 
     if (ThemeData)
     {
@@ -1994,15 +2301,6 @@ VOID PhSipUpdateThemeData(
     {
         ThemeHasItemBackground = FALSE;
     }
-}
-
-VOID PhSipSetAlwaysOnTop(
-    VOID
-    )
-{
-    SetFocus(PhSipWindow); // HACK - SetWindowPos doesn't work properly without this
-    SetWindowPos(PhSipWindow, AlwaysOnTop ? HWND_TOPMOST : HWND_NOTOPMOST, 0, 0, 0, 0,
-        SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE);
 }
 
 VOID PhSipSaveWindowState(

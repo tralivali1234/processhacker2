@@ -21,9 +21,10 @@
  */
 
 #include <phapp.h>
-
+#include <phplug.h>
+#include <phsettings.h>
 #include <emenu.h>
-
+#include <settings.h>
 #include <actions.h>
 #include <phsvccl.h>
 #include <procprv.h>
@@ -55,13 +56,15 @@ VOID PhShowMemoryListsDialog(
             ParentWindowHandle,
             PhpMemoryListsDlgProc
             );
-        RegisterDialog(PhMemoryListsWindowHandle);
+
+        if (RegisterDialog)
+            RegisterDialog(PhMemoryListsWindowHandle);
         UnregisterDialogFunction = UnregisterDialog;
     }
 
     if (!IsWindowVisible(PhMemoryListsWindowHandle))
         ShowWindow(PhMemoryListsWindowHandle, SW_SHOW);
-    else if (IsIconic(PhMemoryListsWindowHandle))
+    else if (IsMinimized(PhMemoryListsWindowHandle))
         ShowWindow(PhMemoryListsWindowHandle, SW_RESTORE);
     else
         SetForegroundWindow(PhMemoryListsWindowHandle);
@@ -101,61 +104,61 @@ static VOID PhpUpdateMemoryListInfo(
             repurposedPageCount += memoryListInfo.RepurposedPagesByPriority[i];
         }
 
-        SetDlgItemText(hwndDlg, IDC_ZLISTZEROED_V, PhaFormatSize((ULONG64)memoryListInfo.ZeroPageCount * PAGE_SIZE, -1)->Buffer);
-        SetDlgItemText(hwndDlg, IDC_ZLISTFREE_V, PhaFormatSize((ULONG64)memoryListInfo.FreePageCount * PAGE_SIZE, -1)->Buffer);
-        SetDlgItemText(hwndDlg, IDC_ZLISTMODIFIED_V, PhaFormatSize((ULONG64)memoryListInfo.ModifiedPageCount * PAGE_SIZE, -1)->Buffer);
-        SetDlgItemText(hwndDlg, IDC_ZLISTMODIFIEDNOWRITE_V, PhaFormatSize((ULONG64)memoryListInfo.ModifiedNoWritePageCount * PAGE_SIZE, -1)->Buffer);
-        SetDlgItemText(hwndDlg, IDC_ZLISTBAD_V, PhaFormatSize((ULONG64)memoryListInfo.BadPageCount * PAGE_SIZE, -1)->Buffer);
-        SetDlgItemText(hwndDlg, IDC_ZLISTSTANDBY_V, PhaFormatSize((ULONG64)standbyPageCount * PAGE_SIZE, -1)->Buffer);
-        SetDlgItemText(hwndDlg, IDC_ZLISTSTANDBY0_V, PhaFormatSize((ULONG64)memoryListInfo.PageCountByPriority[0] * PAGE_SIZE, -1)->Buffer);
-        SetDlgItemText(hwndDlg, IDC_ZLISTSTANDBY1_V, PhaFormatSize((ULONG64)memoryListInfo.PageCountByPriority[1] * PAGE_SIZE, -1)->Buffer);
-        SetDlgItemText(hwndDlg, IDC_ZLISTSTANDBY2_V, PhaFormatSize((ULONG64)memoryListInfo.PageCountByPriority[2] * PAGE_SIZE, -1)->Buffer);
-        SetDlgItemText(hwndDlg, IDC_ZLISTSTANDBY3_V, PhaFormatSize((ULONG64)memoryListInfo.PageCountByPriority[3] * PAGE_SIZE, -1)->Buffer);
-        SetDlgItemText(hwndDlg, IDC_ZLISTSTANDBY4_V, PhaFormatSize((ULONG64)memoryListInfo.PageCountByPriority[4] * PAGE_SIZE, -1)->Buffer);
-        SetDlgItemText(hwndDlg, IDC_ZLISTSTANDBY5_V, PhaFormatSize((ULONG64)memoryListInfo.PageCountByPriority[5] * PAGE_SIZE, -1)->Buffer);
-        SetDlgItemText(hwndDlg, IDC_ZLISTSTANDBY6_V, PhaFormatSize((ULONG64)memoryListInfo.PageCountByPriority[6] * PAGE_SIZE, -1)->Buffer);
-        SetDlgItemText(hwndDlg, IDC_ZLISTSTANDBY7_V, PhaFormatSize((ULONG64)memoryListInfo.PageCountByPriority[7] * PAGE_SIZE, -1)->Buffer);
-        SetDlgItemText(hwndDlg, IDC_ZLISTREPURPOSED_V, PhaFormatSize((ULONG64)repurposedPageCount * PAGE_SIZE, -1)->Buffer);
-        SetDlgItemText(hwndDlg, IDC_ZLISTREPURPOSED0_V, PhaFormatSize((ULONG64)memoryListInfo.RepurposedPagesByPriority[0] * PAGE_SIZE, -1)->Buffer);
-        SetDlgItemText(hwndDlg, IDC_ZLISTREPURPOSED1_V, PhaFormatSize((ULONG64)memoryListInfo.RepurposedPagesByPriority[1] * PAGE_SIZE, -1)->Buffer);
-        SetDlgItemText(hwndDlg, IDC_ZLISTREPURPOSED2_V, PhaFormatSize((ULONG64)memoryListInfo.RepurposedPagesByPriority[2] * PAGE_SIZE, -1)->Buffer);
-        SetDlgItemText(hwndDlg, IDC_ZLISTREPURPOSED3_V, PhaFormatSize((ULONG64)memoryListInfo.RepurposedPagesByPriority[3] * PAGE_SIZE, -1)->Buffer);
-        SetDlgItemText(hwndDlg, IDC_ZLISTREPURPOSED4_V, PhaFormatSize((ULONG64)memoryListInfo.RepurposedPagesByPriority[4] * PAGE_SIZE, -1)->Buffer);
-        SetDlgItemText(hwndDlg, IDC_ZLISTREPURPOSED5_V, PhaFormatSize((ULONG64)memoryListInfo.RepurposedPagesByPriority[5] * PAGE_SIZE, -1)->Buffer);
-        SetDlgItemText(hwndDlg, IDC_ZLISTREPURPOSED6_V, PhaFormatSize((ULONG64)memoryListInfo.RepurposedPagesByPriority[6] * PAGE_SIZE, -1)->Buffer);
-        SetDlgItemText(hwndDlg, IDC_ZLISTREPURPOSED7_V, PhaFormatSize((ULONG64)memoryListInfo.RepurposedPagesByPriority[7] * PAGE_SIZE, -1)->Buffer);
+        PhSetDialogItemText(hwndDlg, IDC_ZLISTZEROED_V, PhaFormatSize((ULONG64)memoryListInfo.ZeroPageCount * PAGE_SIZE, ULONG_MAX)->Buffer);
+        PhSetDialogItemText(hwndDlg, IDC_ZLISTFREE_V, PhaFormatSize((ULONG64)memoryListInfo.FreePageCount * PAGE_SIZE, ULONG_MAX)->Buffer);
+        PhSetDialogItemText(hwndDlg, IDC_ZLISTMODIFIED_V, PhaFormatSize((ULONG64)memoryListInfo.ModifiedPageCount * PAGE_SIZE, ULONG_MAX)->Buffer);
+        PhSetDialogItemText(hwndDlg, IDC_ZLISTMODIFIEDNOWRITE_V, PhaFormatSize((ULONG64)memoryListInfo.ModifiedNoWritePageCount * PAGE_SIZE, ULONG_MAX)->Buffer);
+        PhSetDialogItemText(hwndDlg, IDC_ZLISTBAD_V, PhaFormatSize((ULONG64)memoryListInfo.BadPageCount * PAGE_SIZE, ULONG_MAX)->Buffer);
+        PhSetDialogItemText(hwndDlg, IDC_ZLISTSTANDBY_V, PhaFormatSize((ULONG64)standbyPageCount * PAGE_SIZE, ULONG_MAX)->Buffer);
+        PhSetDialogItemText(hwndDlg, IDC_ZLISTSTANDBY0_V, PhaFormatSize((ULONG64)memoryListInfo.PageCountByPriority[0] * PAGE_SIZE, ULONG_MAX)->Buffer);
+        PhSetDialogItemText(hwndDlg, IDC_ZLISTSTANDBY1_V, PhaFormatSize((ULONG64)memoryListInfo.PageCountByPriority[1] * PAGE_SIZE, ULONG_MAX)->Buffer);
+        PhSetDialogItemText(hwndDlg, IDC_ZLISTSTANDBY2_V, PhaFormatSize((ULONG64)memoryListInfo.PageCountByPriority[2] * PAGE_SIZE, ULONG_MAX)->Buffer);
+        PhSetDialogItemText(hwndDlg, IDC_ZLISTSTANDBY3_V, PhaFormatSize((ULONG64)memoryListInfo.PageCountByPriority[3] * PAGE_SIZE, ULONG_MAX)->Buffer);
+        PhSetDialogItemText(hwndDlg, IDC_ZLISTSTANDBY4_V, PhaFormatSize((ULONG64)memoryListInfo.PageCountByPriority[4] * PAGE_SIZE, ULONG_MAX)->Buffer);
+        PhSetDialogItemText(hwndDlg, IDC_ZLISTSTANDBY5_V, PhaFormatSize((ULONG64)memoryListInfo.PageCountByPriority[5] * PAGE_SIZE, ULONG_MAX)->Buffer);
+        PhSetDialogItemText(hwndDlg, IDC_ZLISTSTANDBY6_V, PhaFormatSize((ULONG64)memoryListInfo.PageCountByPriority[6] * PAGE_SIZE, ULONG_MAX)->Buffer);
+        PhSetDialogItemText(hwndDlg, IDC_ZLISTSTANDBY7_V, PhaFormatSize((ULONG64)memoryListInfo.PageCountByPriority[7] * PAGE_SIZE, ULONG_MAX)->Buffer);
+        PhSetDialogItemText(hwndDlg, IDC_ZLISTREPURPOSED_V, PhaFormatSize((ULONG64)repurposedPageCount * PAGE_SIZE, ULONG_MAX)->Buffer);
+        PhSetDialogItemText(hwndDlg, IDC_ZLISTREPURPOSED0_V, PhaFormatSize((ULONG64)memoryListInfo.RepurposedPagesByPriority[0] * PAGE_SIZE, ULONG_MAX)->Buffer);
+        PhSetDialogItemText(hwndDlg, IDC_ZLISTREPURPOSED1_V, PhaFormatSize((ULONG64)memoryListInfo.RepurposedPagesByPriority[1] * PAGE_SIZE, ULONG_MAX)->Buffer);
+        PhSetDialogItemText(hwndDlg, IDC_ZLISTREPURPOSED2_V, PhaFormatSize((ULONG64)memoryListInfo.RepurposedPagesByPriority[2] * PAGE_SIZE, ULONG_MAX)->Buffer);
+        PhSetDialogItemText(hwndDlg, IDC_ZLISTREPURPOSED3_V, PhaFormatSize((ULONG64)memoryListInfo.RepurposedPagesByPriority[3] * PAGE_SIZE, ULONG_MAX)->Buffer);
+        PhSetDialogItemText(hwndDlg, IDC_ZLISTREPURPOSED4_V, PhaFormatSize((ULONG64)memoryListInfo.RepurposedPagesByPriority[4] * PAGE_SIZE, ULONG_MAX)->Buffer);
+        PhSetDialogItemText(hwndDlg, IDC_ZLISTREPURPOSED5_V, PhaFormatSize((ULONG64)memoryListInfo.RepurposedPagesByPriority[5] * PAGE_SIZE, ULONG_MAX)->Buffer);
+        PhSetDialogItemText(hwndDlg, IDC_ZLISTREPURPOSED6_V, PhaFormatSize((ULONG64)memoryListInfo.RepurposedPagesByPriority[6] * PAGE_SIZE, ULONG_MAX)->Buffer);
+        PhSetDialogItemText(hwndDlg, IDC_ZLISTREPURPOSED7_V, PhaFormatSize((ULONG64)memoryListInfo.RepurposedPagesByPriority[7] * PAGE_SIZE, ULONG_MAX)->Buffer);
 
         if (WindowsVersion >= WINDOWS_8)
-            SetDlgItemText(hwndDlg, IDC_ZLISTMODIFIEDPAGEFILE_V, PhaFormatSize((ULONG64)memoryListInfo.ModifiedPageCountPageFile * PAGE_SIZE, -1)->Buffer);
+            PhSetDialogItemText(hwndDlg, IDC_ZLISTMODIFIEDPAGEFILE_V, PhaFormatSize((ULONG64)memoryListInfo.ModifiedPageCountPageFile * PAGE_SIZE, ULONG_MAX)->Buffer);
         else
-            SetDlgItemText(hwndDlg, IDC_ZLISTMODIFIEDPAGEFILE_V, L"N/A");
+            PhSetDialogItemText(hwndDlg, IDC_ZLISTMODIFIEDPAGEFILE_V, L"N/A");
     }
     else
     {
-        SetDlgItemText(hwndDlg, IDC_ZLISTZEROED_V, L"Unknown");
-        SetDlgItemText(hwndDlg, IDC_ZLISTFREE_V, L"Unknown");
-        SetDlgItemText(hwndDlg, IDC_ZLISTMODIFIED_V, L"Unknown");
-        SetDlgItemText(hwndDlg, IDC_ZLISTMODIFIEDNOWRITE_V, L"Unknown");
-        SetDlgItemText(hwndDlg, IDC_ZLISTMODIFIEDPAGEFILE_V, L"Unknown");
-        SetDlgItemText(hwndDlg, IDC_ZLISTBAD_V, L"Unknown");
-        SetDlgItemText(hwndDlg, IDC_ZLISTSTANDBY_V, L"Unknown");
-        SetDlgItemText(hwndDlg, IDC_ZLISTSTANDBY0_V, L"Unknown");
-        SetDlgItemText(hwndDlg, IDC_ZLISTSTANDBY1_V, L"Unknown");
-        SetDlgItemText(hwndDlg, IDC_ZLISTSTANDBY2_V, L"Unknown");
-        SetDlgItemText(hwndDlg, IDC_ZLISTSTANDBY3_V, L"Unknown");
-        SetDlgItemText(hwndDlg, IDC_ZLISTSTANDBY4_V, L"Unknown");
-        SetDlgItemText(hwndDlg, IDC_ZLISTSTANDBY5_V, L"Unknown");
-        SetDlgItemText(hwndDlg, IDC_ZLISTSTANDBY6_V, L"Unknown");
-        SetDlgItemText(hwndDlg, IDC_ZLISTSTANDBY7_V, L"Unknown");
-        SetDlgItemText(hwndDlg, IDC_ZLISTREPURPOSED_V, L"Unknown");
-        SetDlgItemText(hwndDlg, IDC_ZLISTREPURPOSED0_V, L"Unknown");
-        SetDlgItemText(hwndDlg, IDC_ZLISTREPURPOSED1_V, L"Unknown");
-        SetDlgItemText(hwndDlg, IDC_ZLISTREPURPOSED2_V, L"Unknown");
-        SetDlgItemText(hwndDlg, IDC_ZLISTREPURPOSED3_V, L"Unknown");
-        SetDlgItemText(hwndDlg, IDC_ZLISTREPURPOSED4_V, L"Unknown");
-        SetDlgItemText(hwndDlg, IDC_ZLISTREPURPOSED5_V, L"Unknown");
-        SetDlgItemText(hwndDlg, IDC_ZLISTREPURPOSED6_V, L"Unknown");
-        SetDlgItemText(hwndDlg, IDC_ZLISTREPURPOSED7_V, L"Unknown");
+        PhSetDialogItemText(hwndDlg, IDC_ZLISTZEROED_V, L"Unknown");
+        PhSetDialogItemText(hwndDlg, IDC_ZLISTFREE_V, L"Unknown");
+        PhSetDialogItemText(hwndDlg, IDC_ZLISTMODIFIED_V, L"Unknown");
+        PhSetDialogItemText(hwndDlg, IDC_ZLISTMODIFIEDNOWRITE_V, L"Unknown");
+        PhSetDialogItemText(hwndDlg, IDC_ZLISTMODIFIEDPAGEFILE_V, L"Unknown");
+        PhSetDialogItemText(hwndDlg, IDC_ZLISTBAD_V, L"Unknown");
+        PhSetDialogItemText(hwndDlg, IDC_ZLISTSTANDBY_V, L"Unknown");
+        PhSetDialogItemText(hwndDlg, IDC_ZLISTSTANDBY0_V, L"Unknown");
+        PhSetDialogItemText(hwndDlg, IDC_ZLISTSTANDBY1_V, L"Unknown");
+        PhSetDialogItemText(hwndDlg, IDC_ZLISTSTANDBY2_V, L"Unknown");
+        PhSetDialogItemText(hwndDlg, IDC_ZLISTSTANDBY3_V, L"Unknown");
+        PhSetDialogItemText(hwndDlg, IDC_ZLISTSTANDBY4_V, L"Unknown");
+        PhSetDialogItemText(hwndDlg, IDC_ZLISTSTANDBY5_V, L"Unknown");
+        PhSetDialogItemText(hwndDlg, IDC_ZLISTSTANDBY6_V, L"Unknown");
+        PhSetDialogItemText(hwndDlg, IDC_ZLISTSTANDBY7_V, L"Unknown");
+        PhSetDialogItemText(hwndDlg, IDC_ZLISTREPURPOSED_V, L"Unknown");
+        PhSetDialogItemText(hwndDlg, IDC_ZLISTREPURPOSED0_V, L"Unknown");
+        PhSetDialogItemText(hwndDlg, IDC_ZLISTREPURPOSED1_V, L"Unknown");
+        PhSetDialogItemText(hwndDlg, IDC_ZLISTREPURPOSED2_V, L"Unknown");
+        PhSetDialogItemText(hwndDlg, IDC_ZLISTREPURPOSED3_V, L"Unknown");
+        PhSetDialogItemText(hwndDlg, IDC_ZLISTREPURPOSED4_V, L"Unknown");
+        PhSetDialogItemText(hwndDlg, IDC_ZLISTREPURPOSED5_V, L"Unknown");
+        PhSetDialogItemText(hwndDlg, IDC_ZLISTREPURPOSED6_V, L"Unknown");
+        PhSetDialogItemText(hwndDlg, IDC_ZLISTREPURPOSED7_V, L"Unknown");
     }
 }
 
@@ -170,11 +173,21 @@ INT_PTR CALLBACK PhpMemoryListsDlgProc(
     {
     case WM_INITDIALOG:
         {
-            PhRegisterCallback(&PhProcessesUpdatedEvent, ProcessesUpdatedCallback, NULL, &ProcessesUpdatedRegistration);
+            HANDLE tokenHandle;
+
+            if (NT_SUCCESS(PhOpenProcessToken(NtCurrentProcess(), TOKEN_ADJUST_PRIVILEGES, &tokenHandle)))
+            {
+                PhSetTokenPrivilege2(tokenHandle, SE_PROF_SINGLE_PROCESS_PRIVILEGE, SE_PRIVILEGE_ENABLED);
+                NtClose(tokenHandle);
+            }
+
+            PhRegisterCallback(PhGetGeneralCallback(GeneralCallbackProcessProviderUpdatedEvent), ProcessesUpdatedCallback, NULL, &ProcessesUpdatedRegistration);
             PhpUpdateMemoryListInfo(hwndDlg);
 
             PhLoadWindowPlacementFromSetting(L"MemoryListsWindowPosition", NULL, hwndDlg);
             PhRegisterDialog(hwndDlg);
+
+            PhInitializeWindowTheme(hwndDlg, PhEnableThemeSupport);
         }
         break;
     case WM_DESTROY:
@@ -182,15 +195,16 @@ INT_PTR CALLBACK PhpMemoryListsDlgProc(
             PhUnregisterDialog(hwndDlg);
             PhSaveWindowPlacementToSetting(L"MemoryListsWindowPosition", NULL, hwndDlg);
 
-            PhUnregisterCallback(&PhProcessesUpdatedEvent, &ProcessesUpdatedRegistration);
+            PhUnregisterCallback(PhGetGeneralCallback(GeneralCallbackProcessProviderUpdatedEvent), &ProcessesUpdatedRegistration);
 
-            UnregisterDialogFunction(hwndDlg);
+            if (UnregisterDialogFunction)
+                UnregisterDialogFunction(hwndDlg);
             PhMemoryListsWindowHandle = NULL;
         }
         break;
     case WM_COMMAND:
         {
-            switch (LOWORD(wParam))
+            switch (GET_WM_COMMAND_ID(wParam, lParam))
             {
             case IDCANCEL:
             case IDOK:
@@ -202,10 +216,14 @@ INT_PTR CALLBACK PhpMemoryListsDlgProc(
                     RECT buttonRect;
                     POINT point;
                     PPH_EMENU_ITEM selectedItem;
-                    SYSTEM_MEMORY_LIST_COMMAND command = -1;
+                    SYSTEM_MEMORY_LIST_COMMAND command = ULONG_MAX;
 
                     menu = PhCreateEMenu();
-                    PhLoadResourceEMenuItem(menu, PhInstanceHandle, MAKEINTRESOURCE(IDR_EMPTYMEMLISTS), 0);
+                    PhInsertEMenuItem(menu, PhCreateEMenuItem(0, ID_EMPTY_COMBINEMEMORYLISTS, L"&Combine memory lists", NULL, NULL), ULONG_MAX);
+                    PhInsertEMenuItem(menu, PhCreateEMenuItem(0, ID_EMPTY_EMPTYWORKINGSETS, L"Empty &working sets", NULL, NULL), ULONG_MAX);
+                    PhInsertEMenuItem(menu, PhCreateEMenuItem(0, ID_EMPTY_EMPTYMODIFIEDPAGELIST, L"Empty &modified page list", NULL, NULL), ULONG_MAX);
+                    PhInsertEMenuItem(menu, PhCreateEMenuItem(0, ID_EMPTY_EMPTYSTANDBYLIST, L"Empty &standby list", NULL, NULL), ULONG_MAX);
+                    PhInsertEMenuItem(menu, PhCreateEMenuItem(0, ID_EMPTY_EMPTYPRIORITY0STANDBYLIST, L"Empty &priority 0 standby list", NULL, NULL), ULONG_MAX);
 
                     GetClientRect(GetDlgItem(hwndDlg, IDC_EMPTY), &buttonRect);
                     point.x = 0;
@@ -231,10 +249,37 @@ INT_PTR CALLBACK PhpMemoryListsDlgProc(
                         case ID_EMPTY_EMPTYPRIORITY0STANDBYLIST:
                             command = MemoryPurgeLowPriorityStandbyList;
                             break;
+                        case ID_EMPTY_COMBINEMEMORYLISTS:
+                            {
+                                NTSTATUS status;
+                                MEMORY_COMBINE_INFORMATION_EX combineInfo = { 0 };
+
+                                status = NtSetSystemInformation(
+                                    SystemCombinePhysicalMemoryInformation, 
+                                    &combineInfo, 
+                                    sizeof(MEMORY_COMBINE_INFORMATION_EX)
+                                    );
+
+                                if (NT_SUCCESS(status))
+                                {
+                                    PhShowInformation2(
+                                        hwndDlg,
+                                        L"Memory pages combined",
+                                        L"%s (%llu pages)",
+                                        PhaFormatSize(combineInfo.PagesCombined * PAGE_SIZE, -1)->Buffer,
+                                        combineInfo.PagesCombined
+                                        );
+                                }
+                                else
+                                {
+                                    PhShowStatus(hwndDlg, L"Unable to combine memory pages", status, 0);
+                                }
+                            }
+                            break;
                         }
                     }
 
-                    if (command != -1)
+                    if (command != ULONG_MAX)
                     {
                         NTSTATUS status;
 

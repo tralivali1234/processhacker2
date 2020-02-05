@@ -1,6 +1,7 @@
 #ifndef PH_ACTIONS_H
 #define PH_ACTIONS_H
 
+#define PH_KPH_ERROR_TITLE (L"KProcessHacker could not be loaded.")
 #define PH_KPH_ERROR_MESSAGE (L"KProcessHacker does not support your operating system " \
     L"or could not be loaded. Make sure Process Hacker is running " \
     L"with administrative privileges.")
@@ -183,6 +184,14 @@ PhUiSetVirtualizationProcess(
 PHAPPAPI
 BOOLEAN
 NTAPI
+PhUiSetCriticalProcess(
+    _In_ HWND WindowHandle,
+    _In_ PPH_PROCESS_ITEM Process
+    );
+
+PHAPPAPI
+BOOLEAN
+NTAPI
 PhUiDetachFromDebuggerProcess(
     _In_ HWND hWnd,
     _In_ PPH_PROCESS_ITEM Process
@@ -191,7 +200,7 @@ PhUiDetachFromDebuggerProcess(
 PHAPPAPI
 BOOLEAN
 NTAPI
-PhUiInjectDllProcess(
+PhUiLoadDllProcess(
     _In_ HWND hWnd,
     _In_ PPH_PROCESS_ITEM Process
     );

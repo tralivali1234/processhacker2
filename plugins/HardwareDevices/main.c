@@ -45,6 +45,8 @@ VOID NTAPI LoadCallback(
     _In_opt_ PVOID Context
     )
 {
+    HdPropInitialization();
+
     DiskDrivesInitialize();
     NetAdaptersInitialize();
 
@@ -65,36 +67,26 @@ VOID NTAPI ShowOptionsCallback(
     _In_opt_ PVOID Context
     )
 {
-    PROPSHEETHEADER propSheetHeader = { sizeof(propSheetHeader) };
-    PROPSHEETPAGE propSheetPage;
-    HPROPSHEETPAGE pages[2];
+    PPH_PLUGIN_OPTIONS_POINTERS optionsEntry = (PPH_PLUGIN_OPTIONS_POINTERS)Parameter;
 
-    propSheetHeader.dwFlags =
-        PSH_NOAPPLYNOW |
-        PSH_NOCONTEXTHELP;
-    propSheetHeader.hwndParent = (HWND)Parameter;
-    propSheetHeader.pszCaption = L"Hardware Devices Plugin";
-    propSheetHeader.nPages = 0;
-    propSheetHeader.nStartPage = 0;
-    propSheetHeader.phpage = pages;
+    if (!optionsEntry)
+        return;
 
-    // Disk Drives
-    memset(&propSheetPage, 0, sizeof(PROPSHEETPAGE));
-    propSheetPage.dwSize = sizeof(PROPSHEETPAGE);
-    propSheetPage.hInstance = PluginInstance->DllBase;
-    propSheetPage.pszTemplate = MAKEINTRESOURCE(IDD_DISKDRIVE_OPTIONS);
-    propSheetPage.pfnDlgProc = DiskDriveOptionsDlgProc;
-    pages[propSheetHeader.nPages++] = CreatePropertySheetPage(&propSheetPage);
+    optionsEntry->CreateSection(
+        L"Disk Drives",
+        PluginInstance->DllBase,
+        MAKEINTRESOURCE(IDD_DISKDRIVE_OPTIONS),
+        DiskDriveOptionsDlgProc,
+        NULL
+        );
 
-    // Network Adapters
-    memset(&propSheetPage, 0, sizeof(PROPSHEETPAGE));
-    propSheetPage.dwSize = sizeof(PROPSHEETPAGE);
-    propSheetPage.hInstance = PluginInstance->DllBase;
-    propSheetPage.pszTemplate = MAKEINTRESOURCE(IDD_NETADAPTER_OPTIONS);
-    propSheetPage.pfnDlgProc = NetworkAdapterOptionsDlgProc;
-    pages[propSheetHeader.nPages++] = CreatePropertySheetPage(&propSheetPage);
-
-    PhModalPropertySheet(&propSheetHeader);
+    optionsEntry->CreateSection(
+        L"Network Adapters",
+        PluginInstance->DllBase,
+        MAKEINTRESOURCE(IDD_NETADAPTER_OPTIONS),
+        NetworkAdapterOptionsDlgProc,
+        NULL
+        );
 }
 
 VOID NTAPI MainWindowShowingCallback(
@@ -120,6 +112,9 @@ VOID NTAPI SystemInformationInitializingCallback(
     )
 {
     PPH_PLUGIN_SYSINFO_POINTERS pluginEntry = (PPH_PLUGIN_SYSINFO_POINTERS)Parameter;
+
+    if (!pluginEntry)
+        return;
 
     // Disk Drives
 
@@ -170,72 +165,87 @@ PPH_STRING TrimString(
     return PhCreateString2(&sr);
 }
 
-INT AddListViewGroup(
-    _In_ HWND ListViewHandle,
-    _In_ INT GroupId,
-    _In_ PWSTR Text
+BOOLEAN HardwareDeviceEnableDisable(
+    _In_ HWND ParentWindow,
+    _In_ PPH_STRING DeviceInstance, 
+    _In_ BOOLEAN Enable
     )
 {
-    LVGROUP group;
+    CONFIGRET result;
+    DEVINST deviceInstanceHandle;
 
-    memset(&group, 0, sizeof(LVGROUP));
-    group.cbSize = sizeof(LVGROUP);
-    group.mask = LVGF_HEADER | LVGF_ALIGN | LVGF_STATE | LVGF_GROUPID;
-    group.uAlign = LVGA_HEADER_LEFT;
-    group.state = LVGS_COLLAPSIBLE;
-    group.iGroupId = GroupId;
-    group.pszHeader = Text;
+    result = CM_Locate_DevNode(
+        &deviceInstanceHandle,
+        DeviceInstance->Buffer,
+        CM_LOCATE_DEVNODE_PHANTOM
+        );
 
-    return (INT)ListView_InsertGroup(ListViewHandle, MAXINT, &group);
-}
-
-INT AddListViewItemGroupId(
-    _In_ HWND ListViewHandle,
-    _In_ INT GroupId,
-    _In_ INT Index,
-    _In_ PWSTR Text,
-    _In_opt_ PVOID Param
-    )
-{
-    LVITEM item;
-
-    item.mask = LVIF_TEXT | LVIF_GROUPID;
-    item.iItem = Index;
-    item.iSubItem = 0;
-    item.pszText = Text;
-    item.iGroupId = GroupId;
-
-    if (Param)
+    if (result != CR_SUCCESS) 
     {
-        item.mask |= LVIF_PARAM;
-        item.lParam = (LPARAM)Param;
+        PhShowStatus(ParentWindow, L"Failed to change the device state.", 0, CM_MapCrToWin32Err(result, ERROR_INVALID_HANDLE_STATE));
+        return FALSE;
     }
 
-    return ListView_InsertItem(ListViewHandle, &item);
-}
+    if (Enable)
+        result = CM_Enable_DevInst(deviceInstanceHandle, 0); // CM_DISABLE_PERSIST 
+    else
+        result = CM_Disable_DevInst(deviceInstanceHandle, 0); // CM_DISABLE_PERSIST 
 
-ULONG64 QueryRegistryUlong64(
-    _In_ HANDLE KeyHandle,
-    _In_ PWSTR ValueName
-    )
-{
-    ULONG64 value = 0;
-    PH_STRINGREF valueName;
-    PKEY_VALUE_PARTIAL_INFORMATION buffer;
-
-    PhInitializeStringRef(&valueName, ValueName);
-
-    if (NT_SUCCESS(PhQueryValueKey(KeyHandle, &valueName, KeyValuePartialInformation, &buffer)))
+    if (result != CR_SUCCESS)
     {
-        if (buffer->Type == REG_DWORD || buffer->Type == REG_QWORD)
-        {
-            value = *(ULONG64*)buffer->Data;
-        }
-
-        PhFree(buffer);
+        PhShowStatus(ParentWindow, L"Failed to change the device state.", 0, CM_MapCrToWin32Err(result, ERROR_INVALID_HANDLE_STATE));
+        return FALSE;
     }
 
-    return value;
+    return TRUE;
+}
+
+BOOLEAN HardwareDeviceRestart(
+    _In_ HWND ParentWindow,
+    _In_ PPH_STRING DeviceInstance
+    )
+{
+    CONFIGRET result;
+    DEVINST deviceInstanceHandle;
+
+    result = CM_Locate_DevNode(
+        &deviceInstanceHandle,
+        DeviceInstance->Buffer,
+        CM_LOCATE_DEVNODE_PHANTOM
+        );
+
+    if (result != CR_SUCCESS)
+    {
+        PhShowStatus(ParentWindow, L"Failed to restart the device.", 0, CM_MapCrToWin32Err(result, ERROR_UNKNOWN_PROPERTY));
+        return FALSE;
+    }
+
+    result = CM_Query_And_Remove_SubTree(
+        deviceInstanceHandle,
+        NULL,
+        NULL,
+        0,
+        CM_REMOVE_NO_RESTART
+        );
+
+    if (result != CR_SUCCESS)
+    {
+        PhShowStatus(ParentWindow, L"Failed to restart the device.", 0, CM_MapCrToWin32Err(result, ERROR_UNKNOWN_PROPERTY));
+        return FALSE;
+    }
+
+    result = CM_Setup_DevInst(
+        deviceInstanceHandle,
+        CM_SETUP_DEVNODE_READY
+        );
+
+    if (result != CR_SUCCESS)
+    {
+        PhShowStatus(ParentWindow, L"Failed to restart the device.", 0, CM_MapCrToWin32Err(result, ERROR_UNKNOWN_PROPERTY));
+        return FALSE;
+    }
+
+    return TRUE;
 }
 
 VOID ShowDeviceMenu(
@@ -250,25 +260,33 @@ VOID ShowDeviceMenu(
     GetCursorPos(&cursorPos);
 
     menu = PhCreateEMenu();
-    //PhInsertEMenuItem(menu, PhCreateEMenuItem(0, 0, L"Enable", NULL, NULL), -1);
-    //PhInsertEMenuItem(menu, PhCreateEMenuItem(0, 1, L"Disable", NULL, NULL), -1);
-    //PhInsertEMenuItem(menu, PhCreateEMenuItem(PH_EMENU_SEPARATOR, 0, NULL, NULL, NULL), -1);
-    PhInsertEMenuItem(menu, PhCreateEMenuItem(0, 1, L"Properties", NULL, NULL), -1);
+    PhInsertEMenuItem(menu, PhCreateEMenuItem(0, 0, L"Enable", NULL, NULL), ULONG_MAX);
+    PhInsertEMenuItem(menu, PhCreateEMenuItem(0, 1, L"Disable", NULL, NULL), ULONG_MAX);
+    PhInsertEMenuItem(menu, PhCreateEMenuItem(0, 2, L"Restart", NULL, NULL), ULONG_MAX);
+    PhInsertEMenuItem(menu, PhCreateEMenuSeparator(), ULONG_MAX);
+    PhInsertEMenuItem(menu, PhCreateEMenuItem(0, 3, L"Properties", NULL, NULL), ULONG_MAX);
 
     selectedItem = PhShowEMenu(
         menu,
-        PhMainWndHandle,
+        ParentWindow,
         PH_EMENU_SHOW_LEFTRIGHT,
         PH_ALIGN_LEFT | PH_ALIGN_TOP,
         cursorPos.x,
         cursorPos.y
         );
 
-    if (selectedItem && selectedItem->Id != -1)
+    if (selectedItem && selectedItem->Id != ULONG_MAX)
     {
         switch (selectedItem->Id)
         {
+        case 0:
         case 1:
+            HardwareDeviceEnableDisable(ParentWindow, DeviceInstance, selectedItem->Id == 0);
+            break;
+        case 2:
+            HardwareDeviceRestart(ParentWindow, DeviceInstance);
+            break;
+        case 3:
             {
                 HMODULE devMgrHandle;
 
@@ -284,7 +302,7 @@ VOID ShowDeviceMenu(
                 {
                     if (DeviceProperties_RunDLL_I = PhGetProcedureAddress(devMgrHandle, "DeviceProperties_RunDLLW", 0))
                     {
-                        // This will sometimes re-throw an RPC error during debugging and can be safely ignored.
+                        // This will sometimes re-throw an RPC error while debugging and can safely be ignored.
                         DeviceProperties_RunDLL_I(
                             GetParent(ParentWindow),
                             NULL,
@@ -318,7 +336,15 @@ LOGICAL DllMain(
             {
                 { IntegerSettingType, SETTING_NAME_ENABLE_NDIS, L"1" },
                 { StringSettingType, SETTING_NAME_INTERFACE_LIST, L"" },
+                { IntegerPairSettingType, SETTING_NAME_NETWORK_POSITION, L"0,0" },
+                { ScalableIntegerPairSettingType, SETTING_NAME_NETWORK_SIZE, L"@96|309,265" },
+                { StringSettingType, SETTING_NAME_NETWORK_COLUMNS, L"" },
+                { StringSettingType, SETTING_NAME_NETWORK_SORTCOLUMN, L"" },
                 { StringSettingType, SETTING_NAME_DISK_LIST, L"" },
+                { IntegerPairSettingType, SETTING_NAME_DISK_POSITION, L"100,100" },
+                { ScalableIntegerPairSettingType, SETTING_NAME_DISK_SIZE, L"@96|309,265" },
+                { StringSettingType, SETTING_NAME_DISK_COUNTERS_COLUMNS, L"" },
+                { StringSettingType, SETTING_NAME_SMART_COUNTERS_COLUMNS, L"" }, 
             };
 
             PluginInstance = PhRegisterPlugin(PLUGIN_NAME, Instance, &info);
@@ -330,7 +356,6 @@ LOGICAL DllMain(
             info->Author = L"dmex, wj32";
             info->Description = L"Plugin for monitoring hardware devices like Disk drives and Network adapters via the System Information window.";
             info->Url = L"https://wj32.org/processhacker/forums/viewtopic.php?t=1820";
-            info->HasOptions = TRUE;
 
             PhRegisterCallback(
                 PhGetPluginCallback(PluginInstance, PluginCallbackLoad),
@@ -345,7 +370,7 @@ LOGICAL DllMain(
                 &PluginUnloadCallbackRegistration
                 );
             PhRegisterCallback(
-                PhGetPluginCallback(PluginInstance, PluginCallbackShowOptions),
+                PhGetGeneralCallback(GeneralCallbackOptionsWindowInitializing),
                 ShowOptionsCallback,
                 NULL,
                 &PluginShowOptionsCallbackRegistration
@@ -358,7 +383,7 @@ LOGICAL DllMain(
                 );
 
             PhRegisterCallback(
-                &PhProcessesUpdatedEvent,
+                PhGetGeneralCallback(GeneralCallbackProcessProviderUpdatedEvent),
                 ProcessesUpdatedCallback,
                 NULL,
                 &ProcessesUpdatedCallbackRegistration
@@ -371,7 +396,7 @@ LOGICAL DllMain(
                 &SystemInformationInitializingCallbackRegistration
                 );
 
-            PhAddSettings(settings, ARRAYSIZE(settings));
+            PhAddSettings(settings, RTL_NUMBER_OF(settings));
         }
         break;
     }

@@ -3,6 +3,7 @@
  *   plugin support
  *
  * Copyright (C) 2010-2015 wj32
+ * Copyright (C) 2017-2019 dmex
  *
  * This file is part of Process Hacker.
  *
@@ -50,7 +51,7 @@ INT NTAPI PhpPluginsCompareFunction(
     _In_ PPH_AVL_LINKS Links2
     );
 
-BOOLEAN PhLoadPlugin(
+NTSTATUS PhLoadPlugin(
     _In_ PPH_STRING FileName
     );
 
@@ -60,21 +61,8 @@ VOID PhpExecuteCallbackForAllPlugins(
     );
 
 PH_AVL_TREE PhPluginsByName = PH_AVL_TREE_INIT(PhpPluginsCompareFunction);
-
 static PH_CALLBACK GeneralCallbacks[GeneralCallbackMaximum];
-static PPH_STRING PluginsDirectory;
-static PPH_LIST LoadErrors;
 static ULONG NextPluginId = IDPLUGINS + 1;
-
-VOID PhPluginsInitialization(
-    VOID
-    )
-{
-    ULONG i;
-
-    for (i = 0; i < GeneralCallbackMaximum; i++)
-        PhInitializeCallback(&GeneralCallbacks[i]);
-}
 
 INT NTAPI PhpPluginsCompareFunction(
     _In_ PPH_AVL_LINKS Links1,
@@ -87,6 +75,7 @@ INT NTAPI PhpPluginsCompareFunction(
     return PhCompareStringRef(&plugin1->Name, &plugin2->Name, FALSE);
 }
 
+_Success_(return)
 BOOLEAN PhpLocateDisabledPlugin(
     _In_ PPH_STRING List,
     _In_ PPH_STRINGREF BaseName,
@@ -151,8 +140,8 @@ VOID PhSetPluginDisabled(
             // We have other disabled plugins. Append a pipe character followed by the plugin name.
             newDisabled = PhCreateStringEx(NULL, disabled->Length + sizeof(WCHAR) + BaseName->Length);
             memcpy(newDisabled->Buffer, disabled->Buffer, disabled->Length);
-            newDisabled->Buffer[disabled->Length / 2] = '|';
-            memcpy(&newDisabled->Buffer[disabled->Length / 2 + 1], BaseName->Buffer, BaseName->Length);
+            newDisabled->Buffer[disabled->Length / sizeof(WCHAR)] = '|';
+            memcpy(&newDisabled->Buffer[disabled->Length / sizeof(WCHAR) + 1], BaseName->Buffer, BaseName->Length);
             PhSetStringSetting2(L"DisabledPlugins", &newDisabled->sr);
             PhDereferenceObject(newDisabled);
         }
@@ -168,9 +157,9 @@ VOID PhSetPluginDisabled(
 
         // We need to remove the plugin from the disabled list.
 
-        removeCount = (ULONG)BaseName->Length / 2;
+        removeCount = (ULONG)BaseName->Length / sizeof(WCHAR);
 
-        if (foundIndex + (ULONG)BaseName->Length / 2 < (ULONG)disabled->Length / 2)
+        if (foundIndex + (ULONG)BaseName->Length / sizeof(WCHAR) < (ULONG)disabled->Length / sizeof(WCHAR))
         {
             // Remove the following pipe character as well.
             removeCount++;
@@ -193,30 +182,141 @@ VOID PhSetPluginDisabled(
     PhDereferenceObject(disabled);
 }
 
+PPH_STRING PhpGetPluginDirectoryPath(
+    VOID
+    )
+{
+    static PPH_STRING cachedPluginDirectory = NULL;
+    PPH_STRING pluginsDirectory;
+    SIZE_T returnLength;
+    WCHAR pluginsDirectoryName[MAX_PATH];
+    PH_FORMAT format[3];
+
+    if (pluginsDirectory = InterlockedCompareExchangePointer(
+        &cachedPluginDirectory,
+        NULL,
+        NULL
+        ))
+    {
+        return PhReferenceObject(pluginsDirectory);
+    }
+
+    pluginsDirectory = PhGetStringSetting(L"PluginsDirectory");
+
+    if (RtlDetermineDosPathNameType_U(pluginsDirectory->Buffer) == RtlPathTypeRelative)
+    {
+        PPH_STRING applicationDirectory;
+
+        if (applicationDirectory = PhGetApplicationDirectory())
+        {
+            PH_STRINGREF pluginsDirectoryNameSr;
+
+            // Not absolute. Make sure it is.
+            PhInitFormatS(&format[0], applicationDirectory->Buffer);
+            PhInitFormatS(&format[1], pluginsDirectory->Buffer);
+            PhInitFormatS(&format[2], L"\\");
+
+            if (PhFormatToBuffer(
+                format,
+                RTL_NUMBER_OF(format),
+                pluginsDirectoryName,
+                sizeof(pluginsDirectoryName),
+                &returnLength
+                ))
+            {
+                pluginsDirectoryNameSr.Buffer = pluginsDirectoryName;
+                pluginsDirectoryNameSr.Length = returnLength - sizeof(UNICODE_NULL);
+
+                PhMoveReference(&pluginsDirectory, PhCreateString2(&pluginsDirectoryNameSr));
+            }
+
+            PhDereferenceObject(applicationDirectory);
+        }
+    }
+
+    if (!InterlockedCompareExchangePointer(
+        &cachedPluginDirectory,
+        pluginsDirectory,
+        NULL
+        ))
+    {
+        PhReferenceObject(pluginsDirectory);
+    }
+
+    return pluginsDirectory;
+}
+
 static BOOLEAN EnumPluginsDirectoryCallback(
-    _In_ PFILE_DIRECTORY_INFORMATION Information,
+    _In_ PFILE_NAMES_INFORMATION Information,
     _In_opt_ PVOID Context
     )
 {
+    static PH_STRINGREF PhpPluginExtension = PH_STRINGREF_INIT(L".dll");
+    static PH_STRINGREF PhpPluginBlocklist[] =
+    {
+        PH_STRINGREF_INIT(L"CommonUtil.dll"),
+        PH_STRINGREF_INIT(L"ExtraPlugins.dll"),
+        PH_STRINGREF_INIT(L"SbieSupport.dll"),
+        PH_STRINGREF_INIT(L"HexPidPlugin.dll")
+    };
+    BOOLEAN blocklistedPlugin = FALSE;
     PH_STRINGREF baseName;
+    PPH_STRING directoryName;
     PPH_STRING fileName;
 
     baseName.Buffer = Information->FileName;
     baseName.Length = Information->FileNameLength;
 
-    if (PhEndsWithStringRef2(&baseName, L".dll", TRUE))
+    // Note: The *.dll pattern passed to NtQueryDirectoryFile includes extensions other than dll (For example: *.dll* or .dllmanifest). (dmex)
+    if (!PhEndsWithStringRef(&baseName, &PhpPluginExtension, FALSE))
+        return TRUE;
+
+    for (ULONG i = 0; i < RTL_NUMBER_OF(PhpPluginBlocklist); i++)
     {
-        if (!PhIsPluginDisabled(&baseName))
+        if (PhEndsWithStringRef(&baseName, &PhpPluginBlocklist[i], TRUE))
         {
-            fileName = PhCreateStringEx(NULL, PluginsDirectory->Length + Information->FileNameLength);
-            memcpy(fileName->Buffer, PluginsDirectory->Buffer, PluginsDirectory->Length);
-            memcpy(&fileName->Buffer[PluginsDirectory->Length / 2], Information->FileName, Information->FileNameLength);
-
-            PhLoadPlugin(fileName);
-
-            PhDereferenceObject(fileName);
+            blocklistedPlugin = TRUE;
+            break;
         }
     }
+
+    directoryName = PhpGetPluginDirectoryPath();
+    fileName = PhConcatStringRef2(&directoryName->sr, &baseName);
+
+    if (blocklistedPlugin)
+    {
+        PhDeleteFileWin32(fileName->Buffer);
+    }
+    else if (!PhIsPluginDisabled(&baseName))
+    {
+        NTSTATUS status;
+
+        status = PhLoadPlugin(fileName);
+
+        if (!NT_SUCCESS(status))
+        {
+            PPH_LIST pluginLoadErrors = Context;
+            PPHP_PLUGIN_LOAD_ERROR loadError;
+            PPH_STRING errorMessage;
+
+            loadError = PhAllocateZero(sizeof(PHP_PLUGIN_LOAD_ERROR));
+            PhSetReference(&loadError->FileName, fileName);
+
+            if (errorMessage = PhGetNtMessage(status))
+            {
+                PhSetReference(&loadError->ErrorMessage, errorMessage);
+                PhDereferenceObject(errorMessage);
+            }
+
+            if (pluginLoadErrors)
+            {
+                PhAddItemList(pluginLoadErrors, loadError);
+            }
+        }
+    }
+
+    PhDereferenceObject(fileName);
+    PhDereferenceObject(directoryName);
 
     return TRUE;
 }
@@ -228,79 +328,132 @@ VOID PhLoadPlugins(
     VOID
     )
 {
+    ULONG i;
     HANDLE pluginsDirectoryHandle;
     PPH_STRING pluginsDirectory;
+    PPH_LIST pluginLoadErrors;
 
-    pluginsDirectory = PhGetStringSetting(L"PluginsDirectory");
+    if (!(pluginsDirectory = PhpGetPluginDirectoryPath()))
+        return;
 
-    if (RtlDetermineDosPathNameType_U(pluginsDirectory->Buffer) == RtlPathTypeRelative)
-    {
-        // Not absolute. Make sure it is.
-        PluginsDirectory = PhConcatStrings(4, PhApplicationDirectory->Buffer, L"\\", pluginsDirectory->Buffer, L"\\");
-        PhDereferenceObject(pluginsDirectory);
-    }
-    else
-    {
-        PluginsDirectory = pluginsDirectory;
-    }
+    pluginLoadErrors = PhCreateList(1);
 
     if (NT_SUCCESS(PhCreateFileWin32(
         &pluginsDirectoryHandle,
-        PluginsDirectory->Buffer,
-        FILE_GENERIC_READ,
-        0,
-        FILE_SHARE_READ,
+        PhGetString(pluginsDirectory),
+        FILE_LIST_DIRECTORY | SYNCHRONIZE,
+        FILE_ATTRIBUTE_DIRECTORY,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
         FILE_OPEN,
         FILE_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT
         )))
     {
         UNICODE_STRING pattern = RTL_CONSTANT_STRING(L"*.dll");
 
-        PhEnumDirectoryFile(pluginsDirectoryHandle, &pattern, EnumPluginsDirectoryCallback, NULL);
+        if (!NT_SUCCESS(PhEnumDirectoryFileEx(
+            pluginsDirectoryHandle,
+            FileNamesInformation,
+            FALSE,
+            &pattern,
+            EnumPluginsDirectoryCallback,
+            pluginLoadErrors
+            )))
+        {
+            // Note: The MUP devices for Virtualbox and VMware improperly truncate
+            // data returned by NtQueryDirectoryFile when ReturnSingleEntry=FALSE and also have
+            // various other bugs and issues for information classes other than FileNamesInformation. (dmex)  
+            PhEnumDirectoryFileEx(
+                pluginsDirectoryHandle,
+                FileNamesInformation,
+                TRUE,
+                &pattern,
+                EnumPluginsDirectoryCallback,
+                pluginLoadErrors
+                );
+        }
+
         NtClose(pluginsDirectoryHandle);
     }
 
     // Handle load errors.
     // In certain startup modes we want to ignore all plugin load errors.
-    if (LoadErrors && LoadErrors->Count != 0 && !PhStartupParameters.PhSvc)
+    if (PhGetIntegerSetting(L"ShowPluginLoadErrors") && pluginLoadErrors->Count != 0 && !PhStartupParameters.PhSvc)
     {
-        PH_STRING_BUILDER sb;
-        ULONG i;
+        PH_STRING_BUILDER stringBuilder;
         PPHP_PLUGIN_LOAD_ERROR loadError;
         PPH_STRING baseName;
+        TASKDIALOGCONFIG config = { sizeof(TASKDIALOGCONFIG) };
+        TASKDIALOG_BUTTON buttons[2];
+        INT result;
 
-        PhInitializeStringBuilder(&sb, 100);
-        PhAppendStringBuilder2(&sb, L"Unable to load the following plugin(s):\n\n");
+        PhInitializeStringBuilder(&stringBuilder, 100);
 
-        for (i = 0; i < LoadErrors->Count; i++)
+        for (i = 0; i < pluginLoadErrors->Count; i++)
         {
-            loadError = LoadErrors->Items[i];
+            loadError = pluginLoadErrors->Items[i];
             baseName = PhGetBaseName(loadError->FileName);
-            PhAppendFormatStringBuilder(&sb, L"%s: %s\n",
-                baseName->Buffer, PhGetStringOrDefault(loadError->ErrorMessage, L"An unknown error occurred."));
+
+            PhAppendFormatStringBuilder(
+                &stringBuilder,
+                L"%s: %s\n",
+                baseName->Buffer, 
+                PhGetStringOrDefault(loadError->ErrorMessage, L"An unknown error occurred.")
+                );
+
             PhDereferenceObject(baseName);
         }
 
-        PhAppendStringBuilder2(&sb, L"\nDo you want to disable the above plugin(s)?");
+        if (PhEndsWithStringRef2(&stringBuilder.String->sr, L"\n", FALSE)) 
+            PhRemoveEndStringBuilder(&stringBuilder, 2);
 
-        if (PhShowMessage(
+        config.dwFlags = TDF_ALLOW_DIALOG_CANCELLATION;
+        config.dwCommonButtons = TDCBF_CANCEL_BUTTON;
+        config.pszWindowTitle = PhApplicationName;
+        config.pszMainIcon = TD_ERROR_ICON;
+        config.pszMainInstruction = L"Unable to load the following plugin(s)";
+        config.pszContent = PhGetString(PhFinalStringBuilderString(&stringBuilder));
+
+        buttons[0].nButtonID = IDYES;
+        buttons[0].pszButtonText = L"Delete plugins";
+        buttons[1].nButtonID = IDNO;
+        buttons[1].pszButtonText = L"Disable plugins";
+
+        config.cButtons = 2;
+        config.pButtons = buttons;
+        config.nDefaultButton = IDCANCEL;
+
+        if (TaskDialogIndirect(
+            &config,
+            &result,
             NULL,
-            MB_ICONERROR | MB_YESNO,
-            sb.String->Buffer
-            ) == IDYES)
+            NULL
+            ) == S_OK)
         {
-            ULONG i;
-
-            for (i = 0; i < LoadErrors->Count; i++)
+            switch (result)
             {
-                loadError = LoadErrors->Items[i];
-                baseName = PhGetBaseName(loadError->FileName);
-                PhSetPluginDisabled(&baseName->sr, TRUE);
-                PhDereferenceObject(baseName);
+            case IDNO:
+                for (i = 0; i < pluginLoadErrors->Count; i++)
+                {
+                    loadError = pluginLoadErrors->Items[i];
+                    baseName = PhGetBaseName(loadError->FileName);
+
+                    PhSetPluginDisabled(&baseName->sr, TRUE);
+
+                    PhDereferenceObject(baseName);
+                }
+                break;
+            case IDYES:
+                for (i = 0; i < pluginLoadErrors->Count; i++)
+                {
+                    loadError = pluginLoadErrors->Items[i];
+
+                    PhDeleteFileWin32(loadError->FileName->Buffer);
+                }
+                break;
             }
         }
 
-        PhDeleteStringBuilder(&sb);
+        PhDeleteStringBuilder(&stringBuilder);
     }
 
     // When we loaded settings before, we didn't know about plugin settings, so they
@@ -311,6 +464,23 @@ VOID PhLoadPlugins(
         PhConvertIgnoredSettings();
 
     PhpExecuteCallbackForAllPlugins(PluginCallbackLoad, TRUE);
+
+    for (i = 0; i < pluginLoadErrors->Count; i++)
+    {
+        PPHP_PLUGIN_LOAD_ERROR loadError;
+
+        loadError = pluginLoadErrors->Items[i];
+
+        if (loadError->FileName)
+            PhDereferenceObject(loadError->FileName);
+        if (loadError->ErrorMessage)
+            PhDereferenceObject(loadError->ErrorMessage);
+
+        PhFree(loadError);
+    }
+
+    PhDereferenceObject(pluginLoadErrors);
+    PhDereferenceObject(pluginsDirectory);
 }
 
 /**
@@ -328,47 +498,27 @@ VOID PhUnloadPlugins(
  *
  * \param FileName The full file name of the plugin.
  */
-BOOLEAN PhLoadPlugin(
+NTSTATUS PhLoadPlugin(
     _In_ PPH_STRING FileName
     )
 {
-    BOOLEAN success;
+    NTSTATUS status;
     PPH_STRING fileName;
-    PPH_STRING errorMessage;
 
-    fileName = PhGetFullPath(FileName->Buffer, NULL);
+    status = PhGetFullPathEx(
+        FileName->Buffer, 
+        NULL,
+        &fileName
+        );
 
-    if (!fileName)
-        PhSetReference(&fileName, FileName);
-
-    success = TRUE;
-
-    if (!LoadLibrary(fileName->Buffer))
+    if (NT_SUCCESS(status))
     {
-        success = FALSE;
-        errorMessage = PhGetWin32Message(GetLastError());
+        status = PhLoadPluginImage(fileName, NULL);
+
+        PhDereferenceObject(fileName);
     }
 
-    if (!success)
-    {
-        PPHP_PLUGIN_LOAD_ERROR loadError;
-
-        loadError = PhAllocate(sizeof(PHP_PLUGIN_LOAD_ERROR));
-        PhSetReference(&loadError->FileName, fileName);
-        PhSetReference(&loadError->ErrorMessage, errorMessage);
-
-        if (!LoadErrors)
-            LoadErrors = PhCreateList(2);
-
-        PhAddItemList(LoadErrors, loadError);
-
-        if (errorMessage)
-            PhDereferenceObject(errorMessage);
-    }
-
-    PhDereferenceObject(fileName);
-
-    return success;
+    return status;
 }
 
 VOID PhpExecuteCallbackForAllPlugins(
@@ -401,7 +551,8 @@ VOID PhpExecuteCallbackForAllPlugins(
                     if (!parameters)
                         parameters = PhCreateList(3);
 
-                    PhAddItemList(parameters, PhCreateString2(&parameter));
+                    if (parameters)
+                        PhAddItemList(parameters, PhCreateString2(&parameter));
                 }
             }
         }
@@ -476,12 +627,9 @@ PPH_PLUGIN PhRegisterPlugin(
     if (!fileName)
         return NULL;
 
-    plugin = PhAllocate(sizeof(PH_PLUGIN));
-    memset(plugin, 0, sizeof(PH_PLUGIN));
-
+    plugin = PhAllocateZero(sizeof(PH_PLUGIN));
     plugin->Name = pluginName;
     plugin->DllBase = DllBase;
-
     plugin->FileName = fileName;
 
     existingLinks = PhAddElementAvlTree(&PhPluginsByName, &plugin->Links);
@@ -579,6 +727,14 @@ PPH_CALLBACK PhGetPluginCallback(
     return &Plugin->Callbacks[Callback];
 }
 
+VOID PhInitializeCallbacks(
+    VOID
+    )
+{
+    for (ULONG i = 0; i < GeneralCallbackMaximum; i++)
+        PhInitializeCallback(&GeneralCallbacks[i]);
+}
+
 /**
  * Retrieves a pointer to a general callback.
  *
@@ -617,60 +773,6 @@ ULONG PhPluginReserveIds(
     NextPluginId += Count;
 
     return nextPluginId;
-}
-
-/**
- * Adds a menu item to the program's main menu. This function is
- * deprecated. Use \c GeneralCallbackMainMenuInitializing instead.
- *
- * \param Plugin A plugin instance structure.
- * \param Location A handle to the parent menu, or one of the following:
- * \li \c PH_MENU_ITEM_LOCATION_VIEW The "View" menu.
- * \li \c PH_MENU_ITEM_LOCATION_TOOLS The "Tools" menu.
- * \param InsertAfter The text of the menu item to insert the
- * new menu item after. The search is a case-insensitive prefix search
- * that ignores prefix characters (ampersands).
- * \param Id An identifier for the menu item. This should be unique
- * within the plugin.
- * \param Text The text of the menu item.
- * \param Context A user-defined value for the menu item.
- *
- * \return TRUE if the function succeeded, otherwise FALSE.
- *
- * \remarks The \ref PluginCallbackMenuItem callback is invoked when
- * the menu item is chosen, and the \ref PH_PLUGIN_MENU_ITEM structure
- * will contain the \a Id and \a Context values passed to this function.
- */
-ULONG_PTR PhPluginAddMenuItem(
-    _In_ PPH_PLUGIN Plugin,
-    _In_ ULONG_PTR Location,
-    _In_opt_ PWSTR InsertAfter,
-    _In_ ULONG Id,
-    _In_ PWSTR Text,
-    _In_opt_ PVOID Context
-    )
-{
-    PH_ADD_MENU_ITEM addMenuItem;
-
-    addMenuItem.Plugin = Plugin;
-    addMenuItem.InsertAfter = InsertAfter;
-    addMenuItem.Text = Text;
-    addMenuItem.Context = Context;
-
-    if (Location < 0x1000)
-    {
-        addMenuItem.Location = (ULONG)Location;
-    }
-    else
-    {
-        return 0;
-    }
-
-    addMenuItem.Flags = Id & PH_MENU_ITEM_VALID_FLAGS;
-    Id &= ~PH_MENU_ITEM_VALID_FLAGS;
-    addMenuItem.Id = Id;
-
-    return ProcessHacker_AddMenuItem(PhMainWndHandle, &addMenuItem);
 }
 
 /**
@@ -760,18 +862,15 @@ PPH_EMENU_ITEM PhPluginCreateEMenuItem(
     _In_opt_ PVOID Context
     )
 {
-    PPH_EMENU_ITEM item;
     PPH_PLUGIN_MENU_ITEM pluginMenuItem;
+    PPH_EMENU_ITEM item;
 
-    item = PhCreateEMenuItem(Flags, ID_PLUGIN_MENU_ITEM, Text, NULL, NULL);
-
-    pluginMenuItem = PhAllocate(sizeof(PH_PLUGIN_MENU_ITEM));
-    memset(pluginMenuItem, 0, sizeof(PH_PLUGIN_MENU_ITEM));
+    pluginMenuItem = PhAllocateZero(sizeof(PH_PLUGIN_MENU_ITEM));
     pluginMenuItem->Plugin = Plugin;
     pluginMenuItem->Id = Id;
     pluginMenuItem->Context = Context;
 
-    item->Context = pluginMenuItem;
+    item = PhCreateEMenuItem(Flags, ID_PLUGIN_MENU_ITEM, Text, NULL, pluginMenuItem);
     item->DeleteFunction = PhpPluginEMenuItemDeleteFunction;
 
     return item;
@@ -956,39 +1055,6 @@ PVOID PhPluginGetObjectExtension(
 }
 
 /**
- * Creates a notification icon.
- *
- * \param Plugin A plugin instance structure.
- * \param SubId An identifier for the column. This should be unique within the
- * plugin.
- * \param Context A user-defined value.
- * \param Text A string describing the notification icon.
- * \param Flags A combination of flags.
- * \li \c PH_NF_ICON_UNAVAILABLE The notification icon is currently unavailable.
- * \param RegistrationData A \ref PH_NF_ICON_REGISTRATION_DATA structure that
- * contains registration information.
- */
-struct _PH_NF_ICON *PhPluginRegisterIcon(
-    _In_ PPH_PLUGIN Plugin,
-    _In_ ULONG SubId,
-    _In_opt_ PVOID Context,
-    _In_ PWSTR Text,
-    _In_ ULONG Flags,
-    _In_ struct _PH_NF_ICON_REGISTRATION_DATA *RegistrationData
-    )
-{
-    return PhNfRegisterIcon(
-        Plugin,
-        SubId,
-        Context,
-        Text,
-        Flags,
-        RegistrationData->UpdateCallback,
-        RegistrationData->MessageCallback
-        );
-}
-
-/**
  * Allows a plugin to receive all treenew messages, not just column-related ones.
  *
  * \param Plugin A plugin instance structure.
@@ -1003,6 +1069,7 @@ VOID PhPluginEnableTreeNewNotify(
     PhCmSetNotifyPlugin(CmData, Plugin);
 }
 
+_Success_(return)
 BOOLEAN PhPluginQueryPhSvc(
     _Out_ PPH_PLUGIN_PHSVC_CLIENT Client
     )
@@ -1040,4 +1107,11 @@ NTSTATUS PhPluginCallPhSvc(
     PhDereferenceObject(apiId);
 
     return status;
+}
+
+PPH_STRING PhGetPluginName(
+    _In_ PPH_PLUGIN Plugin
+    )
+{
+    return PhCreateString2(&Plugin->Name);
 }

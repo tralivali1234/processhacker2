@@ -20,7 +20,11 @@ typedef enum _PH_MEMORY_REGION_TYPE
     HeapRegion,
     Heap32Region,
     HeapSegmentRegion,
-    HeapSegment32Region
+    HeapSegment32Region,
+    CfgBitmapRegion,
+    CfgBitmap32Region,
+    ApiSetMapRegion,
+    HypervisorSharedDataRegion,
 } PH_MEMORY_REGION_TYPE;
 
 typedef struct _PH_MEMORY_ITEM
@@ -30,6 +34,7 @@ typedef struct _PH_MEMORY_ITEM
 
     union
     {
+        MEMORY_BASIC_INFORMATION BasicInfo;
         struct
         {
             PVOID BaseAddress;
@@ -40,7 +45,17 @@ typedef struct _PH_MEMORY_ITEM
             ULONG Protect;
             ULONG Type;
         };
-        MEMORY_BASIC_INFORMATION BasicInfo;
+    };
+
+    union
+    {
+        BOOLEAN Attributes;
+        struct
+        {
+            BOOLEAN Valid : 1;
+            BOOLEAN Bad : 1;
+            BOOLEAN Spare : 6;
+        };
     };
 
     struct _PH_MEMORY_ITEM *AllocationBaseItem;
@@ -93,10 +108,6 @@ typedef struct _PH_MEMORY_ITEM_LIST
     LIST_ENTRY ListHead;
 } PH_MEMORY_ITEM_LIST, *PPH_MEMORY_ITEM_LIST;
 // end_phapppub
-
-BOOLEAN PhMemoryProviderInitialization(
-    VOID
-    );
 
 VOID PhGetMemoryProtectionString(
     _In_ ULONG Protection,

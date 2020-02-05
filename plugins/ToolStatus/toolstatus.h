@@ -2,8 +2,8 @@
  * Process Hacker ToolStatus -
  *   toolstatus header
  *
- * Copyright (C) 2011-2016 dmex
  * Copyright (C) 2010-2013 wj32
+ * Copyright (C) 2011-2019 dmex
  *
  * This file is part of Process Hacker.
  *
@@ -24,21 +24,22 @@
 #ifndef _TOOLSTATUS_H
 #define _TOOLSTATUS_H
 
-#define CINTERFACE
-#define COBJMACROS
-#define INITGUID
 #include <phdk.h>
+#include <phapppub.h>
 #include <phappresource.h>
-#include <windowsx.h>
-#include <Wincodec.h>
-#include <toolstatusintf.h>
+#include <settings.h>
+
+#include <uxtheme.h>
+#include <vssym32.h>
 
 #include "resource.h"
+#include <toolstatusintf.h>
 
 #define PLUGIN_NAME TOOLSTATUS_PLUGIN_NAME
 #define SETTING_NAME_TOOLSTATUS_CONFIG (PLUGIN_NAME L".Config")
 #define SETTING_NAME_REBAR_CONFIG (PLUGIN_NAME L".RebarConfig")
-#define SETTING_NAME_TOOLBAR_CONFIG (PLUGIN_NAME L".ToolbarConfig")
+#define SETTING_NAME_TOOLBAR_CONFIG (PLUGIN_NAME L".ToolbarButtonConfig")
+#define SETTING_NAME_TOOLBAR_GRAPH_CONFIG (PLUGIN_NAME L".ToolbarGraphConfig")
 #define SETTING_NAME_STATUSBAR_CONFIG (PLUGIN_NAME L".StatusbarConfig")
 #define SETTING_NAME_TOOLBAR_THEME (PLUGIN_NAME L".ToolbarTheme")
 #define SETTING_NAME_TOOLBARDISPLAYSTYLE (PLUGIN_NAME L".ToolbarDisplayStyle")
@@ -49,11 +50,10 @@
 #define MAX_TOOLBAR_ITEMS 12
 #define MAX_STATUSBAR_ITEMS 14
 
-#define ID_SEARCH_CLEAR (WM_APP + 1)
-#define TIDC_FINDWINDOW (WM_APP + 2)
-#define TIDC_FINDWINDOWTHREAD (WM_APP + 3)
-#define TIDC_FINDWINDOWKILL (WM_APP + 4)
-#define TIDC_POWERMENUDROPDOWN (WM_APP + 5)
+#define TIDC_FINDWINDOW (WM_APP + 1)
+#define TIDC_FINDWINDOWTHREAD (WM_APP + 2)
+#define TIDC_FINDWINDOWKILL (WM_APP + 3)
+#define TIDC_POWERMENUDROPDOWN (WM_APP + 4)
 
 typedef enum _TOOLBAR_DISPLAY_STYLE
 {
@@ -66,20 +66,17 @@ typedef enum _TOOLBAR_COMMAND_ID
 {
     COMMAND_ID_ENABLE_MENU = 1,
     COMMAND_ID_ENABLE_SEARCHBOX,
-    COMMAND_ID_ENABLE_CPU_GRAPH,
-    COMMAND_ID_ENABLE_MEMORY_GRAPH,
-    COMMAND_ID_ENABLE_COMMIT_GRAPH,
-    COMMAND_ID_ENABLE_IO_GRAPH,
     COMMAND_ID_TOOLBAR_LOCKUNLOCK,
     COMMAND_ID_TOOLBAR_CUSTOMIZE,
+    COMMAND_ID_GRAPHS_CUSTOMIZE,
 } TOOLBAR_COMMAND_ID;
 
-typedef enum _TOOLBAR_THEME
-{
-    TOOLBAR_THEME_NONE,
-    TOOLBAR_THEME_BLACK,
-    TOOLBAR_THEME_BLUE
-} TOOLBAR_THEME;
+//typedef enum _TOOLBAR_THEME
+//{
+//    TOOLBAR_THEME_NONE,
+//    TOOLBAR_THEME_BLACK,
+//    TOOLBAR_THEME_BLUE
+//} TOOLBAR_THEME;
 
 typedef enum _SEARCHBOX_DISPLAY_MODE
 {
@@ -116,15 +113,11 @@ typedef union _TOOLSTATUS_CONFIG
         ULONG StatusBarEnabled : 1;
         ULONG ToolBarLocked : 1;
         ULONG ResolveGhostWindows : 1;
-
         ULONG ModernIcons : 1;
         ULONG AutoHideMenu : 1;
-        ULONG CpuGraphEnabled : 1;
-        ULONG MemGraphEnabled : 1;
-        ULONG CommitGraphEnabled : 1;
-        ULONG IoGraphEnabled : 1;
-
-        ULONG Spare : 21;
+        ULONG Reserved : 4;
+        ULONG SearchAutoFocus : 1;
+        ULONG Spare : 20;
     };
 } TOOLSTATUS_CONFIG;
 
@@ -135,7 +128,6 @@ extern HWND NetworkTreeNewHandle;
 extern INT SelectedTabIndex;
 extern BOOLEAN UpdateAutomatically;
 extern BOOLEAN UpdateGraphs;
-extern TOOLBAR_THEME ToolBarTheme;
 extern TOOLBAR_DISPLAY_STYLE DisplayStyle;
 extern SEARCHBOX_DISPLAY_MODE SearchBoxDisplayMode;
 extern REBAR_DISPLAY_LOCATION RebarDisplayLocation;
@@ -216,14 +208,21 @@ HWND GetCurrentTreeNewHandle(
     VOID
     );
 
-VOID ShowCustomizeMenu(
+HFONT ToolStatusGetTreeWindowFont(
     VOID
+    );
+
+VOID ShowCustomizeMenu(
+    _In_ HWND WindowHandle
     );
 
 // options.c
 
-VOID ShowOptionsDialog(
-    _In_opt_ HWND Parent
+INT_PTR CALLBACK OptionsDlgProc(
+    _In_ HWND hwndDlg,
+    _In_ UINT uMsg,
+    _In_ WPARAM wParam,
+    _In_ LPARAM lParam
     );
 
 // filter.c
@@ -251,65 +250,86 @@ NTSTATUS QueryServiceFileName(
     _Out_ PPH_STRING *ServiceBinaryPath
     );
 
-// searchbox.c
-
-HWND CreateSearchControl(
-    _In_ UINT CmdId
-    );
-
-typedef struct _EDIT_CONTEXT
-{
-    UINT CommandID;
-    LONG CXWidth;
-    INT CXBorder;
-    INT ImageWidth;
-    INT ImageHeight;
-
-    HWND WindowHandle;
-    HFONT WindowFont;
-    HIMAGELIST ImageList;
-
-    HBRUSH BrushNormal;
-    HBRUSH BrushPushed;
-    HBRUSH BrushHot;
-    //COLORREF BackgroundColorRef;
-
-    union
-    {
-        ULONG Flags;
-        struct
-        {
-            ULONG Hot : 1;
-            ULONG Pushed : 1;
-            ULONG Spare : 30;
-        };
-    };
-} EDIT_CONTEXT, *PEDIT_CONTEXT;
-
-HBITMAP LoadImageFromResources(
-    _In_ UINT Width,
-    _In_ UINT Height,
-    _In_ PCWSTR Name,
-    _In_ BOOLEAN RGBAImage
-    );
-
 // graph.c
 
-extern HWND CpuGraphHandle;
-extern HWND MemGraphHandle;
-extern HWND CommitGraphHandle;
-extern HWND IoGraphHandle;
+typedef struct _PH_TOOLBAR_GRAPH
+{
+    struct _PH_PLUGIN *Plugin;
 
-VOID ToolbarCreateGraphs(VOID);
-VOID ToolbarUpdateGraphs(VOID);
-VOID ToolbarUpdateGraphsInfo(LPNMHDR Header);
+    ULONG Flags;
+    ULONG GraphId;
+
+    HWND GraphHandle;
+    PVOID Context;
+    PWSTR Text;
+
+    PTOOLSTATUS_GRAPH_MESSAGE_CALLBACK MessageCallback;
+    PH_GRAPH_STATE GraphState;
+} PH_TOOLBAR_GRAPH, *PPH_TOOLBAR_GRAPH;
+
+VOID ToolbarGraphLoadSettings(
+    VOID
+    );
+
+VOID ToolbarGraphSaveSettings(
+    VOID
+    );
+
+VOID ToolbarGraphsInitialize(
+    VOID
+    );
+
+VOID ToolbarRegisterGraph(
+    _In_ struct _PH_PLUGIN *Plugin,
+    _In_ ULONG Id,
+    _In_ PWSTR Text,
+    _In_ ULONG Flags,
+    _In_opt_ PVOID Context,
+    _In_opt_ PTOOLSTATUS_GRAPH_MESSAGE_CALLBACK MessageCallback
+    );
+
+VOID ToolbarCreateGraphs(
+    VOID
+    );
+
+VOID ToolbarUpdateGraphs(
+    VOID
+    );
+
+BOOLEAN ToolbarUpdateGraphsInfo(
+    _In_ HWND WindowHandle,
+    _In_ LPNMHDR Header
+    );
+
+VOID ToolbarSetVisibleGraph(
+    _In_ PPH_TOOLBAR_GRAPH Icon,
+    _In_ BOOLEAN Visible
+    );
+
+BOOLEAN ToolbarGraphsEnabled(
+    VOID
+    );
+
+PPH_TOOLBAR_GRAPH ToolbarGraphFindById(
+    _In_ ULONG SubId
+    );
+
+PPH_TOOLBAR_GRAPH ToolbarGraphFindByName(
+    _In_ PPH_STRINGREF PluginName,
+    _In_ ULONG SubId
+    );
+
+VOID ToolbarGraphCreateMenu(
+    _In_ PPH_EMENU ParentMenu,
+    _In_ ULONG MenuId
+    );
+
+VOID ToolbarGraphCreatePluginMenu(
+    _In_ PPH_EMENU ParentMenu,
+    _In_ ULONG MenuId
+    );
 
 // statusbar.c
-
-typedef struct _STATUSBAR_ITEM
-{
-    ULONG Id;
-} STATUSBAR_ITEM, *PSTATUSBAR_ITEM;
 
 extern ULONG ProcessesUpdatedCount;
 extern HWND StatusBarHandle;
@@ -376,7 +396,7 @@ VOID StatusBarShowCustomizeDialog(
 typedef struct _BUTTON_CONTEXT
 {
     INT IdCommand;
-    INT IdBitmap;
+    HICON IconHandle;
 
     union
     {
@@ -393,6 +413,14 @@ typedef struct _BUTTON_CONTEXT
 
 typedef struct _CUSTOMIZE_CONTEXT
 {
+    HFONT FontHandle;
+    HBRUSH BrushNormal;
+    HBRUSH BrushPushed;
+    HBRUSH BrushHot;
+    INT CXWidth;
+    INT ImageWidth;
+    INT ImageHeight;
+
     HWND DialogHandle;
     HWND AvailableListHandle;
     HWND CurrentListHandle;
@@ -400,10 +428,19 @@ typedef struct _CUSTOMIZE_CONTEXT
     HWND MoveDownButtonHandle;
     HWND AddButtonHandle;
     HWND RemoveButtonHandle;
-
-    INT BitmapWidth;
-    HFONT FontHandle;
-    HIMAGELIST ImageListHandle;
 } CUSTOMIZE_CONTEXT, *PCUSTOMIZE_CONTEXT;
+
+HICON CustomizeGetToolbarIcon(
+    _In_ PCUSTOMIZE_CONTEXT Context,
+    _In_ INT CommandID
+    );
+
+// searchbox.c
+
+BOOLEAN CreateSearchboxControl(
+    VOID
+    );
+
+extern HFONT ToolStatusWindowFont;
 
 #endif

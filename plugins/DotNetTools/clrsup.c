@@ -90,7 +90,7 @@ PPH_STRING GetRuntimeNameByAddressClrProcess(
     ULONG64 displacement;
 
     bufferLength = 33;
-    buffer = PhCreateStringEx(NULL, (bufferLength - 1) * 2);
+    buffer = PhCreateStringEx(NULL, (bufferLength - 1) * sizeof(WCHAR));
 
     returnLength = 0;
 
@@ -113,7 +113,7 @@ PPH_STRING GetRuntimeNameByAddressClrProcess(
     {
         PhDereferenceObject(buffer);
         bufferLength = returnLength;
-        buffer = PhCreateStringEx(NULL, (bufferLength - 1) * 2);
+        buffer = PhCreateStringEx(NULL, (bufferLength - 1) * sizeof(WCHAR));
 
         if (!SUCCEEDED(IXCLRDataProcess_GetRuntimeNameByAddress(
             Support->DataProcess,
@@ -133,7 +133,7 @@ PPH_STRING GetRuntimeNameByAddressClrProcess(
     if (Displacement)
         *Displacement = displacement;
 
-    buffer->Length = (returnLength - 1) * 2;
+    buffer->Length = (returnLength - 1) * sizeof(WCHAR);
 
     return buffer;
 }
@@ -150,7 +150,7 @@ PPH_STRING GetNameXClrDataAppDomain(
     appDomain = AppDomain;
 
     bufferLength = 33;
-    buffer = PhCreateStringEx(NULL, (bufferLength - 1) * 2);
+    buffer = PhCreateStringEx(NULL, (bufferLength - 1) * sizeof(WCHAR));
 
     returnLength = 0;
 
@@ -165,7 +165,7 @@ PPH_STRING GetNameXClrDataAppDomain(
     {
         PhDereferenceObject(buffer);
         bufferLength = returnLength;
-        buffer = PhCreateStringEx(NULL, (bufferLength - 1) * 2);
+        buffer = PhCreateStringEx(NULL, (bufferLength - 1) * sizeof(WCHAR));
 
         if (!SUCCEEDED(IXCLRDataAppDomain_GetName(appDomain, bufferLength, &returnLength, buffer->Buffer)))
         {
@@ -174,7 +174,7 @@ PPH_STRING GetNameXClrDataAppDomain(
         }
     }
 
-    buffer->Length = (returnLength - 1) * 2;
+    buffer->Length = (returnLength - 1) * sizeof(WCHAR);
 
     return buffer;
 }
@@ -225,7 +225,7 @@ HRESULT CreateXCLRDataProcess(
     ULONG flags;
     BOOLEAN clrV4;
     HMODULE dllBase;
-    HRESULT (__stdcall *clrDataCreateInstance)(REFIID, ICLRDataTarget *, void **);
+    PFN_CLRDataCreateInstance clrDataCreateInstance;
 
     clrV4 = FALSE;
 
@@ -283,7 +283,7 @@ ICLRDataTarget *DnCLRDataTarget_Create(
     HANDLE processHandle;
     BOOLEAN isWow64;
 
-    if (!NT_SUCCESS(PhOpenProcess(&processHandle, ProcessQueryAccess | PROCESS_VM_READ, ProcessId)))
+    if (!NT_SUCCESS(PhOpenProcess(&processHandle, PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ, ProcessId)))
         return NULL;
 
 #ifdef _WIN64
@@ -403,11 +403,14 @@ BOOLEAN NTAPI PhpGetImageBaseCallback(
 {
     PPHP_GET_IMAGE_BASE_CONTEXT context = Context;
 
-    if (RtlEqualUnicodeString(&Module->FullDllName, &context->ImagePath, TRUE) ||
-        RtlEqualUnicodeString(&Module->BaseDllName, &context->ImagePath, TRUE))
+    if (context)
     {
-        context->BaseAddress = Module->DllBase;
-        return FALSE;
+        if (RtlEqualUnicodeString(&Module->FullDllName, &context->ImagePath, TRUE) ||
+            RtlEqualUnicodeString(&Module->BaseDllName, &context->ImagePath, TRUE))
+        {
+            context->BaseAddress = Module->DllBase;
+            return FALSE;
+        }
     }
 
     return TRUE;

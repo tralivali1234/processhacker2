@@ -21,9 +21,9 @@
  */
 
 #include <phapp.h>
+#include <phsettings.h>
 #include <procprp.h>
 #include <procprpp.h>
-
 #include <procprv.h>
 
 static VOID PhpLayoutServiceListControl(
@@ -53,15 +53,11 @@ INT_PTR CALLBACK PhpProcessServicesDlgProc(
     _In_ LPARAM lParam
     )
 {
-    LPPROPSHEETPAGE propSheetPage;
     PPH_PROCESS_PROPPAGECONTEXT propPageContext;
     PPH_PROCESS_ITEM processItem;
 
-    if (!PhpPropPageDlgProcHeader(hwndDlg, uMsg, lParam,
-        &propSheetPage, &propPageContext, &processItem))
-    {
+    if (!PhPropPageDlgProcHeader(hwndDlg, uMsg, lParam, NULL, &propPageContext, &processItem))
         return FALSE;
-    }
 
     switch (uMsg)
     {
@@ -103,28 +99,20 @@ INT_PTR CALLBACK PhpProcessServicesDlgProc(
             ShowWindow(serviceListHandle, SW_SHOW);
 
             propPageContext->Context = serviceListHandle;
-        }
-        break;
-    case WM_DESTROY:
-        {
-            PhpPropPageDlgProcDestroy(hwndDlg);
+
+            PhInitializeWindowTheme(hwndDlg, PhEnableThemeSupport);
         }
         break;
     case WM_SHOWWINDOW:
         {
-            if (!propPageContext->LayoutInitialized)
+            PPH_LAYOUT_ITEM dialogItem;
+
+            if (dialogItem = PhBeginPropPageLayout(hwndDlg, propPageContext))
             {
-                PPH_LAYOUT_ITEM dialogItem;
+                PhAddPropPageLayoutItem(hwndDlg, GetDlgItem(hwndDlg, IDC_SERVICES_LAYOUT), dialogItem, PH_ANCHOR_ALL);
+                PhEndPropPageLayout(hwndDlg, propPageContext);
 
-                dialogItem = PhAddPropPageLayoutItem(hwndDlg, hwndDlg,
-                    PH_PROP_PAGE_TAB_CONTROL_PARENT, PH_ANCHOR_ALL);
-                PhAddPropPageLayoutItem(hwndDlg, GetDlgItem(hwndDlg, IDC_SERVICES_LAYOUT),
-                    dialogItem, PH_ANCHOR_ALL);
-
-                PhDoPropPageLayout(hwndDlg);
                 PhpLayoutServiceListControl(hwndDlg, (HWND)propPageContext->Context);
-
-                propPageContext->LayoutInitialized = TRUE;
             }
         }
         break;

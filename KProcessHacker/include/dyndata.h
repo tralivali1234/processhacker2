@@ -7,7 +7,7 @@
 
 #ifdef _DYNDATA_PRIVATE
 #define EXT
-#define OFFDEFAULT = -1
+#define OFFDEFAULT = ULONG_MAX
 #else
 #define EXT extern
 #define OFFDEFAULT
@@ -41,7 +41,7 @@ NTSTATUS KphDynamicDataInitialization(
     );
 
 NTSTATUS KphReadDynamicDataParameters(
-    __in_opt HANDLE KeyHandle
+    _In_opt_ HANDLE KeyHandle
     );
 
 #endif

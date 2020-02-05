@@ -23,11 +23,9 @@
 #define _DYNDATA_PRIVATE
 #include <dyndata.h>
 
-#define C_2sTo4(x) ((unsigned int)(signed short)(x))
-
 NTSTATUS KphpLoadDynamicConfiguration(
-    __in PVOID Buffer,
-    __in ULONG Length
+    _In_ PVOID Buffer,
+    _In_ ULONG Length
     );
 
 #ifdef ALLOC_PRAGMA
@@ -53,7 +51,7 @@ NTSTATUS KphDynamicDataInitialization(
 }
 
 NTSTATUS KphReadDynamicDataParameters(
-    __in_opt HANDLE KeyHandle
+    _In_opt_ HANDLE KeyHandle
     )
 {
     NTSTATUS status;
@@ -114,8 +112,8 @@ NTSTATUS KphReadDynamicDataParameters(
 }
 
 NTSTATUS KphpLoadDynamicConfiguration(
-    __in PVOID Buffer,
-    __in ULONG Length
+    _In_ PVOID Buffer,
+    _In_ ULONG Length
     )
 {
     PKPH_DYN_CONFIGURATION config;
@@ -126,16 +124,16 @@ NTSTATUS KphpLoadDynamicConfiguration(
 
     config = Buffer;
 
-    if (Length < FIELD_OFFSET(KPH_DYN_CONFIGURATION, Packages))
+    if (Length < UFIELD_OFFSET(KPH_DYN_CONFIGURATION, Packages))
         return STATUS_INVALID_PARAMETER;
     if (config->Version != KPH_DYN_CONFIGURATION_VERSION)
         return STATUS_INVALID_PARAMETER;
     if (config->NumberOfPackages > KPH_DYN_MAXIMUM_PACKAGES)
         return STATUS_INVALID_PARAMETER;
-    if (Length < FIELD_OFFSET(KPH_DYN_CONFIGURATION, Packages) + config->NumberOfPackages * sizeof(KPH_DYN_PACKAGE))
+    if (Length < UFIELD_OFFSET(KPH_DYN_CONFIGURATION, Packages) + config->NumberOfPackages * sizeof(KPH_DYN_PACKAGE))
         return STATUS_INVALID_PARAMETER;
 
-    dprintf("Loading dynamic configuration with %u package(s)\n", config->NumberOfPackages);
+    dprintf("Loading dynamic configuration with %lu package(s)\n", config->NumberOfPackages);
 
     for (i = 0; i < config->NumberOfPackages; i++)
     {
@@ -143,10 +141,10 @@ NTSTATUS KphpLoadDynamicConfiguration(
 
         if (package->MajorVersion == KphDynOsVersionInfo.dwMajorVersion &&
             package->MinorVersion == KphDynOsVersionInfo.dwMinorVersion &&
-            (package->ServicePackMajor == (USHORT)-1 || package->ServicePackMajor == KphDynOsVersionInfo.wServicePackMajor) &&
-            (package->BuildNumber == (USHORT)-1 || package->BuildNumber == KphDynOsVersionInfo.dwBuildNumber))
+            (package->ServicePackMajor == USHORT_MAX || package->ServicePackMajor == KphDynOsVersionInfo.wServicePackMajor) &&
+            (package->BuildNumber == USHORT_MAX || package->BuildNumber == KphDynOsVersionInfo.dwBuildNumber))
         {
-            dprintf("Found matching package at index %u for Windows %u.%u\n", i, package->MajorVersion, package->MinorVersion);
+            dprintf("Found matching package at index %lu for Windows %u.%u\n", i, package->MajorVersion, package->MinorVersion);
 
             KphDynNtVersion = package->ResultingNtVersion;
 

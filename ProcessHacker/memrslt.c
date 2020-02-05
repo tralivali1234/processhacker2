@@ -3,6 +3,7 @@
  *   memory search results
  *
  * Copyright (C) 2010-2016 wj32
+ * Copyright (C) 2017-2019 dmex
  *
  * This file is part of Process Hacker.
  *
@@ -21,9 +22,6 @@
  */
 
 #include <phapp.h>
-
-#include <windowsx.h>
-
 #include <emenu.h>
 
 #include <mainwnd.h>
@@ -81,6 +79,7 @@ VOID PhShowMemoryResultsDialog(
         (LPARAM)context
         );
     ShowWindow(windowHandle, SW_SHOW);
+    SetForegroundWindow(windowHandle);
 }
 
 static PPH_STRING PhpGetStringForSelectedResults(
@@ -90,13 +89,13 @@ static PPH_STRING PhpGetStringForSelectedResults(
     )
 {
     PH_STRING_BUILDER stringBuilder;
-    ULONG i;
 
     PhInitializeStringBuilder(&stringBuilder, 0x100);
 
-    for (i = 0; i < Results->Count; i++)
+    for (ULONG i = 0; i < Results->Count; i++)
     {
         PPH_MEMORY_RESULT result;
+        WCHAR value[PH_PTR_STR_LEN_1];
 
         if (!All)
         {
@@ -106,8 +105,14 @@ static PPH_STRING PhpGetStringForSelectedResults(
 
         result = Results->Items[i];
 
-        PhAppendFormatStringBuilder(&stringBuilder, L"0x%Ix (%u): %s\r\n", result->Address, result->Length,
-            result->Display.Buffer ? result->Display.Buffer : L"");
+        PhPrintPointer(value, result->Address);
+        PhAppendFormatStringBuilder(
+            &stringBuilder,
+            L"%s (%lu): %s\r\n",
+            value,
+            (ULONG)result->Length,
+            result->Display.Buffer ? result->Display.Buffer : L""
+            );
     }
 
     return PhFinalStringBuilderString(&stringBuilder);
@@ -204,7 +209,8 @@ static VOID FilterResults(
 
             if (!compiledExpression)
             {
-                PhShowError(hwndDlg, L"Unable to compile the regular expression: \"%s\" at position %zu.",
+                PhShowError2(hwndDlg, L"Unable to compile the regular expression.",
+                    L"\"%s\" at position %zu.",
                     PhGetStringOrDefault(PH_AUTO(PhPcre2GetErrorMessage(errorCode)), L"Unknown error"),
                     errorOffset
                     );
@@ -261,12 +267,12 @@ INT_PTR CALLBACK PhpMemoryResultsDlgProc(
 
     if (uMsg != WM_INITDIALOG)
     {
-        context = GetProp(hwndDlg, PhMakeContextAtom());
+        context = PhGetWindowContext(hwndDlg, PH_WINDOW_CONTEXT_DEFAULT);
     }
     else
     {
         context = (PMEMORY_RESULTS_CONTEXT)lParam;
-        SetProp(hwndDlg, PhMakeContextAtom(), (HANDLE)context);
+        PhSetWindowContext(hwndDlg, PH_WINDOW_CONTEXT_DEFAULT, context);
     }
 
     if (!context)
@@ -278,6 +284,9 @@ INT_PTR CALLBACK PhpMemoryResultsDlgProc(
         {
             HWND lvHandle;
 
+            SendMessage(hwndDlg, WM_SETICON, ICON_SMALL, (LPARAM)PH_LOAD_SHARED_ICON_SMALL(PhInstanceHandle, MAKEINTRESOURCE(IDI_PROCESSHACKER)));
+            SendMessage(hwndDlg, WM_SETICON, ICON_BIG, (LPARAM)PH_LOAD_SHARED_ICON_LARGE(PhInstanceHandle, MAKEINTRESOURCE(IDI_PROCESSHACKER)));
+
             PhRegisterDialog(hwndDlg);
 
             {
@@ -285,7 +294,7 @@ INT_PTR CALLBACK PhpMemoryResultsDlgProc(
 
                 if (processItem = PhReferenceProcessItem(context->ProcessId))
                 {
-                    SetWindowText(hwndDlg, PhaFormatString(L"Results - %s (%u)",
+                    PhSetWindowText(hwndDlg, PhaFormatString(L"Results - %s (%u)",
                         processItem->ProcessName->Buffer, HandleToUlong(processItem->ProcessId))->Buffer);
                     PhDereferenceObject(processItem);
                 }
@@ -295,8 +304,9 @@ INT_PTR CALLBACK PhpMemoryResultsDlgProc(
             PhSetListViewStyle(lvHandle, FALSE, TRUE);
             PhSetControlTheme(lvHandle, L"explorer");
             PhAddListViewColumn(lvHandle, 0, 0, 0, LVCFMT_LEFT, 120, L"Address");
-            PhAddListViewColumn(lvHandle, 1, 1, 1, LVCFMT_LEFT, 80, L"Length");
-            PhAddListViewColumn(lvHandle, 2, 2, 2, LVCFMT_LEFT, 200, L"Result");
+            PhAddListViewColumn(lvHandle, 1, 1, 1, LVCFMT_LEFT, 120, L"Base Address");
+            PhAddListViewColumn(lvHandle, 2, 2, 2, LVCFMT_LEFT, 80, L"Length");
+            PhAddListViewColumn(lvHandle, 3, 3, 3, LVCFMT_LEFT, 200, L"Result");
 
             PhLoadListViewColumnsFromSetting(L"MemResultsListViewColumns", lvHandle);
 
@@ -327,7 +337,7 @@ INT_PTR CALLBACK PhpMemoryResultsDlgProc(
 
             ListView_SetItemCount(lvHandle, context->Results->Count);
 
-            SetDlgItemText(hwndDlg, IDC_INTRO, PhaFormatString(L"%s results.",
+            PhSetDialogItemText(hwndDlg, IDC_INTRO, PhaFormatString(L"%s results.",
                 PhaFormatUInt64(context->Results->Count, TRUE)->Buffer)->Buffer);
 
             {
@@ -356,7 +366,7 @@ INT_PTR CALLBACK PhpMemoryResultsDlgProc(
 
             PhDeleteLayoutManager(&context->LayoutManager);
             PhUnregisterDialog(hwndDlg);
-            RemoveProp(hwndDlg, PhMakeContextAtom());
+            PhRemoveWindowContext(hwndDlg, PH_WINDOW_CONTEXT_DEFAULT);
 
             PhDereferenceMemoryResults((PPH_MEMORY_RESULT *)context->Results->Items, context->Results->Count);
             PhDereferenceObject(context->Results);
@@ -365,7 +375,7 @@ INT_PTR CALLBACK PhpMemoryResultsDlgProc(
         break;
     case WM_COMMAND:
         {
-            switch (LOWORD(wParam))
+            switch (GET_WM_COMMAND_ID(wParam, lParam))
             {
             case IDCANCEL:
             case IDOK:
@@ -394,7 +404,7 @@ INT_PTR CALLBACK PhpMemoryResultsDlgProc(
                     PhSetClipboardString(hwndDlg, &string->sr);
                     PhDereferenceObject(string);
 
-                    SendMessage(hwndDlg, WM_NEXTDLGCTL, (WPARAM)lvHandle, TRUE);
+                    PhSetDialogFocus(hwndDlg, lvHandle);
                 }
                 break;
             case IDC_SAVE:
@@ -455,7 +465,10 @@ INT_PTR CALLBACK PhpMemoryResultsDlgProc(
                     ULONG filterType = 0;
 
                     menu = PhCreateEMenu();
-                    PhLoadResourceEMenuItem(menu, PhInstanceHandle, MAKEINTRESOURCE(IDR_MEMFILTER), 0);
+                    PhInsertEMenuItem(menu, PhCreateEMenuItem(0, ID_FILTER_CONTAINS, L"Contains...", NULL, NULL), ULONG_MAX);
+                    PhInsertEMenuItem(menu, PhCreateEMenuItem(0, ID_FILTER_CONTAINS_CASEINSENSITIVE, L"Contains (case-insensitive)...", NULL, NULL), ULONG_MAX);
+                    PhInsertEMenuItem(menu, PhCreateEMenuItem(0, ID_FILTER_REGEX, L"Regex...", NULL, NULL), ULONG_MAX);
+                    PhInsertEMenuItem(menu, PhCreateEMenuItem(0, ID_FILTER_REGEX_CASEINSENSITIVE, L"Regex (case-insensitive)...", NULL, NULL), ULONG_MAX);
 
                     GetClientRect(GetDlgItem(hwndDlg, IDC_FILTER), &buttonRect);
                     point.x = 0;
@@ -528,6 +541,19 @@ INT_PTR CALLBACK PhpMemoryResultsDlgProc(
                             break;
                         case 1:
                             {
+                                WCHAR baseAddressString[PH_PTR_STR_LEN_1];
+
+                                PhPrintPointer(baseAddressString, result->BaseAddress);
+                                wcsncpy_s(
+                                    dispInfo->item.pszText,
+                                    dispInfo->item.cchTextMax,
+                                    baseAddressString,
+                                    _TRUNCATE
+                                    );
+                            }
+                            break;
+                        case 2:
+                            {
                                 WCHAR lengthString[PH_INT32_STR_LEN_1];
 
                                 PhPrintUInt32(lengthString, (ULONG)result->Length);
@@ -539,7 +565,7 @@ INT_PTR CALLBACK PhpMemoryResultsDlgProc(
                                     );
                             }
                             break;
-                        case 2:
+                        case 3:
                             wcsncpy_s(
                                 dispInfo->item.pszText,
                                 dispInfo->item.cchTextMax,
@@ -600,6 +626,117 @@ INT_PTR CALLBACK PhpMemoryResultsDlgProc(
                             if (!NT_SUCCESS(status))
                                 PhShowStatus(hwndDlg, L"Unable to edit memory", status, 0);
                         }
+                    }
+                }
+                break;
+            case NM_RCLICK:
+                {
+                    if (header->hwndFrom == lvHandle)
+                    {
+                        POINT point;
+                        PPH_EMENU menu;
+                        PPH_EMENU_ITEM selectedItem;
+                        ULONG filterType = 0;
+
+                        menu = PhCreateEMenu();
+                        PhInsertEMenuItem(menu, PhCreateEMenuItem(0, ID_MEMORY_READWRITEMEMORY, L"Read/Write memory", NULL, NULL), ULONG_MAX);
+                        PhInsertEMenuItem(menu, PhCreateEMenuSeparator(), ULONG_MAX);
+                        PhInsertEMenuItem(menu, PhCreateEMenuItem(0, IDC_COPY, L"Copy", NULL, NULL), ULONG_MAX);
+
+                        GetCursorPos(&point);
+
+                        selectedItem = PhShowEMenu(
+                            menu, 
+                            hwndDlg, 
+                            PH_EMENU_SHOW_LEFTRIGHT, 
+                            PH_ALIGN_LEFT | PH_ALIGN_TOP, 
+                            point.x, 
+                            point.y
+                            );
+
+                        if (selectedItem)
+                        {
+                            switch (selectedItem->Id)
+                            {
+                            case ID_MEMORY_READWRITEMEMORY:
+                                {
+                                    INT index;
+
+                                    if ((index = ListView_GetNextItem(
+                                        lvHandle,
+                                        -1,
+                                        LVNI_SELECTED
+                                        )) != -1)
+                                    {
+                                        NTSTATUS status;
+                                        PPH_MEMORY_RESULT result = context->Results->Items[index];
+                                        HANDLE processHandle;
+                                        MEMORY_BASIC_INFORMATION basicInfo;
+                                        PPH_SHOW_MEMORY_EDITOR showMemoryEditor;
+
+                                        if (NT_SUCCESS(status = PhOpenProcess(
+                                            &processHandle,
+                                            PROCESS_QUERY_INFORMATION | PROCESS_VM_READ,
+                                            context->ProcessId
+                                            )))
+                                        {
+                                            if (NT_SUCCESS(status = NtQueryVirtualMemory(
+                                                processHandle,
+                                                result->Address,
+                                                MemoryBasicInformation,
+                                                &basicInfo,
+                                                sizeof(MEMORY_BASIC_INFORMATION),
+                                                NULL
+                                                )))
+                                            {
+                                                showMemoryEditor = PhAllocate(sizeof(PH_SHOW_MEMORY_EDITOR));
+                                                memset(showMemoryEditor, 0, sizeof(PH_SHOW_MEMORY_EDITOR));
+                                                showMemoryEditor->ProcessId = context->ProcessId;
+                                                showMemoryEditor->BaseAddress = basicInfo.BaseAddress;
+                                                showMemoryEditor->RegionSize = basicInfo.RegionSize;
+                                                showMemoryEditor->SelectOffset = (ULONG)((ULONG_PTR)result->Address - (ULONG_PTR)basicInfo.BaseAddress);
+                                                showMemoryEditor->SelectLength = (ULONG)result->Length;
+                                                ProcessHacker_ShowMemoryEditor(PhMainWndHandle, showMemoryEditor);
+                                            }
+
+                                            NtClose(processHandle);
+                                        }
+
+                                        if (!NT_SUCCESS(status))
+                                            PhShowStatus(hwndDlg, L"Unable to edit memory", status, 0);
+                                    }
+                                }
+                                break;
+                            case IDC_COPY:
+                                {
+                                    HWND lvHandle;
+                                    PPH_STRING string;
+                                    ULONG selectedCount;
+
+                                    lvHandle = GetDlgItem(hwndDlg, IDC_LIST);
+                                    selectedCount = ListView_GetSelectedCount(lvHandle);
+
+                                    if (selectedCount == 0)
+                                    {
+                                        // User didn't select anything, so copy all items.
+                                        string = PhpGetStringForSelectedResults(lvHandle, context->Results, TRUE);
+                                        PhSetStateAllListViewItems(lvHandle, LVIS_SELECTED, LVIS_SELECTED);
+                                    }
+                                    else
+                                    {
+                                        string = PhpGetStringForSelectedResults(lvHandle, context->Results, FALSE);
+                                    }
+
+                                    PhSetClipboardString(hwndDlg, &string->sr);
+                                    PhDereferenceObject(string);
+
+                                    PhSetDialogFocus(hwndDlg, lvHandle);
+                                }
+                                break;
+                            }
+                        }
+
+                        PhDestroyEMenu(menu);
                     }
                 }
                 break;

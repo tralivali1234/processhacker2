@@ -23,28 +23,10 @@
 #include "extsrv.h"
 
 PPH_PLUGIN PluginInstance;
-static PH_CALLBACK_REGISTRATION PluginLoadCallbackRegistration;
-static PH_CALLBACK_REGISTRATION PluginShowOptionsCallbackRegistration;
-static PH_CALLBACK_REGISTRATION PluginMenuItemCallbackRegistration;
-static PH_CALLBACK_REGISTRATION ProcessMenuInitializingCallbackRegistration;
-static PH_CALLBACK_REGISTRATION ServicePropertiesInitializingCallbackRegistration;
-static PH_CALLBACK_REGISTRATION ServiceMenuInitializingCallbackRegistration;
-
-VOID NTAPI LoadCallback(
-    _In_opt_ PVOID Parameter,
-    _In_opt_ PVOID Context
-    )
-{
-    // Nothing
-}
-
-VOID NTAPI ShowOptionsCallback(
-    _In_opt_ PVOID Parameter,
-    _In_opt_ PVOID Context
-    )
-{
-    EsShowOptionsDialog((HWND)Parameter);
-}
+PH_CALLBACK_REGISTRATION PluginMenuItemCallbackRegistration;
+PH_CALLBACK_REGISTRATION ProcessMenuInitializingCallbackRegistration;
+PH_CALLBACK_REGISTRATION ServicePropertiesInitializingCallbackRegistration;
+PH_CALLBACK_REGISTRATION ServiceMenuInitializingCallbackRegistration;
 
 VOID NTAPI MenuItemCallback(
     _In_opt_ PVOID Parameter,
@@ -85,7 +67,7 @@ VOID NTAPI MenuItemCallback(
         {
             PPH_SERVICE_ITEM serviceItem = menuItem->Context;
             SC_HANDLE serviceHandle;
-            ULONG win32Result = 0;
+            ULONG win32Result = ERROR_SUCCESS;
 
             if (serviceHandle = PhOpenService(serviceItem->Name->Buffer, SERVICE_QUERY_STATUS))
             {
@@ -97,7 +79,7 @@ VOID NTAPI MenuItemCallback(
                 win32Result = GetLastError();
             }
 
-            if (win32Result != 0)
+            if (win32Result != ERROR_SUCCESS)
             {
                 PhShowStatus(
                     PhMainWndHandle,
@@ -172,7 +154,7 @@ VOID NTAPI ProcessMenuInitializingCallback(
         // * There are no extra submenus.
         if (serviceList->Count != 1)
         {
-            servicesMenuItem = PhPluginCreateEMenuItem(PluginInstance, 0, 0, L"Services", NULL);
+            servicesMenuItem = PhPluginCreateEMenuItem(PluginInstance, 0, 0, L"Ser&vices", NULL);
         }
 
         // Create and add a menu item for each service.
@@ -192,7 +174,7 @@ VOID NTAPI ProcessMenuInitializingCallback(
             if (serviceList->Count == 1)
             {
                 // "Service (Xxx)"
-                escapedName = PhaFormatString(L"Service (%s)", escapedName->Buffer);
+                escapedName = PhaFormatString(L"Ser&vice (%s)", escapedName->Buffer);
             }
 
             serviceMenuItem = PhPluginCreateEMenuItem(PluginInstance, 0, 0, escapedName->Buffer, NULL);
@@ -203,11 +185,11 @@ VOID NTAPI ProcessMenuInitializingCallback(
                 servicesMenuItem = serviceMenuItem;
             }
 
-            PhInsertEMenuItem(serviceMenuItem, PhPluginCreateEMenuItem(PluginInstance, 0, ID_SERVICE_GOTOSERVICE, L"Go to service", serviceItem), -1);
-            PhInsertEMenuItem(serviceMenuItem, startMenuItem = PhPluginCreateEMenuItem(PluginInstance, 0, ID_SERVICE_START, L"Start", serviceItem), -1);
-            PhInsertEMenuItem(serviceMenuItem, continueMenuItem = PhPluginCreateEMenuItem(PluginInstance, 0, ID_SERVICE_CONTINUE, L"Continue", serviceItem), -1);
-            PhInsertEMenuItem(serviceMenuItem, pauseMenuItem = PhPluginCreateEMenuItem(PluginInstance, 0, ID_SERVICE_PAUSE, L"Pause", serviceItem), -1);
-            PhInsertEMenuItem(serviceMenuItem, stopMenuItem = PhPluginCreateEMenuItem(PluginInstance, 0, ID_SERVICE_STOP, L"Stop", serviceItem), -1);
+            PhInsertEMenuItem(serviceMenuItem, PhPluginCreateEMenuItem(PluginInstance, 0, ID_SERVICE_GOTOSERVICE, L"&Go to service", serviceItem), ULONG_MAX);
+            PhInsertEMenuItem(serviceMenuItem, startMenuItem = PhPluginCreateEMenuItem(PluginInstance, 0, ID_SERVICE_START, L"Sta&rt", serviceItem), ULONG_MAX);
+            PhInsertEMenuItem(serviceMenuItem, continueMenuItem = PhPluginCreateEMenuItem(PluginInstance, 0, ID_SERVICE_CONTINUE, L"&Continue", serviceItem), ULONG_MAX);
+            PhInsertEMenuItem(serviceMenuItem, pauseMenuItem = PhPluginCreateEMenuItem(PluginInstance, 0, ID_SERVICE_PAUSE, L"&Pause", serviceItem), ULONG_MAX);
+            PhInsertEMenuItem(serviceMenuItem, stopMenuItem = PhPluginCreateEMenuItem(PluginInstance, 0, ID_SERVICE_STOP, L"St&op", serviceItem), ULONG_MAX);
 
             // Massive copy and paste from mainwnd.c.
             // == START ==
@@ -265,15 +247,15 @@ VOID NTAPI ProcessMenuInitializingCallback(
             // == END ==
 
             if (serviceList->Count != 1)
-                PhInsertEMenuItem(servicesMenuItem, serviceMenuItem, -1);
+                PhInsertEMenuItem(servicesMenuItem, serviceMenuItem, ULONG_MAX);
         }
 
         // Insert our Services menu after the I/O Priority menu.
 
-        priorityMenuItem = PhFindEMenuItem(menuInfo->Menu, 0, L"I/O Priority", 0);
+        priorityMenuItem = PhFindEMenuItem(menuInfo->Menu, 0, NULL, PHAPP_ID_PROCESS_IOPRIORITY);
 
         if (!priorityMenuItem)
-            priorityMenuItem = PhFindEMenuItem(menuInfo->Menu, 0, L"Priority", 0);
+            priorityMenuItem = PhFindEMenuItem(menuInfo->Menu, 0, NULL, PHAPP_ID_PROCESS_PRIORITY);
 
         if (priorityMenuItem)
             insertIndex = PhIndexOfEMenuItem(menuInfo->Menu, priorityMenuItem) + 1;
@@ -284,7 +266,7 @@ VOID NTAPI ProcessMenuInitializingCallback(
     }
 }
 
-NTAPI ServicePropertiesInitializingCallback(
+VOID NTAPI ServicePropertiesInitializingCallback(
     _In_opt_ PVOID Parameter,
     _In_opt_ PVOID Context
     )
@@ -292,6 +274,9 @@ NTAPI ServicePropertiesInitializingCallback(
     PPH_PLUGIN_OBJECT_PROPERTIES objectProperties = Parameter;
     PROPSHEETPAGE propSheetPage;
     PPH_SERVICE_ITEM serviceItem;
+
+    if (!objectProperties)
+        return;
 
     serviceItem = objectProperties->Parameter;
 
@@ -348,7 +333,7 @@ NTAPI ServicePropertiesInitializingCallback(
     }
 
     // Other
-    if (WindowsVersion >= WINDOWS_7 && objectProperties->NumberOfPages < objectProperties->MaximumNumberOfPages)
+    if (objectProperties->NumberOfPages < objectProperties->MaximumNumberOfPages)
     {
         memset(&propSheetPage, 0, sizeof(PROPSHEETPAGE));
         propSheetPage.dwSize = sizeof(PROPSHEETPAGE);
@@ -362,7 +347,7 @@ NTAPI ServicePropertiesInitializingCallback(
     }
 
     // Other
-    if (WindowsVersion >= WINDOWS_VISTA && objectProperties->NumberOfPages < objectProperties->MaximumNumberOfPages)
+    if (objectProperties->NumberOfPages < objectProperties->MaximumNumberOfPages)
     {
         memset(&propSheetPage, 0, sizeof(PROPSHEETPAGE));
         propSheetPage.dwSize = sizeof(PROPSHEETPAGE);
@@ -385,6 +370,9 @@ VOID NTAPI ServiceMenuInitializingCallback(
     PPH_EMENU_ITEM menuItem;
     ULONG indexOfMenuItem;
 
+    if (!menuInfo)
+        return;
+
     if (
         menuInfo->u.Service.NumberOfServices == 1 &&
         (menuInfo->u.Service.Services[0]->State == SERVICE_RUNNING || menuInfo->u.Service.Services[0]->State == SERVICE_PAUSED)
@@ -392,17 +380,17 @@ VOID NTAPI ServiceMenuInitializingCallback(
     {
         // Insert our Restart menu item after the Stop menu item.
 
-        menuItem = PhFindEMenuItem(menuInfo->Menu, PH_EMENU_FIND_STARTSWITH, L"Stop", 0);
+        menuItem = PhFindEMenuItem(menuInfo->Menu, 0, NULL, PHAPP_ID_SERVICE_STOP);
 
         if (menuItem)
-            indexOfMenuItem = PhIndexOfEMenuItem(menuInfo->Menu, menuItem);
+            indexOfMenuItem = PhIndexOfEMenuItem(menuInfo->Menu, menuItem) + 1;
         else
-            indexOfMenuItem = -1;
+            indexOfMenuItem = ULONG_MAX;
 
         PhInsertEMenuItem(
             menuInfo->Menu,
-            PhPluginCreateEMenuItem(PluginInstance, 0, ID_SERVICE_RESTART, L"Restart", menuInfo->u.Service.Services[0]),
-            indexOfMenuItem + 1
+            PhPluginCreateEMenuItem(PluginInstance, 0, ID_SERVICE_RESTART, L"R&estart", menuInfo->u.Service.Services[0]),
+            indexOfMenuItem
             );
     }
 }
@@ -432,20 +420,7 @@ LOGICAL DllMain(
             info->Author = L"wj32";
             info->Description = L"Extends service management capabilities.";
             info->Url = L"https://wj32.org/processhacker/forums/viewtopic.php?t=1113";
-            info->HasOptions = TRUE;
 
-            PhRegisterCallback(
-                PhGetPluginCallback(PluginInstance, PluginCallbackLoad),
-                LoadCallback,
-                NULL,
-                &PluginLoadCallbackRegistration
-                );
-            PhRegisterCallback(
-                PhGetPluginCallback(PluginInstance, PluginCallbackShowOptions),
-                ShowOptionsCallback,
-                NULL,
-                &PluginShowOptionsCallbackRegistration
-                );
             PhRegisterCallback(
                 PhGetPluginCallback(PluginInstance, PluginCallbackMenuItem),
                 MenuItemCallback,

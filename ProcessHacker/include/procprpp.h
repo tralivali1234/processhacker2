@@ -9,7 +9,7 @@
 
 typedef struct _PH_PROCESS_PROPSHEETCONTEXT
 {
-    WNDPROC OldWndProc;
+    WNDPROC PropSheetWindowHookProc;
     PH_LAYOUT_MANAGER LayoutManager;
     PPH_LAYOUT_ITEM TabPageItem;
     BOOLEAN LayoutInitialized;
@@ -47,43 +47,6 @@ INT CALLBACK PhpStandardPropPageProc(
     _In_ UINT uMsg,
     _In_ LPPROPSHEETPAGE ppsp
     );
-
-FORCEINLINE BOOLEAN PhpPropPageDlgProcHeader(
-    _In_ HWND hwndDlg,
-    _In_ UINT uMsg,
-    _In_ LPARAM lParam,
-    _Out_ LPPROPSHEETPAGE *PropSheetPage,
-    _Out_ PPH_PROCESS_PROPPAGECONTEXT *PropPageContext,
-    _Out_ PPH_PROCESS_ITEM *ProcessItem
-    )
-{
-    LPPROPSHEETPAGE propSheetPage;
-    PPH_PROCESS_PROPPAGECONTEXT propPageContext;
-
-    if (uMsg == WM_INITDIALOG)
-    {
-        // Save the context.
-        SetProp(hwndDlg, PhMakeContextAtom(), (HANDLE)lParam);
-    }
-
-    propSheetPage = (LPPROPSHEETPAGE)GetProp(hwndDlg, PhMakeContextAtom());
-
-    if (!propSheetPage)
-        return FALSE;
-
-    *PropSheetPage = propSheetPage;
-    *PropPageContext = propPageContext = (PPH_PROCESS_PROPPAGECONTEXT)propSheetPage->lParam;
-    *ProcessItem = propPageContext->PropContext->ProcessItem;
-
-    return TRUE;
-}
-
-FORCEINLINE VOID PhpPropPageDlgProcDestroy(
-    _In_ HWND hwndDlg
-    )
-{
-    RemoveProp(hwndDlg, PhMakeContextAtom());
-}
 
 #define SET_BUTTON_ICON(Id, Icon) \
     SendMessage(GetDlgItem(hwndDlg, (Id)), BM_SETIMAGE, IMAGE_ICON, (LPARAM)(Icon))
@@ -177,6 +140,13 @@ INT_PTR CALLBACK PhpProcessServicesDlgProc(
     _In_ LPARAM lParam
     );
 
+INT_PTR CALLBACK PhpProcessWmiProvidersDlgProc(
+    _In_ HWND hwndDlg,
+    _In_ UINT uMsg,
+    _In_ WPARAM wParam,
+    _In_ LPARAM lParam
+    );
+
 extern PH_STRINGREF PhpLoadingText;
 
 #define WM_PH_THREADS_UPDATED (WM_APP + 200)
@@ -195,7 +165,10 @@ typedef struct _PH_THREADS_CONTEXT
 
     HWND WindowHandle;
 // end_phapppub
-
+    HWND TreeNewHandle;
+    HWND SearchboxHandle;
+    PPH_STRING SearchboxText;
+    PPH_TN_FILTER_ENTRY FilterEntry;
     union
     {
         PH_THREAD_LIST_CONTEXT ListContext;
@@ -224,7 +197,8 @@ typedef struct _PH_MODULES_CONTEXT
 
     HWND WindowHandle;
 // end_phapppub
-
+    HWND SearchboxHandle;
+    HWND TreeNewHandle;
     union
     {
         PH_MODULE_LIST_CONTEXT ListContext;
@@ -237,6 +211,8 @@ typedef struct _PH_MODULES_CONTEXT
     PH_PROVIDER_EVENT_QUEUE EventQueue;
     NTSTATUS LastRunStatus;
     PPH_STRING ErrorMessage;
+    PPH_STRING SearchboxText;
+    PPH_TN_FILTER_ENTRY FilterEntry;
 // begin_phapppub
 } PH_MODULES_CONTEXT, *PPH_MODULES_CONTEXT;
 // end_phapppub
@@ -255,6 +231,8 @@ typedef struct _PH_HANDLES_CONTEXT
 
     HWND WindowHandle;
 // end_phapppub
+    HWND TreeNewHandle;
+    HWND SearchWindowHandle;
 
     union
     {
@@ -270,6 +248,9 @@ typedef struct _PH_HANDLES_CONTEXT
     BOOLEAN SelectedHandleInherit;
     NTSTATUS LastRunStatus;
     PPH_STRING ErrorMessage;
+
+    PPH_STRING SearchboxText;
+    PPH_TN_FILTER_ENTRY FilterEntry;
 // begin_phapppub
 } PH_HANDLES_CONTEXT, *PPH_HANDLES_CONTEXT;
 // end_phapppub
@@ -280,6 +261,8 @@ typedef struct _PH_MEMORY_CONTEXT
     HANDLE ProcessId;
     HWND WindowHandle;
 // end_phapppub
+    HWND TreeNewHandle;
+    HWND SearchboxHandle;
 
     union
     {
@@ -294,6 +277,12 @@ typedef struct _PH_MEMORY_CONTEXT
     BOOLEAN MemoryItemListValid;
     NTSTATUS LastRunStatus;
     PPH_STRING ErrorMessage;
+
+    BOOLEAN UseSearchPointer;
+    ULONG64 SearchPointer;
+    PPH_STRING SearchboxText;
+    PPH_TN_FILTER_ENTRY AllocationFilterEntry;
+    PPH_TN_FILTER_ENTRY FilterEntry;
 // begin_phapppub
 } PH_MEMORY_CONTEXT, *PPH_MEMORY_CONTEXT;
 // end_phapppub
@@ -303,10 +292,11 @@ typedef struct _PH_MEMORY_CONTEXT
 typedef struct _PH_STATISTICS_CONTEXT
 {
     PH_CALLBACK_REGISTRATION ProcessesUpdatedRegistration;
-
     HWND WindowHandle;
+    HWND ListViewHandle;
     BOOLEAN Enabled;
     HANDLE ProcessHandle;
+    PPH_PROCESS_ITEM ProcessItem;
 } PH_STATISTICS_CONTEXT, *PPH_STATISTICS_CONTEXT;
 
 #define WM_PH_PERFORMANCE_UPDATE (WM_APP + 241)
@@ -316,6 +306,7 @@ typedef struct _PH_PERFORMANCE_CONTEXT
     PH_CALLBACK_REGISTRATION ProcessesUpdatedRegistration;
 
     HWND WindowHandle;
+    BOOLEAN Enabled;
 
     PH_GRAPH_STATE CpuGraphState;
     PH_GRAPH_STATE PrivateGraphState;
@@ -334,7 +325,45 @@ typedef struct _PH_ENVIRONMENT_ITEM
 
 typedef struct _PH_ENVIRONMENT_CONTEXT
 {
-    HWND ListViewHandle;
+    HWND WindowHandle;
+    HWND TreeNewHandle;
+    HWND SearchWindowHandle;
+
+    PPH_PROCESS_ITEM ProcessItem;   
+    PPH_STRING SearchboxText;
+    PPH_STRING StatusMessage;
+
+    PPH_LIST NodeList;
+    PPH_LIST NodeRootList;
+    PPH_HASHTABLE NodeHashtable;
+    PPH_TN_FILTER_ENTRY TreeFilterEntry;
+    ULONG TreeNewSortColumn;
+    PH_TN_FILTER_SUPPORT TreeFilterSupport;
+    PH_SORT_ORDER TreeNewSortOrder;
+    PH_CM_MANAGER Cm;
+
+    BOOLEAN EnableStateHighlighting;
+
+    union
+    {
+        ULONG Flags;
+        struct
+        {
+            ULONG Reserved : 1;
+            ULONG HideProcessEnvironment : 1;
+            ULONG HideUserEnvironment : 1;
+            ULONG HideSystemEnvironment : 1;
+            ULONG HighlightProcessEnvironment : 1;
+            ULONG HighlightUserEnvironment : 1;
+            ULONG HighlightSystemEnvironment : 1;
+            ULONG HideCmdTypeEnvironment : 1;
+            ULONG HighlightCmdEnvironment : 1;
+            ULONG Spare : 23;
+        };
+    };
+
+    PVOID SystemDefaultEnvironment;
+    PVOID UserDefaultEnvironment;
     PH_ARRAY Items;
 } PH_ENVIRONMENT_CONTEXT, *PPH_ENVIRONMENT_CONTEXT;
 

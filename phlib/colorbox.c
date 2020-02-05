@@ -51,7 +51,7 @@ BOOLEAN PhColorBoxInitialization(
     c.lpfnWndProc = PhpColorBoxWndProc;
     c.cbClsExtra = 0;
     c.cbWndExtra = sizeof(PVOID);
-    c.hInstance = PhLibImageBase;
+    c.hInstance = PhInstanceHandle;
     c.hIcon = NULL;
     c.hCursor = LoadCursor(NULL, IDC_ARROW);
     c.hbrBackground = NULL;
@@ -132,8 +132,8 @@ LRESULT CALLBACK PhpColorBoxWndProc(
         break;
     case WM_DESTROY:
         {
-            PhpFreeColorBoxContext(context);
             SetWindowLongPtr(hwnd, 0, (LONG_PTR)NULL);
+            PhpFreeColorBoxContext(context);
         }
         break;
     case WM_PAINT:
@@ -156,8 +156,8 @@ LRESULT CALLBACK PhpColorBoxWndProc(
                     SetDCBrushColor(hdc, PhMakeColorBrighter(context->SelectedColor, 64));
 
                 // Draw the rectangle.
-                SelectObject(hdc, GetStockObject(DC_PEN));
-                SelectObject(hdc, GetStockObject(DC_BRUSH));
+                SelectPen(hdc, GetStockPen(DC_PEN));
+                SelectBrush(hdc, GetStockBrush(DC_BRUSH));
                 Rectangle(hdc, clientRect.left, clientRect.top, clientRect.right, clientRect.bottom);
 
                 EndPaint(hwnd, &paintStruct);

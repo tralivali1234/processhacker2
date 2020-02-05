@@ -3,6 +3,7 @@
  *   service support functions
  *
  * Copyright (C) 2010-2012 wj32
+ * Copyright (C) 2019 dmex
  *
  * This file is part of Process Hacker.
  *
@@ -21,12 +22,11 @@
  */
 
 #include <ph.h>
-
 #include <subprocesstag.h>
-
 #include <svcsup.h>
 
-#define SIP(String, Integer) { (String), (PVOID)(Integer) }
+#define SIP(String, Integer) \
+    { (String), (PVOID)(Integer) }
 
 static PH_KEY_VALUE_PAIR PhpServiceStatePairs[] =
 {
@@ -50,7 +50,7 @@ static PH_KEY_VALUE_PAIR PhpServiceTypePairs[] =
     SIP(L"User own process", SERVICE_USER_OWN_PROCESS),
     SIP(L"User own process (instance)", SERVICE_USER_OWN_PROCESS | SERVICE_USERSERVICE_INSTANCE),
     SIP(L"User share process", SERVICE_USER_SHARE_PROCESS),
-    SIP(L"User share process (instance)", SERVICE_USER_SHARE_PROCESS | SERVICE_USERSERVICE_INSTANCE),
+    SIP(L"User share process (instance)", SERVICE_USER_SHARE_PROCESS | SERVICE_USERSERVICE_INSTANCE)
 };
 
 static PH_KEY_VALUE_PAIR PhpServiceStartTypePairs[] =
@@ -70,12 +70,36 @@ static PH_KEY_VALUE_PAIR PhpServiceErrorControlPairs[] =
     SIP(L"Critical", SERVICE_ERROR_CRITICAL)
 };
 
-WCHAR *PhServiceTypeStrings[10] = { L"Driver", L"FS driver", L"Own process", L"Share process",
-    L"Own interactive process", L"Share interactive process", L"User own process", L"User own process (instance)",
-    L"User share process", L"User share process (instance)" };
-WCHAR *PhServiceStartTypeStrings[5] = { L"Disabled", L"Boot start", L"System start",
-    L"Auto start", L"Demand start" };
-WCHAR *PhServiceErrorControlStrings[4] = { L"Ignore", L"Normal", L"Severe", L"Critical" };
+PWSTR PhServiceTypeStrings[10] =
+{
+    L"Driver",
+    L"FS driver",
+    L"Own process",
+    L"Share process",
+    L"Own interactive process",
+    L"Share interactive process",
+    L"User own process",
+    L"User own process (instance)",
+    L"User share process",
+    L"User share process (instance)"
+};
+
+PWSTR PhServiceStartTypeStrings[5] =
+{
+    L"Disabled",
+    L"Boot start",
+    L"System start",
+    L"Auto start",
+    L"Demand start"
+};
+
+PWSTR PhServiceErrorControlStrings[4] =
+{
+    L"Ignore",
+    L"Normal",
+    L"Severe",
+    L"Critical"
+};
 
 PVOID PhEnumServices(
     _In_ SC_HANDLE ScManagerHandle,
@@ -92,7 +116,26 @@ PVOID PhEnumServices(
     ULONG servicesReturned;
 
     if (!Type)
-        Type = WindowsVersion >= WINDOWS_10 ? SERVICE_TYPE_ALL : (SERVICE_DRIVER | SERVICE_WIN32);
+    {
+        if (WindowsVersion >= WINDOWS_10_RS1)
+        {
+            Type = SERVICE_TYPE_ALL;
+        }
+        else if (WindowsVersion >= WINDOWS_10)
+        {
+            Type = SERVICE_WIN32 |
+                SERVICE_ADAPTER |
+                SERVICE_DRIVER |
+                SERVICE_INTERACTIVE_PROCESS |
+                SERVICE_USER_SERVICE |
+                SERVICE_USERSERVICE_INSTANCE;
+        }
+        else
+        {
+            Type = SERVICE_DRIVER | SERVICE_WIN32;
+        }
+    }
+
     if (!State)
         State = SERVICE_STATE_ALL;
 
@@ -104,7 +147,7 @@ PVOID PhEnumServices(
         SC_ENUM_PROCESS_INFO,
         Type,
         State,
-        buffer,
+        (PBYTE)buffer,
         bufferSize,
         &returnLength,
         &servicesReturned,
@@ -123,7 +166,7 @@ PVOID PhEnumServices(
                 SC_ENUM_PROCESS_INFO,
                 Type,
                 State,
-                buffer,
+                (PBYTE)buffer,
                 bufferSize,
                 &returnLength,
                 &servicesReturned,
@@ -162,6 +205,51 @@ SC_HANDLE PhOpenService(
     CloseServiceHandle(scManagerHandle);
 
     return serviceHandle;
+}
+
+NTSTATUS PhOpenServiceEx(
+    _In_ PWSTR ServiceName,
+    _In_ ACCESS_MASK DesiredAccess,
+    _In_ SC_HANDLE ScManagerHandle,
+    _Out_ SC_HANDLE* ServiceHandle
+    )
+{
+    SC_HANDLE serviceHandle;
+
+    if (ScManagerHandle)
+    {
+        if (serviceHandle = OpenService(ScManagerHandle, ServiceName, DesiredAccess))
+        {
+            *ServiceHandle = serviceHandle;
+            return STATUS_SUCCESS;
+        }
+
+        return PhGetLastWin32ErrorAsNtStatus();
+    }
+    else
+    {
+        NTSTATUS status;
+        SC_HANDLE scManagerHandle;
+
+        if (!(scManagerHandle = OpenSCManager(NULL, NULL, SC_MANAGER_CONNECT)))
+        {
+            return PhGetLastWin32ErrorAsNtStatus();
+        }
+
+        if (serviceHandle = OpenService(ScManagerHandle, ServiceName, DesiredAccess))
+        {
+            *ServiceHandle = serviceHandle;
+            status = STATUS_SUCCESS;
+        }
+        else
+        {
+            status = PhGetLastWin32ErrorAsNtStatus();
+        }
+        
+        CloseServiceHandle(scManagerHandle);
+
+        return status;
+    }
 }
 
 PVOID PhGetServiceConfig(
@@ -338,7 +426,7 @@ ULONG PhGetServiceTypeInteger(
         ))
         return integer;
     else
-        return -1;
+        return ULONG_MAX;
 }
 
 PWSTR PhGetServiceStartTypeString(
@@ -372,7 +460,7 @@ ULONG PhGetServiceStartTypeInteger(
         ))
         return integer;
     else
-        return -1;
+        return ULONG_MAX;
 }
 
 PWSTR PhGetServiceErrorControlString(
@@ -406,7 +494,7 @@ ULONG PhGetServiceErrorControlInteger(
         ))
         return integer;
     else
-        return -1;
+        return ULONG_MAX;
 }
 
 PPH_STRING PhGetServiceNameFromTag(
@@ -420,7 +508,7 @@ PPH_STRING PhGetServiceNameFromTag(
 
     if (!I_QueryTagInformation)
     {
-        I_QueryTagInformation = PhGetModuleProcAddress(L"advapi32.dll", "I_QueryTagInformation");
+        I_QueryTagInformation = PhGetDllProcedureAddress(L"advapi32.dll", "I_QueryTagInformation", 0);
 
         if (!I_QueryTagInformation)
             return NULL;
@@ -439,6 +527,49 @@ PPH_STRING PhGetServiceNameFromTag(
     }
 
     return serviceName;
+}
+
+PPH_STRING PhGetServiceNameForModuleReference(
+    _In_ HANDLE ProcessId,
+    _In_ PWSTR ModuleName
+    )
+{
+    static PQUERY_TAG_INFORMATION I_QueryTagInformation = NULL;
+    PPH_STRING serviceNames = NULL;
+    TAG_INFO_NAMES_REFERENCING_MODULE moduleNameRef;
+
+    if (!I_QueryTagInformation)
+    {
+        I_QueryTagInformation = PhGetDllProcedureAddress(L"advapi32.dll", "I_QueryTagInformation", 0);
+
+        if (!I_QueryTagInformation)
+            return NULL;
+    }
+
+    memset(&moduleNameRef, 0, sizeof(TAG_INFO_NAMES_REFERENCING_MODULE));
+    moduleNameRef.InParams.dwPid = HandleToUlong(ProcessId);
+    moduleNameRef.InParams.pszModule = ModuleName;
+
+    I_QueryTagInformation(NULL, eTagInfoLevelNamesReferencingModule, &moduleNameRef);
+
+    if (moduleNameRef.OutParams.pmszNames)
+    {
+        PH_STRING_BUILDER sb;
+        PWSTR serviceName;
+
+        PhInitializeStringBuilder(&sb, 0x40);
+
+        for (serviceName = moduleNameRef.OutParams.pmszNames; *serviceName; serviceName += PhCountStringZ(serviceName) + 1)
+            PhAppendFormatStringBuilder(&sb, L"%s, ", serviceName);
+
+        if (sb.String->Length != 0)
+            PhRemoveEndStringBuilder(&sb, 2);
+
+        serviceNames = PhFinalStringBuilderString(&sb);
+        LocalFree(moduleNameRef.OutParams.pmszNames);
+    }
+
+    return serviceNames;
 }
 
 NTSTATUS PhGetThreadServiceTag(
@@ -481,18 +612,36 @@ NTSTATUS PhGetThreadServiceTag(
 }
 
 NTSTATUS PhGetServiceDllParameter(
+    _In_ ULONG ServiceType,
     _In_ PPH_STRINGREF ServiceName,
     _Out_ PPH_STRING *ServiceDll
     )
 {
     static PH_STRINGREF servicesKeyName = PH_STRINGREF_INIT(L"System\\CurrentControlSet\\Services\\");
     static PH_STRINGREF parameters = PH_STRINGREF_INIT(L"\\Parameters");
-
     NTSTATUS status;
     HANDLE keyHandle;
     PPH_STRING keyName;
 
-    keyName = PhConcatStringRef3(&servicesKeyName, ServiceName, &parameters);
+    if (ServiceType & SERVICE_USERSERVICE_INSTANCE)
+    {
+        PH_STRINGREF hostServiceName;
+        PH_STRINGREF userSessionLuid;
+
+        // The SCM creates multiple "user service instance" processes for each user session with the following template:
+        // [Host Service Instance Name]_[LUID for Session]
+        // The SCM internally uses the ServiceDll of the "host service instance" for all "user service instance" processes/services
+        // and we need to parse the user service template and query the "host service instance" configuration. (hsebs)
+
+        if (PhSplitStringRefAtLastChar(ServiceName, L'_', &hostServiceName, &userSessionLuid))
+            keyName = PhConcatStringRef3(&servicesKeyName, &hostServiceName, &parameters);
+        else
+            keyName = PhConcatStringRef3(&servicesKeyName, ServiceName, &parameters);
+    }
+    else
+    {
+        keyName = PhConcatStringRef3(&servicesKeyName, ServiceName, &parameters);
+    }
 
     if (NT_SUCCESS(status = PhOpenKey(
         &keyHandle,

@@ -18,6 +18,7 @@ typedef struct _PH_HANDLE_ITEM
     PVOID Object;
     ULONG Attributes;
     ACCESS_MASK GrantedAccess;
+    ULONG TypeIndex;
     ULONG FileFlags;
 
     PPH_STRING TypeName;
@@ -25,7 +26,6 @@ typedef struct _PH_HANDLE_ITEM
     PPH_STRING BestObjectName;
 
     WCHAR HandleString[PH_PTR_STR_LEN_1];
-    WCHAR ObjectString[PH_PTR_STR_LEN_1];
     WCHAR GrantedAccessString[PH_PTR_STR_LEN_1];
 } PH_HANDLE_ITEM, *PPH_HANDLE_ITEM;
 
@@ -48,10 +48,6 @@ typedef struct _PH_HANDLE_PROVIDER
     NTSTATUS RunStatus;
 } PH_HANDLE_PROVIDER, *PPH_HANDLE_PROVIDER;
 // end_phapppub
-
-BOOLEAN PhHandleProviderInitialization(
-    VOID
-    );
 
 PPH_HANDLE_PROVIDER PhCreateHandleProvider(
     _In_ HANDLE ProcessId

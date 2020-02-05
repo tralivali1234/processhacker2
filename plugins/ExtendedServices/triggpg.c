@@ -26,6 +26,7 @@ typedef struct _SERVICE_TRIGGERS_CONTEXT
 {
     PPH_SERVICE_ITEM ServiceItem;
     HWND TriggersLv;
+    PH_LAYOUT_MANAGER LayoutManager;
     struct _ES_TRIGGER_CONTEXT *TriggerContext;
 } SERVICE_TRIGGERS_CONTEXT, *PSERVICE_TRIGGERS_CONTEXT;
 
@@ -60,14 +61,14 @@ INT_PTR CALLBACK EspServiceTriggersDlgProc(
         context = PhAllocate(sizeof(SERVICE_TRIGGERS_CONTEXT));
         memset(context, 0, sizeof(SERVICE_TRIGGERS_CONTEXT));
 
-        SetProp(hwndDlg, L"Context", (HANDLE)context);
+        PhSetWindowContext(hwndDlg, PH_WINDOW_CONTEXT_DEFAULT, context);
     }
     else
     {
-        context = (PSERVICE_TRIGGERS_CONTEXT)GetProp(hwndDlg, L"Context");
+        context = PhGetWindowContext(hwndDlg, PH_WINDOW_CONTEXT_DEFAULT);
 
         if (uMsg == WM_DESTROY)
-            RemoveProp(hwndDlg, L"Context");
+            PhRemoveWindowContext(hwndDlg, PH_WINDOW_CONTEXT_DEFAULT);
     }
 
     if (!context)
@@ -94,20 +95,37 @@ INT_PTR CALLBACK EspServiceTriggersDlgProc(
 
             if (!NT_SUCCESS(status))
             {
-                PhShowWarning(hwndDlg, L"Unable to query service trigger information: %s",
-                    ((PPH_STRING)PH_AUTO(PhGetNtMessage(status)))->Buffer);
+                PPH_STRING errorMessage = PhGetNtMessage(status);
+
+                PhShowWarning(
+                    hwndDlg,
+                    L"Unable to query service trigger information: %s",
+                    PhGetStringOrDefault(errorMessage, L"Unknown error.")
+                    );
+
+                PhClearReference(&errorMessage);
             }
+
+            PhInitializeLayoutManager(&context->LayoutManager, hwndDlg);
+            PhAddLayoutItem(&context->LayoutManager, GetDlgItem(hwndDlg, IDC_TRIGGERS), NULL, PH_ANCHOR_ALL);
+            PhAddLayoutItem(&context->LayoutManager, GetDlgItem(hwndDlg, IDC_NEW), NULL, PH_ANCHOR_BOTTOM | PH_ANCHOR_RIGHT);
+            PhAddLayoutItem(&context->LayoutManager, GetDlgItem(hwndDlg, IDC_EDIT), NULL, PH_ANCHOR_BOTTOM | PH_ANCHOR_RIGHT);
+            PhAddLayoutItem(&context->LayoutManager, GetDlgItem(hwndDlg, IDC_DELETE), NULL, PH_ANCHOR_BOTTOM | PH_ANCHOR_RIGHT);
+
+            PhInitializeWindowTheme(hwndDlg, !!PhGetIntegerSetting(L"EnableThemeSupport"));
         }
         break;
     case WM_DESTROY:
         {
+            PhDeleteLayoutManager(&context->LayoutManager);
+
             EsDestroyServiceTriggerContext(context->TriggerContext);
             PhFree(context);
         }
         break;
     case WM_COMMAND:
         {
-            switch (LOWORD(wParam))
+            switch (GET_WM_COMMAND_ID(wParam, lParam))
             {
             case IDC_NEW:
                 if (context->TriggerContext)
@@ -137,20 +155,31 @@ INT_PTR CALLBACK EspServiceTriggersDlgProc(
                 return TRUE;
             case PSN_APPLY:
                 {
-                    ULONG win32Result = 0;
+                    ULONG win32Result = ERROR_SUCCESS;
 
                     SetWindowLongPtr(hwndDlg, DWLP_MSGRESULT, PSNRET_NOERROR);
 
                     if (!EsSaveServiceTriggerInfo(context->TriggerContext, &win32Result))
                     {
-                        if (win32Result == ERROR_CANCELLED || (PhShowMessage(
-                            hwndDlg,
-                            MB_ICONERROR | MB_RETRYCANCEL,
-                            L"Unable to change service trigger information: %s",
-                            ((PPH_STRING)PH_AUTO(PhGetWin32Message(win32Result)))->Buffer
-                            ) == IDRETRY))
+                        if (win32Result == ERROR_CANCELLED)
                         {
                             SetWindowLongPtr(hwndDlg, DWLP_MSGRESULT, PSNRET_INVALID);
+                        }
+                        else
+                        {
+                            PPH_STRING errorMessage = PhGetWin32Message(win32Result);
+
+                            if (PhShowMessage(
+                                hwndDlg,
+                                MB_ICONERROR | MB_RETRYCANCEL,
+                                L"Unable to change service trigger information: %s",
+                                PhGetStringOrDefault(errorMessage, L"Unknown error.")
+                                ) == IDRETRY)
+                            {
+                                SetWindowLongPtr(hwndDlg, DWLP_MSGRESULT, PSNRET_INVALID);
+                            }
+
+                            PhClearReference(&errorMessage);
                         }
                     }
 
@@ -174,6 +203,11 @@ INT_PTR CALLBACK EspServiceTriggersDlgProc(
                 }
                 break;
             }
+        }
+        break;
+    case WM_SIZE:
+        {
+            PhLayoutManagerLayout(&context->LayoutManager);
         }
         break;
     }

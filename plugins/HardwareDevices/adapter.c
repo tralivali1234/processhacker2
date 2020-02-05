@@ -34,7 +34,7 @@ VOID AdapterEntryDeleteProcedure(
     PhRemoveItemList(NetworkAdaptersList, PhFindItemList(NetworkAdaptersList, entry));
     PhReleaseQueuedLockExclusive(&NetworkAdaptersListLock);
 
-    DeleteNetAdapterId(&entry->Id);
+    DeleteNetAdapterId(&entry->AdapterId);
     PhClearReference(&entry->AdapterName);
 
     PhDeleteCircularBuffer_ULONG64(&entry->InboundBuffer);
@@ -63,9 +63,7 @@ VOID NetAdaptersUpdate(
         PDV_NETADAPTER_ENTRY entry;
         ULONG64 networkInOctets = 0;
         ULONG64 networkOutOctets = 0;
-        ULONG64 networkRcvSpeed = 0;
-        ULONG64 networkXmitSpeed = 0;
-        NDIS_MEDIA_CONNECT_STATE mediaState = MediaConnectStateUnknown;
+        ULONG64 linkSpeedValue = 0;
 
         entry = PhReferenceObjectSafe(NetworkAdaptersList->Items[i]);
 
@@ -74,7 +72,15 @@ VOID NetAdaptersUpdate(
 
         if (PhGetIntegerSetting(SETTING_NAME_ENABLE_NDIS))
         {
-            if (NT_SUCCESS(NetworkAdapterCreateHandle(&deviceHandle, entry->Id.InterfaceGuid)))
+            if (NT_SUCCESS(PhCreateFileWin32(
+                &deviceHandle,
+                PhGetString(entry->AdapterId.InterfaceDevice),
+                FILE_GENERIC_READ,
+                FILE_ATTRIBUTE_NORMAL,
+                FILE_SHARE_READ | FILE_SHARE_WRITE,
+                FILE_OPEN,
+                FILE_NON_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT
+                )))
             {
                 if (!entry->CheckedDeviceSupport)
                 {
@@ -99,35 +105,30 @@ VOID NetAdaptersUpdate(
         if (deviceHandle)
         {
             NDIS_STATISTICS_INFO interfaceStats;
-            NDIS_LINK_STATE interfaceState;
 
             memset(&interfaceStats, 0, sizeof(NDIS_STATISTICS_INFO));
 
-            NetworkAdapterQueryStatistics(deviceHandle, &interfaceStats);
-
-            if (NT_SUCCESS(NetworkAdapterQueryLinkState(deviceHandle, &interfaceState)))
+            if (NT_SUCCESS(NetworkAdapterQueryStatistics(deviceHandle, &interfaceStats)))
             {
-                mediaState = interfaceState.MediaConnectState;
+                if (!(interfaceStats.SupportedStatistics & NDIS_STATISTICS_FLAGS_VALID_BYTES_RCV))
+                    networkInOctets = NetworkAdapterQueryValue(deviceHandle, OID_GEN_BYTES_RCV);
+                else
+                    networkInOctets = interfaceStats.ifHCInOctets;
+
+                if (!(interfaceStats.SupportedStatistics & NDIS_STATISTICS_FLAGS_VALID_BYTES_XMIT))
+                    networkOutOctets = NetworkAdapterQueryValue(deviceHandle, OID_GEN_BYTES_XMIT);
+                else
+                    networkOutOctets = interfaceStats.ifHCOutOctets;
             }
-
-            if (!(interfaceStats.SupportedStatistics & NDIS_STATISTICS_FLAGS_VALID_BYTES_RCV))
+            else
+            {
                 networkInOctets = NetworkAdapterQueryValue(deviceHandle, OID_GEN_BYTES_RCV);
-            else
-                networkInOctets = interfaceStats.ifHCInOctets;
-
-            if (!(interfaceStats.SupportedStatistics & NDIS_STATISTICS_FLAGS_VALID_BYTES_XMIT))
                 networkOutOctets = NetworkAdapterQueryValue(deviceHandle, OID_GEN_BYTES_XMIT);
-            else
-                networkOutOctets = interfaceStats.ifHCOutOctets;
-
-            networkRcvSpeed = networkInOctets - entry->LastInboundValue;
-            networkXmitSpeed = networkOutOctets - entry->LastOutboundValue;
+            }
 
             // HACK: Pull the Adapter name from the current query.
             if (!entry->AdapterName)
-            {
-                entry->AdapterName = NetworkAdapterQueryName(deviceHandle, entry->Id.InterfaceGuid);
-            }
+                entry->AdapterName = NetworkAdapterQueryName(deviceHandle, entry->AdapterId.InterfaceGuid);
 
             entry->DevicePresent = TRUE;
 
@@ -137,13 +138,10 @@ VOID NetAdaptersUpdate(
         {
             MIB_IF_ROW2 interfaceRow;
 
-            if (QueryInterfaceRow(&entry->Id, &interfaceRow))
+            if (QueryInterfaceRow(&entry->AdapterId, &interfaceRow))
             {
                 networkInOctets = interfaceRow.InOctets;
                 networkOutOctets = interfaceRow.OutOctets;
-                mediaState = interfaceRow.MediaConnectState;
-                networkRcvSpeed = networkInOctets - entry->LastInboundValue;
-                networkXmitSpeed = networkOutOctets - entry->LastOutboundValue;
 
                 // HACK: Pull the Adapter name from the current query.
                 if (!entry->AdapterName && PhCountStringZ(interfaceRow.Description) > 0)
@@ -159,32 +157,29 @@ VOID NetAdaptersUpdate(
             }
         }
 
-        if (mediaState == MediaConnectStateUnknown)
-        {
-            // We don't want incorrect data when the adapter is disabled.
-            networkRcvSpeed = 0;
-            networkXmitSpeed = 0;
-        }
+        if (entry->NetworkReceiveRaw < networkInOctets)
+            entry->NetworkReceiveRaw = networkInOctets;
+        if (entry->NetworkSendRaw < networkOutOctets)
+            entry->NetworkSendRaw = networkOutOctets;
+
+        PhUpdateDelta(&entry->NetworkSendDelta, entry->NetworkSendRaw);
+        PhUpdateDelta(&entry->NetworkReceiveDelta, entry->NetworkReceiveRaw);
 
         if (!entry->HaveFirstSample)
         {
-            // The first sample must be zero.
-            networkRcvSpeed = 0;
-            networkXmitSpeed = 0;
+            entry->NetworkSendDelta.Delta = 0;
+            entry->NetworkReceiveDelta.Delta = 0;
             entry->HaveFirstSample = TRUE;
         }
 
         if (runCount != 0)
         {
-            PhAddItemCircularBuffer_ULONG64(&entry->InboundBuffer, networkRcvSpeed);
-            PhAddItemCircularBuffer_ULONG64(&entry->OutboundBuffer, networkXmitSpeed);
-        }
+            entry->CurrentNetworkSend = entry->NetworkSendDelta.Delta;
+            entry->CurrentNetworkReceive = entry->NetworkReceiveDelta.Delta;
 
-        //context->LinkSpeed = networkLinkSpeed;
-        entry->InboundValue = networkRcvSpeed;
-        entry->OutboundValue = networkXmitSpeed;
-        entry->LastInboundValue = networkInOctets;
-        entry->LastOutboundValue = networkOutOctets;
+            PhAddItemCircularBuffer_ULONG64(&entry->OutboundBuffer, entry->CurrentNetworkSend);
+            PhAddItemCircularBuffer_ULONG64(&entry->InboundBuffer, entry->CurrentNetworkReceive);
+        }
 
         PhDereferenceObjectDeferDelete(entry);
     }
@@ -204,6 +199,7 @@ VOID InitializeNetAdapterId(
     Id->InterfaceIndex = InterfaceIndex;
     Id->InterfaceLuid = InterfaceLuid;
     PhSetReference(&Id->InterfaceGuid, InterfaceGuid);
+    Id->InterfaceDevice = PhConcatStrings2(L"\\\\.\\", InterfaceGuid->Buffer);
 }
 
 VOID CopyNetAdapterId(
@@ -224,6 +220,7 @@ VOID DeleteNetAdapterId(
     )
 {
     PhClearReference(&Id->InterfaceGuid);
+    PhClearReference(&Id->InterfaceDevice);
 }
 
 BOOLEAN EquivalentNetAdapterId(
@@ -246,7 +243,7 @@ PDV_NETADAPTER_ENTRY CreateNetAdapterEntry(
     entry = PhCreateObject(sizeof(DV_NETADAPTER_ENTRY), NetAdapterEntryType);
     memset(entry, 0, sizeof(DV_NETADAPTER_ENTRY));
 
-    CopyNetAdapterId(&entry->Id, Id);
+    CopyNetAdapterId(&entry->AdapterId, Id);
 
     PhInitializeCircularBuffer_ULONG64(&entry->InboundBuffer, PhGetIntegerSetting(L"SampleCount"));
     PhInitializeCircularBuffer_ULONG64(&entry->OutboundBuffer, PhGetIntegerSetting(L"SampleCount"));

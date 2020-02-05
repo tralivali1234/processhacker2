@@ -3,6 +3,7 @@
  *   extended list view
  *
  * Copyright (C) 2010-2012 wj32
+ * Copyright (C) 2017 dmex
  *
  * This file is part of Process Hacker.
  *
@@ -27,9 +28,6 @@
  */
 
 #include <ph.h>
-
-#include <windowsx.h>
-
 #include <guisup.h>
 
 #define PH_MAX_COMPARE_FUNCTIONS 16
@@ -98,13 +96,6 @@ INT PhpDefaultCompareListViewItems(
     _In_ ULONG Column
     );
 
-static PWSTR PhpMakeExtLvContextAtom(
-    VOID
-    )
-{
-    PH_DEFINE_MAKE_ATOM(L"PhLib_ExtLvContext");
-}
-
 /**
  * Enables extended list view support for a list view control.
  *
@@ -114,34 +105,37 @@ VOID PhSetExtendedListView(
     _In_ HWND hWnd
     )
 {
-    WNDPROC oldWndProc;
+    PhSetExtendedListViewEx(hWnd, 0, AscendingSortOrder);
+}
+
+VOID PhSetExtendedListViewEx(
+    _In_ HWND WindowHandle,
+    _In_ ULONG SortColumn,
+    _In_ ULONG SortOrder
+    )
+{
     PPH_EXTLV_CONTEXT context;
 
-    oldWndProc = (WNDPROC)GetWindowLongPtr(hWnd, GWLP_WNDPROC);
-    SetWindowLongPtr(hWnd, GWLP_WNDPROC, (LONG_PTR)PhpExtendedListViewWndProc);
-
-    context = PhAllocate(sizeof(PH_EXTLV_CONTEXT));
-
-    context->Handle = hWnd;
-    context->OldWndProc = oldWndProc;
+    context = PhAllocateZero(sizeof(PH_EXTLV_CONTEXT));
+    context->Handle = WindowHandle;
     context->Context = NULL;
     context->TriState = FALSE;
-    context->SortColumn = 0;
-    context->SortOrder = AscendingSortOrder;
+    context->SortColumn = SortColumn;
+    context->SortOrder = SortOrder;
     context->SortFast = FALSE;
     context->TriStateCompareFunction = NULL;
     memset(context->CompareFunctions, 0, sizeof(context->CompareFunctions));
     context->NumberOfFallbackColumns = 0;
-
     context->ItemColorFunction = NULL;
     context->ItemFontFunction = NULL;
-
     context->EnableRedraw = 1;
     context->Cursor = NULL;
 
-    SetProp(hWnd, PhpMakeExtLvContextAtom(), (HANDLE)context);
+    context->OldWndProc = (WNDPROC)GetWindowLongPtr(WindowHandle, GWLP_WNDPROC);
+    PhSetWindowContext(WindowHandle, MAXCHAR, context);
+    SetWindowLongPtr(WindowHandle, GWLP_WNDPROC, (LONG_PTR)PhpExtendedListViewWndProc);
 
-    ExtendedListView_Init(hWnd);
+    ExtendedListView_Init(WindowHandle);
 }
 
 LRESULT CALLBACK PhpExtendedListViewWndProc(
@@ -154,7 +148,11 @@ LRESULT CALLBACK PhpExtendedListViewWndProc(
     PPH_EXTLV_CONTEXT context;
     WNDPROC oldWndProc;
 
-    context = (PPH_EXTLV_CONTEXT)GetProp(hwnd, PhpMakeExtLvContextAtom());
+    context = PhGetWindowContext(hwnd, MAXCHAR);
+
+    if (!context)
+        return 0;
+
     oldWndProc = context->OldWndProc;
 
     switch (uMsg)
@@ -162,8 +160,8 @@ LRESULT CALLBACK PhpExtendedListViewWndProc(
     case WM_DESTROY:
         {
             SetWindowLongPtr(hwnd, GWLP_WNDPROC, (LONG_PTR)oldWndProc);
+            PhRemoveWindowContext(hwnd, MAXCHAR);
             PhFree(context);
-            RemoveProp(hwnd, PhpMakeExtLvContextAtom());
         }
         break;
     case WM_NOTIFY:
@@ -176,7 +174,7 @@ LRESULT CALLBACK PhpExtendedListViewWndProc(
                 {
                     HWND headerHandle;
 
-                    headerHandle = (HWND)CallWindowProc(context->OldWndProc, hwnd, LVM_GETHEADER, 0, 0);
+                    headerHandle = (HWND)CallWindowProc(oldWndProc, hwnd, LVM_GETHEADER, 0, 0);
 
                     if (header->hwndFrom == headerHandle)
                     {
@@ -256,7 +254,7 @@ LRESULT CALLBACK PhpExtendedListViewWndProc(
                                 }
 
                                 if (newFont)
-                                    SelectObject(customDraw->nmcd.hdc, newFont);
+                                    SelectFont(customDraw->nmcd.hdc, newFont);
 
                                 if (colorChanged)
                                 {
@@ -433,6 +431,17 @@ LRESULT CALLBACK PhpExtendedListViewWndProc(
             }
         }
         return TRUE;
+    case ELVM_GETSORT:
+        {
+            PULONG sortColumn = (PULONG)wParam;
+            PPH_SORT_ORDER sortOrder = (PPH_SORT_ORDER)lParam;
+
+            if (sortColumn)
+                *sortColumn = context->SortColumn;
+            if (sortOrder)
+                *sortOrder = context->SortOrder;
+        }
+        return TRUE;
     case ELVM_SETSORT:
         {
             context->SortColumn = (ULONG)wParam;
@@ -560,10 +569,6 @@ static INT PhpExtendedListViewCompareFunc(
     yItem.mask = LVIF_PARAM | LVIF_STATE;
     yItem.iItem = y;
     yItem.iSubItem = 0;
-
-    // Don't use SendMessage/ListView_* because it will call our new window procedure, which will
-    // use GetProp. This calls NtUserGetProp, and obviously having a system call in a comparison
-    // function is very, very bad for performance.
 
     if (!CallWindowProc(context->OldWndProc, context->Handle, LVM_GETITEM, 0, (LPARAM)&xItem))
         return 0;
@@ -716,8 +721,8 @@ static INT PhpDefaultCompareListViewItems(
     _In_ ULONG Column
     )
 {
-    WCHAR xText[261];
-    WCHAR yText[261];
+    WCHAR xText[MAX_PATH + 1];
+    WCHAR yText[MAX_PATH + 1];
     LVITEM item;
 
     // Get the X item text.
@@ -726,18 +731,18 @@ static INT PhpDefaultCompareListViewItems(
     item.iItem = X;
     item.iSubItem = Column;
     item.pszText = xText;
-    item.cchTextMax = 260;
+    item.cchTextMax = MAX_PATH;
 
-    xText[0] = 0;
+    xText[0] = UNICODE_NULL;
     CallWindowProc(Context->OldWndProc, Context->Handle, LVM_GETITEM, 0, (LPARAM)&item);
 
     // Get the Y item text.
 
     item.iItem = Y;
     item.pszText = yText;
-    item.cchTextMax = 260;
+    item.cchTextMax = MAX_PATH;
 
-    yText[0] = 0;
+    yText[0] = UNICODE_NULL;
     CallWindowProc(Context->OldWndProc, Context->Handle, LVM_GETITEM, 0, (LPARAM)&item);
 
     // Compare them.

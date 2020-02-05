@@ -3,6 +3,7 @@
  *   mapped library
  *
  * Copyright (C) 2010 wj32
+ * Copyright (C) 2019 dmex
  *
  * This file is part of Process Hacker.
  *
@@ -49,9 +50,9 @@ NTSTATUS PhInitializeMappedArchive(
     )
 {
     NTSTATUS status;
-    PCHAR start;
+    PVOID start;
 
-    start = (PCHAR)ViewBase;
+    start = ViewBase;
 
     memset(MappedArchive, 0, sizeof(PH_MAPPED_ARCHIVE));
     MappedArchive->ViewBase = ViewBase;
@@ -78,7 +79,7 @@ NTSTATUS PhInitializeMappedArchive(
 
     status = PhpGetMappedArchiveMemberFromHeader(
         MappedArchive,
-        (PIMAGE_ARCHIVE_MEMBER_HEADER)(start + IMAGE_ARCHIVE_START_SIZE),
+        PTR_ADD_OFFSET(start, IMAGE_ARCHIVE_START_SIZE),
         &MappedArchive->FirstLinkerMember
         );
 
@@ -100,7 +101,10 @@ NTSTATUS PhInitializeMappedArchive(
     if (!NT_SUCCESS(status))
         return status;
 
-    if (MappedArchive->SecondLinkerMember.Type != LinkerArchiveMemberType)
+    if (
+        MappedArchive->SecondLinkerMember.Type != LinkerArchiveMemberType &&
+        MappedArchive->SecondLinkerMember.Type != NormalArchiveMemberType // NormalArchiveMemberType might not be correct here but set by LLVM compiled libs (dmex)
+        )
         return STATUS_INVALID_PARAMETER;
 
     // Longnames member
@@ -155,7 +159,7 @@ NTSTATUS PhLoadMappedArchive(
 
         if (!NT_SUCCESS(status))
         {
-            NtUnmapViewOfSection(NtCurrentProcess(), MappedArchive->ViewBase);
+            PhUnloadMappedArchive(MappedArchive);
         }
     }
 
@@ -290,14 +294,14 @@ NTSTATUS PhpGetMappedArchiveMemberFromHeader(
         {
             // Longnames member. Set the name to "/".
             Member->NameBuffer[0] = '/';
-            Member->NameBuffer[1] = 0;
+            Member->NameBuffer[1] = ANSI_NULL;
 
             Member->Type = LongnamesArchiveMemberType;
         }
         else
         {
             // Linker member. Set the name to "".
-            Member->NameBuffer[0] = 0;
+            Member->NameBuffer[0] = ANSI_NULL;
 
             Member->Type = LinkerArchiveMemberType;
         }
@@ -371,8 +375,6 @@ NTSTATUS PhGetMappedArchiveImportEntry(
 
     importHeader = (IMPORT_OBJECT_HEADER *)Member->Data;
 
-    if (Member->Type != NormalArchiveMemberType)
-        return STATUS_INVALID_PARAMETER;
     if (
         importHeader->Sig1 != IMAGE_FILE_MACHINE_UNKNOWN ||
         importHeader->Sig2 != IMPORT_OBJECT_HDR_SIG2

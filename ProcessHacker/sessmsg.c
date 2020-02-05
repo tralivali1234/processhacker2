@@ -3,6 +3,7 @@
  *   send message window
  *
  * Copyright (C) 2010-2013 wj32
+ * Copyright (C) 2019 dmex
  *
  * This file is part of Process Hacker.
  *
@@ -21,8 +22,9 @@
  */
 
 #include <phapp.h>
+#include <phsettings.h>
+#include <lsasup.h>
 
-#include <windowsx.h>
 #include <winsta.h>
 
 #define SIP(String, Integer) { (String), (PVOID)(Integer) }
@@ -69,8 +71,10 @@ INT_PTR CALLBACK PhpSessionSendMessageDlgProc(
     case WM_INITDIALOG:
         {
             HWND iconComboBox;
+            PPH_STRING currentUserName;
 
-            SetProp(hwndDlg, L"SessionId", UlongToHandle((ULONG)lParam));
+            PhSetWindowContext(hwndDlg, PH_WINDOW_CONTEXT_DEFAULT, UlongToPtr((ULONG)lParam));
+
             PhCenterWindow(hwndDlg, GetParent(hwndDlg));
 
             iconComboBox = GetDlgItem(hwndDlg, IDC_TYPE);
@@ -82,21 +86,24 @@ INT_PTR CALLBACK PhpSessionSendMessageDlgProc(
             ComboBox_AddString(iconComboBox, L"Question");
             PhSelectComboBoxString(iconComboBox, L"None", FALSE);
 
-            if (PhCurrentUserName)
+            if (currentUserName = PhGetTokenUserString(PhGetOwnTokenAttributes().TokenHandle, TRUE))
             {
-                SetDlgItemText(
+                PhSetDialogItemText(
                     hwndDlg,
                     IDC_TITLE,
-                    PhaFormatString(L"Message from %s", PhCurrentUserName->Buffer)->Buffer
+                    PhaFormatString(L"Message from %s", currentUserName->Buffer)->Buffer
                     );
+                PhDereferenceObject(currentUserName);
             }
 
-            SendMessage(hwndDlg, WM_NEXTDLGCTL, (WPARAM)GetDlgItem(hwndDlg, IDC_TEXT), TRUE);
+            PhSetDialogFocus(hwndDlg, GetDlgItem(hwndDlg, IDC_TEXT));
+
+            PhInitializeWindowTheme(hwndDlg, PhEnableThemeSupport); // HACK (dmex)
         }
         break;
     case WM_DESTROY:
         {
-            RemoveProp(hwndDlg, L"SessionId");
+            PhRemoveWindowContext(hwndDlg, PH_WINDOW_CONTEXT_DEFAULT);
         }
         break;
     case WM_COMMAND:
@@ -108,7 +115,7 @@ INT_PTR CALLBACK PhpSessionSendMessageDlgProc(
                 break;
             case IDOK:
                 {
-                    ULONG sessionId = HandleToUlong(GetProp(hwndDlg, L"SessionId"));
+                    ULONG sessionId = PtrToUlong(PhGetWindowContext(hwndDlg, PH_WINDOW_CONTEXT_DEFAULT));
                     PPH_STRING title;
                     PPH_STRING text;
                     ULONG icon = 0;

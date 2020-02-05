@@ -1,5 +1,5 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
-<Project DefaultTargets="Build" ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+<Project DefaultTargets="Build" ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|Win32">
       <Configuration>Debug</Configuration>
@@ -22,30 +22,34 @@
     <ProjectGuid>{477D0215-F252-41A1-874B-F27E3EA1ED17}</ProjectGuid>
     <RootNamespace>phlib</RootNamespace>
     <Keyword>Win32Proj</Keyword>
-    <WindowsTargetPlatformVersion>10.0.14393.0</WindowsTargetPlatformVersion>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
     <ConfigurationType>StaticLibrary</ConfigurationType>
     <CharacterSet>Unicode</CharacterSet>
     <WholeProgramOptimization>true</WholeProgramOptimization>
-    <PlatformToolset>v140</PlatformToolset>
+    <PlatformToolset>v142</PlatformToolset>
+    <SpectreMitigation>false</SpectreMitigation>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
     <ConfigurationType>StaticLibrary</ConfigurationType>
     <CharacterSet>Unicode</CharacterSet>
-    <PlatformToolset>v140</PlatformToolset>
+    <PlatformToolset>v142</PlatformToolset>
+    <SpectreMitigation>false</SpectreMitigation>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
     <ConfigurationType>StaticLibrary</ConfigurationType>
     <CharacterSet>Unicode</CharacterSet>
     <WholeProgramOptimization>true</WholeProgramOptimization>
-    <PlatformToolset>v140</PlatformToolset>
+    <PlatformToolset>v142</PlatformToolset>
+    <SpectreMitigation>false</SpectreMitigation>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
     <ConfigurationType>StaticLibrary</ConfigurationType>
     <CharacterSet>Unicode</CharacterSet>
-    <PlatformToolset>v140</PlatformToolset>
+    <PlatformToolset>v142</PlatformToolset>
+    <SpectreMitigation>false</SpectreMitigation>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <ImportGroup Label="ExtensionSettings">
@@ -76,8 +80,8 @@
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
       <Optimization>Disabled</Optimization>
-      <AdditionalIncludeDirectories>..\phnt\include;include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>DEBUG;_PHLIB_;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(SolutionDir)phnt\include;include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>DEBUG;_DEBUG;_PHLIB_;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <StringPooling>true</StringPooling>
       <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
@@ -87,12 +91,15 @@
       <TreatWarningAsError>true</TreatWarningAsError>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
     </ClCompile>
+    <Lib>
+      <TargetMachine>MachineX86</TargetMachine>
+    </Lib>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
       <Optimization>Disabled</Optimization>
-      <AdditionalIncludeDirectories>..\phnt\include;include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>DEBUG;_PHLIB_;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(SolutionDir)phnt\include;include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>DEBUG;_DEBUG;_PHLIB_;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <StringPooling>true</StringPooling>
       <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
@@ -102,16 +109,18 @@
       <TreatWarningAsError>true</TreatWarningAsError>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
     </ClCompile>
+    <Lib>
+      <TargetMachine>MachineX64</TargetMachine>
+    </Lib>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <ClCompile>
       <Optimization>MaxSpeed</Optimization>
       <IntrinsicFunctions>true</IntrinsicFunctions>
-      <AdditionalIncludeDirectories>..\phnt\include;include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)phnt\include;include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>WIN32;NDEBUG;_WINDOWS;_PHLIB_;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <StringPooling>true</StringPooling>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
-      <BufferSecurityCheck>false</BufferSecurityCheck>
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <WarningLevel>Level3</WarningLevel>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
@@ -119,27 +128,35 @@
       <TreatWarningAsError>true</TreatWarningAsError>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <EnableEnhancedInstructionSet>StreamingSIMDExtensions</EnableEnhancedInstructionSet>
+      <ControlFlowGuard>Guard</ControlFlowGuard>
     </ClCompile>
+    <Lib>
+      <TargetMachine>MachineX86</TargetMachine>
+    </Lib>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
       <Optimization>MaxSpeed</Optimization>
       <IntrinsicFunctions>true</IntrinsicFunctions>
-      <AdditionalIncludeDirectories>..\phnt\include;include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)phnt\include;include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>WIN64;NDEBUG;_WINDOWS;_PHLIB_;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <StringPooling>true</StringPooling>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
-      <BufferSecurityCheck>false</BufferSecurityCheck>
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <WarningLevel>Level3</WarningLevel>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
       <CallingConvention>StdCall</CallingConvention>
       <TreatWarningAsError>true</TreatWarningAsError>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <ControlFlowGuard>Guard</ControlFlowGuard>
     </ClCompile>
+    <Lib>
+      <TargetMachine>MachineX64</TargetMachine>
+    </Lib>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="apiimport.c" />
+    <ClCompile Include="appresolver.c" />
     <ClCompile Include="avltree.c" />
     <ClCompile Include="basesup.c" />
     <ClCompile Include="circbuf.c" />
@@ -159,22 +176,51 @@
     <ClCompile Include="handle.c" />
     <ClCompile Include="hexedit.c" />
     <ClCompile Include="hndlinfo.c" />
+    <ClCompile Include="http.c" />
     <ClCompile Include="icotobmp.c" />
     <ClCompile Include="filestream.c" />
+    <ClCompile Include="json.c" />
+    <ClCompile Include="jsonc\arraylist.c" />
+    <ClCompile Include="jsonc\debug.c" />
+    <ClCompile Include="jsonc\json_c_version.c" />
+    <ClCompile Include="jsonc\json_object.c" />
+    <ClCompile Include="jsonc\json_object_iterator.c" />
+    <ClCompile Include="jsonc\json_pointer.c" />
+    <ClCompile Include="jsonc\json_tokener.c" />
+    <ClCompile Include="jsonc\json_util.c" />
+    <ClCompile Include="jsonc\json_visit.c" />
+    <ClCompile Include="jsonc\libjson.c" />
+    <ClCompile Include="jsonc\linkhash.c" />
+    <ClCompile Include="jsonc\printbuf.c" />
+    <ClCompile Include="jsonc\random_seed.c" />
+    <ClCompile Include="jsonc\strerror_override.c" />
     <ClCompile Include="kph.c" />
     <ClCompile Include="kphdata.c" />
     <ClCompile Include="lsasup.c" />
+    <ClCompile Include="mapexlf.c" />
     <ClCompile Include="mapimg.c" />
     <ClCompile Include="maplib.c" />
     <ClCompile Include="md5.c" />
+    <ClCompile Include="mxml\mxml-attr.c" />
+    <ClCompile Include="mxml\mxml-entity.c" />
+    <ClCompile Include="mxml\mxml-file.c" />
+    <ClCompile Include="mxml\mxml-get.c" />
+    <ClCompile Include="mxml\mxml-index.c" />
+    <ClCompile Include="mxml\mxml-node.c" />
+    <ClCompile Include="mxml\mxml-private.c" />
+    <ClCompile Include="mxml\mxml-search.c" />
+    <ClCompile Include="mxml\mxml-set.c" />
+    <ClCompile Include="mxml\mxml-string.c" />
     <ClCompile Include="native.c" />
     <ClCompile Include="provider.c" />
     <ClCompile Include="queuedlock.c" />
     <ClCompile Include="ref.c" />
     <ClCompile Include="secdata.c" />
     <ClCompile Include="secedit.c" />
+    <ClCompile Include="settings.c" />
     <ClCompile Include="sha.c" />
     <ClCompile Include="sha256.c" />
+    <ClCompile Include="theme.c" />
     <ClCompile Include="util.c" />
     <ClCompile Include="svcsup.c" />
     <ClCompile Include="symprv.c" />
@@ -182,15 +228,20 @@
     <ClCompile Include="treenew.c" />
     <ClCompile Include="verify.c" />
     <ClCompile Include="workqueue.c" />
+    <ClCompile Include="wslsup.c" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="include\apiimport.h" />
+    <ClInclude Include="include\appresolver.h" />
+    <ClInclude Include="include\appresolverp.h" />
     <ClInclude Include="include\cpysave.h" />
+    <ClInclude Include="include\exlf.h" />
     <ClInclude Include="include\filepool.h" />
     <ClInclude Include="include\filepoolp.h" />
     <ClInclude Include="include\filestream.h" />
     <ClInclude Include="include\handle.h" />
     <ClInclude Include="include\hndlinfo.h" />
+    <ClInclude Include="include\json.h" />
     <ClInclude Include="include\kphapi.h" />
     <ClInclude Include="include\kphuserp.h" />
     <ClInclude Include="include\lsasup.h" />
@@ -208,6 +259,7 @@
     <ClInclude Include="include\phutil.h" />
     <ClInclude Include="include\provider.h" />
     <ClInclude Include="include\secedit.h" />
+    <ClInclude Include="include\settings.h" />
     <ClInclude Include="include\svcsup.h" />
     <ClInclude Include="include\symprvp.h" />
     <ClInclude Include="include\treenew.h" />
@@ -225,6 +277,31 @@
     <ClInclude Include="include\hexeditp.h" />
     <ClInclude Include="include\filestreamp.h" />
     <ClInclude Include="include\kphuser.h" />
+    <ClInclude Include="include\wslsup.h" />
+    <ClInclude Include="jsonc\arraylist.h" />
+    <ClInclude Include="jsonc\bits.h" />
+    <ClInclude Include="jsonc\config.h" />
+    <ClInclude Include="jsonc\debug.h" />
+    <ClInclude Include="jsonc\json.h" />
+    <ClInclude Include="jsonc\json_config.h" />
+    <ClInclude Include="jsonc\json_c_version.h" />
+    <ClInclude Include="jsonc\json_inttypes.h" />
+    <ClInclude Include="jsonc\json_object.h" />
+    <ClInclude Include="jsonc\json_object_iterator.h" />
+    <ClInclude Include="jsonc\json_object_private.h" />
+    <ClInclude Include="jsonc\json_pointer.h" />
+    <ClInclude Include="jsonc\json_tokener.h" />
+    <ClInclude Include="jsonc\json_util.h" />
+    <ClInclude Include="jsonc\json_visit.h" />
+    <ClInclude Include="jsonc\linkhash.h" />
+    <ClInclude Include="jsonc\math_compat.h" />
+    <ClInclude Include="jsonc\printbuf.h" />
+    <ClInclude Include="jsonc\random_seed.h" />
+    <ClInclude Include="jsonc\snprintf_compat.h" />
+    <ClInclude Include="jsonc\strdup_compat.h" />
+    <ClInclude Include="jsonc\strerror_override.h" />
+    <ClInclude Include="jsonc\strerror_override_private.h" />
+    <ClInclude Include="jsonc\vasprintf_compat.h" />
     <ClInclude Include="md5.h" />
     <ClInclude Include="include\ph.h" />
     <ClInclude Include="include\phbase.h" />
@@ -235,6 +312,9 @@
     <ClInclude Include="include\ref.h" />
     <ClInclude Include="include\refp.h" />
     <ClInclude Include="include\seceditp.h" />
+    <ClInclude Include="mxml\config.h" />
+    <ClInclude Include="mxml\mxml-private.h" />
+    <ClInclude Include="mxml\mxml.h" />
     <ClInclude Include="sha.h" />
     <ClInclude Include="include\symprv.h" />
     <ClInclude Include="include\templ.h" />

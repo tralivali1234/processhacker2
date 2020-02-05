@@ -16,6 +16,7 @@ extern "C" {
 
 #define PH_EMENU_SEPARATECHECKSPACE 0x100000
 #define PH_EMENU_SEPARATOR 0x200000
+#define PH_EMENU_MAINMENU 0x400000
 
 #define PH_EMENU_TEXT_OWNED 0x80000000
 #define PH_EMENU_BITMAP_OWNED 0x40000000
@@ -48,7 +49,7 @@ PHLIBAPI
 PPH_EMENU_ITEM PhCreateEMenuItem(
     _In_ ULONG Flags,
     _In_ ULONG Id,
-    _In_ PWSTR Text,
+    _In_opt_ PWSTR Text,
     _In_opt_ HBITMAP Bitmap,
     _In_opt_ PVOID Context
     );
@@ -76,8 +77,8 @@ PPH_EMENU_ITEM PhFindEMenuItemEx(
     _In_ ULONG Flags,
     _In_opt_ PWSTR Text,
     _In_opt_ ULONG Id,
-    _Out_opt_ PPH_EMENU_ITEM *FoundParent,
-    _Out_opt_ PULONG FoundIndex
+    _Inout_opt_ PPH_EMENU_ITEM *FoundParent,
+    _Inout_opt_ PULONG FoundIndex
     );
 
 PHLIBAPI
@@ -174,8 +175,6 @@ PPH_EMENU_ITEM PhShowEMenu(
     _In_ ULONG Y
     );
 
-// Convenience functions
-
 PHLIBAPI
 BOOLEAN PhSetFlagsEMenuItem(
     _Inout_ PPH_EMENU_ITEM Item,
@@ -183,15 +182,6 @@ BOOLEAN PhSetFlagsEMenuItem(
     _In_ ULONG Mask,
     _In_ ULONG Value
     );
-
-FORCEINLINE BOOLEAN PhEnableEMenuItem(
-    _Inout_ PPH_EMENU_ITEM Item,
-    _In_ ULONG Id,
-    _In_ BOOLEAN Enable
-    )
-{
-    return PhSetFlagsEMenuItem(Item, Id, PH_EMENU_DISABLED, Enable ? 0 : PH_EMENU_DISABLED);
-}
 
 PHLIBAPI
 VOID PhSetFlagsAllEMenuItems(
@@ -211,6 +201,34 @@ VOID PhModifyEMenuItem(
     _In_opt_ PWSTR Text,
     _In_opt_ HBITMAP Bitmap
     );
+
+// Convenience functions
+
+FORCEINLINE
+PPH_EMENU_ITEM PhCreateEMenuSeparator(
+    VOID
+    )
+{
+    return PhCreateEMenuItem(PH_EMENU_SEPARATOR, 0, NULL, NULL, NULL);
+}
+
+FORCEINLINE 
+BOOLEAN PhEnableEMenuItem(
+    _Inout_ PPH_EMENU_ITEM Item,
+    _In_ ULONG Id,
+    _In_ BOOLEAN Enable
+    )
+{
+    return PhSetFlagsEMenuItem(Item, Id, PH_EMENU_DISABLED, Enable ? 0 : PH_EMENU_DISABLED);
+}
+
+FORCEINLINE 
+VOID PhSetDisabledEMenuItem(
+    _In_ PPH_EMENU_ITEM Item
+    )
+{
+    Item->Flags |= PH_EMENU_DISABLED;
+}
 
 #ifdef __cplusplus
 }

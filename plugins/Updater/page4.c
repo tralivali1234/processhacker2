@@ -2,7 +2,7 @@
  * Process Hacker Plugins -
  *   Update Checker Plugin
  *
- * Copyright (C) 2016 dmex
+ * Copyright (C) 2016-2019 dmex
  *
  * This file is part of Process Hacker.
  *
@@ -36,19 +36,17 @@ HRESULT CALLBACK ShowProgressCallbackProc(
     {
     case TDN_NAVIGATED:
         {
-            HANDLE downloadThreadHandle = NULL;
-
             SendMessage(hwndDlg, TDM_SET_MARQUEE_PROGRESS_BAR, TRUE, 0);
             SendMessage(hwndDlg, TDM_SET_PROGRESS_BAR_MARQUEE, TRUE, 1);
 
-            // Start file download thread
-            if (downloadThreadHandle = PhCreateThread(0, (PUSER_THREAD_START_ROUTINE)UpdateDownloadThread, context))
-                NtClose(downloadThreadHandle);
+            PhReferenceObject(context);
+            PhQueueItemWorkQueue(PhGetGlobalWorkQueue(), UpdateDownloadThread, context);
         }
         break;
     case TDN_HYPERLINK_CLICKED:
         {
             TaskDialogLinkClicked(context);
+            return S_FALSE;
         }
         break;
     }
@@ -64,22 +62,16 @@ VOID ShowProgressDialog(
 
     memset(&config, 0, sizeof(TASKDIALOGCONFIG));
     config.cbSize = sizeof(TASKDIALOGCONFIG);
-    config.dwFlags = TDF_USE_HICON_MAIN | TDF_ALLOW_DIALOG_CANCELLATION | TDF_CAN_BE_MINIMIZED | TDF_EXPAND_FOOTER_AREA | TDF_ENABLE_HYPERLINKS | TDF_SHOW_PROGRESS_BAR;
+    config.dwFlags = TDF_USE_HICON_MAIN | TDF_ALLOW_DIALOG_CANCELLATION | TDF_CAN_BE_MINIMIZED | TDF_ENABLE_HYPERLINKS | TDF_SHOW_PROGRESS_BAR;
     config.dwCommonButtons = TDCBF_CANCEL_BUTTON;
     config.hMainIcon = Context->IconLargeHandle;
-
-    config.pszWindowTitle = L"Process Hacker - Updater";
-    config.pszMainInstruction = PhaFormatString(L"Downloading update %lu.%lu.%lu...",
-        Context->MajorVersion,
-        Context->MinorVersion,
-        Context->RevisionVersion
-        )->Buffer;
-    config.pszContent = L"Downloaded: ~ of ~ (0%)\r\nSpeed: ~ KB/s";
-    config.pszExpandedInformation = L"<A HREF=\"executablestring\">View Changelog</A>";   
-    
     config.cxWidth = 200;
     config.lpCallbackData = (LONG_PTR)Context;
     config.pfCallback = ShowProgressCallbackProc;
 
-    SendMessage(Context->DialogHandle, TDM_NAVIGATE_PAGE, 0, (LPARAM)&config);
+    config.pszWindowTitle = L"Process Hacker - Updater";
+    config.pszMainInstruction = PhaFormatString(L"Downloading update %s...", PhGetStringOrEmpty(Context->Version))->Buffer;
+    config.pszContent = L"Downloaded: ~ of ~ (0%)\r\nSpeed: ~ KB/s";
+
+    TaskDialogNavigatePage(Context->DialogHandle, &config);
 }

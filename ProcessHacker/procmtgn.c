@@ -3,6 +3,7 @@
  *   process mitigation information
  *
  * Copyright (C) 2016 wj32
+ * Copyright (C) 2017 dmex
  *
  * This file is part of Process Hacker.
  *
@@ -51,7 +52,7 @@ NTSTATUS PhpCopyProcessMitigationPolicy(
         return status;
     }
 
-    memcpy(Destination, (PCHAR)&policyInfo + Offset, Size);
+    memcpy(Destination, PTR_ADD_OFFSET(&policyInfo, Offset), Size);
     *Status = STATUS_SUCCESS;
 
     return status;
@@ -99,7 +100,7 @@ NTSTATUS PhGetProcessMitigationPolicy(
 
 #define COPY_PROCESS_MITIGATION_POLICY(PolicyName, StructName) \
     if (NT_SUCCESS(PhpCopyProcessMitigationPolicy(&status, ProcessHandle, Process##PolicyName##Policy, \
-        FIELD_OFFSET(PROCESS_MITIGATION_POLICY_INFORMATION, PolicyName##Policy), \
+        UFIELD_OFFSET(PROCESS_MITIGATION_POLICY_INFORMATION, PolicyName##Policy), \
         sizeof(StructName), \
         &Information->PolicyName##Policy))) \
     { \
@@ -115,6 +116,10 @@ NTSTATUS PhGetProcessMitigationPolicy(
     COPY_PROCESS_MITIGATION_POLICY(Signature, PROCESS_MITIGATION_BINARY_SIGNATURE_POLICY);
     COPY_PROCESS_MITIGATION_POLICY(FontDisable, PROCESS_MITIGATION_FONT_DISABLE_POLICY);
     COPY_PROCESS_MITIGATION_POLICY(ImageLoad, PROCESS_MITIGATION_IMAGE_LOAD_POLICY);
+    COPY_PROCESS_MITIGATION_POLICY(SystemCallFilter, PROCESS_MITIGATION_SYSTEM_CALL_FILTER_POLICY); // REDSTONE3
+    COPY_PROCESS_MITIGATION_POLICY(PayloadRestriction, PROCESS_MITIGATION_PAYLOAD_RESTRICTION_POLICY);
+    COPY_PROCESS_MITIGATION_POLICY(ChildProcess, PROCESS_MITIGATION_CHILD_PROCESS_POLICY);
+    COPY_PROCESS_MITIGATION_POLICY(SideChannelIsolation, PROCESS_MITIGATION_SIDE_CHANNEL_ISOLATION_POLICY);
 
     return status;
 }
@@ -173,6 +178,7 @@ BOOLEAN PhDescribeProcessMitigationPolicy(
                         PhAppendStringBuilder2(&sb, L" (");
                         if (data->EnableHighEntropy) PhAppendStringBuilder2(&sb, L"high entropy, ");
                         if (data->EnableForceRelocateImages) PhAppendStringBuilder2(&sb, L"force relocate, ");
+                        if (data->DisallowStrippedImages) PhAppendStringBuilder2(&sb, L"disallow stripped, ");
                         if (PhEndsWithStringRef2(&sb.String->sr, L", ", FALSE)) PhRemoveEndStringBuilder(&sb, 2);
                         PhAppendCharStringBuilder(&sb, ')');
                     }
@@ -219,6 +225,17 @@ BOOLEAN PhDescribeProcessMitigationPolicy(
 
                 result = TRUE;
             }
+
+            if (data->AllowRemoteDowngrade)
+            {
+                if (ShortDescription)
+                    *ShortDescription = PhCreateString(L"Dynamic code downgradable");
+
+                if (LongDescription)
+                    *LongDescription = PhCreateString(L"Allow non-AppContainer processes to modify all of the dynamic code settings for the calling process, including relaxing dynamic code restrictions after they have been set.\r\n");
+
+                result = TRUE;
+            }
         }
         break;
     case ProcessStrictHandleCheckPolicy:
@@ -251,6 +268,17 @@ BOOLEAN PhDescribeProcessMitigationPolicy(
 
                 result = TRUE;
             }
+
+            if (data->AuditDisallowWin32kSystemCalls)
+            {
+                if (ShortDescription)
+                    *ShortDescription = PhCreateString(L"Win32k system calls (Audit)");
+
+                if (LongDescription)
+                    *LongDescription = PhCreateString(L"Win32k (GDI/USER) system calls will trigger an ETW event.\r\n");
+
+                result = TRUE;
+            }
         }
         break;
     case ProcessExtensionPointDisablePolicy:
@@ -276,10 +304,21 @@ BOOLEAN PhDescribeProcessMitigationPolicy(
             if (data->EnableControlFlowGuard)
             {
                 if (ShortDescription)
-                    *ShortDescription = PhCreateString(L"CF Guard");
+                {
+                    PhInitializeStringBuilder(&sb, 50);
+                    if (data->StrictMode) PhAppendStringBuilder2(&sb, L"Strict ");
+                    PhAppendStringBuilder2(&sb, L"CF Guard");
+                    *ShortDescription = PhFinalStringBuilderString(&sb);
+                }
 
                 if (LongDescription)
-                    *LongDescription = PhCreateString(L"Control Flow Guard (CFG) is enabled for the process.\r\n");
+                {
+                    PhInitializeStringBuilder(&sb, 100);
+                    PhAppendStringBuilder2(&sb, L"Control Flow Guard (CFG) is enabled for the process.\r\n");
+                    if (data->StrictMode) PhAppendStringBuilder2(&sb, L"Strict CFG : only CFG modules can be loaded.\r\n");
+                    if (data->EnableExportSuppression) PhAppendStringBuilder2(&sb, L"Dll Exports can be marked as CFG invalid targets.\r\n");
+                    *LongDescription = PhFinalStringBuilderString(&sb);
+                }
 
                 result = TRUE;
             }
@@ -327,7 +366,12 @@ BOOLEAN PhDescribeProcessMitigationPolicy(
                     *ShortDescription = PhCreateString(L"Non-system fonts disabled");
 
                 if (LongDescription)
-                    *LongDescription = PhCreateString(L"Non-system fonts cannot be used in this process.\r\n");
+                {
+                    PhInitializeStringBuilder(&sb, 100);
+                    PhAppendStringBuilder2(&sb, L"Non-system fonts cannot be used in this process.\r\n");
+                    if (data->AuditNonSystemFontLoading) PhAppendStringBuilder2(&sb, L"Loading a non-system font in this process will trigger an ETW event.\r\n");
+                    *LongDescription = PhFinalStringBuilderString(&sb);
+                }
 
                 result = TRUE;
             }
@@ -375,9 +419,166 @@ BOOLEAN PhDescribeProcessMitigationPolicy(
             }
         }
         break;
+    case ProcessSystemCallFilterPolicy:
+        {
+            PPROCESS_MITIGATION_SYSTEM_CALL_FILTER_POLICY data = Data;
+            
+            if (data->FilterId)
+            {
+                if (ShortDescription)
+                    *ShortDescription = PhCreateString(L"System call filtering");
+
+                if (LongDescription)
+                    *LongDescription = PhCreateString(L"System call filtering is active.\r\n");
+
+                result = TRUE;
+            }
+        }
+        break;
+    case ProcessPayloadRestrictionPolicy:
+        {
+            PPROCESS_MITIGATION_PAYLOAD_RESTRICTION_POLICY data = Data;
+
+            if (data->EnableExportAddressFilter || data->EnableExportAddressFilterPlus ||
+                data->EnableImportAddressFilter || data->EnableRopStackPivot ||
+                data->EnableRopCallerCheck || data->EnableRopSimExec)
+            {
+                if (ShortDescription)
+                    *ShortDescription = PhCreateString(L"Payload restrictions");
+
+                if (LongDescription)
+                {
+                    PhInitializeStringBuilder(&sb, 100);
+                    PhAppendStringBuilder2(&sb, L"Payload restrictions are enabled for this process.\r\n");
+                    if (data->EnableExportAddressFilter) PhAppendStringBuilder2(&sb, L"Export Address Filtering is enabled.\r\n");
+                    if (data->EnableExportAddressFilterPlus) PhAppendStringBuilder2(&sb, L"Export Address Filtering (Plus) is enabled.\r\n");
+                    if (data->EnableImportAddressFilter) PhAppendStringBuilder2(&sb, L"Import Address Filtering is enabled.\r\n");
+                    if (data->EnableRopStackPivot) PhAppendStringBuilder2(&sb, L"StackPivot is enabled.\r\n");
+                    if (data->EnableRopCallerCheck) PhAppendStringBuilder2(&sb, L"CallerCheck is enabled.\r\n");
+                    if (data->EnableRopSimExec) PhAppendStringBuilder2(&sb, L"SimExec is enabled.\r\n");
+                    *LongDescription = PhFinalStringBuilderString(&sb);
+                }
+
+                result = TRUE;
+            }
+        }
+        break;
+    case ProcessChildProcessPolicy:
+        {
+            PPROCESS_MITIGATION_CHILD_PROCESS_POLICY data = Data;
+
+            if (data->NoChildProcessCreation)
+            {
+                if (ShortDescription)
+                    *ShortDescription = PhCreateString(L"Child process creation disabled");
+
+                if (LongDescription)
+                    *LongDescription = PhCreateString(L"Child processes cannot be created by this process.\r\n");
+
+                result = TRUE;
+            }
+        }
+        break;
+    case ProcessSideChannelIsolationPolicy:
+        {
+            PPROCESS_MITIGATION_SIDE_CHANNEL_ISOLATION_POLICY data = Data;
+
+            if (data->SmtBranchTargetIsolation)
+            {
+                if (ShortDescription)
+                    *ShortDescription = PhCreateString(L"SMT-thread branch target isolation");
+
+                if (LongDescription)
+                    *LongDescription = PhCreateString(L"Branch target pollution cross-SMT-thread in user mode is enabled.\r\n");
+
+                result = TRUE;
+            }
+
+            if (data->IsolateSecurityDomain)
+            {
+                if (ShortDescription)
+                    *ShortDescription = PhCreateString(L"Distinct security domain");
+
+                if (LongDescription)
+                    *LongDescription = PhCreateString(L"Isolated security domain is enabled.\r\n");
+
+                result = TRUE;
+            }
+
+            if (data->DisablePageCombine)
+            {
+                if (ShortDescription)
+                    *ShortDescription = PhCreateString(L"Restricted page combining");
+
+                if (LongDescription)
+                    *LongDescription = PhCreateString(L"Disables all page combining for this process.\r\n");
+
+                result = TRUE;
+            }
+
+            if (data->SpeculativeStoreBypassDisable)
+            {
+                if (ShortDescription)
+                    *ShortDescription = PhCreateString(L"Restricted page combining");
+
+                if (LongDescription)
+                    *LongDescription = PhCreateString(L"Memory Disambiguation is enabled for this process.\r\n");
+
+                result = TRUE;
+            }
+        }
+        break;
     default:
         result = FALSE;
     }
 
     return result;
+}
+
+NTSTATUS PhGetProcessSystemDllInitBlock(
+    _In_ HANDLE ProcessHandle,
+    _Out_ PPS_SYSTEM_DLL_INIT_BLOCK *SystemDllInitBlock
+    )
+{
+    NTSTATUS status;
+    PH_STRINGREF systemRoot;
+    PVOID ldrInitBlockBaseAddress = NULL;
+    PPH_STRING ntdllFileName;
+
+    PhGetSystemRoot(&systemRoot);
+    ntdllFileName = PhConcatStringRefZ(&systemRoot, L"\\System32\\ntdll.dll");
+
+    status = PhGetProcedureAddressRemote(
+        ProcessHandle,
+        ntdllFileName->Buffer,
+        "LdrSystemDllInitBlock",
+        0,
+        &ldrInitBlockBaseAddress,
+        NULL
+        );
+
+    PhDereferenceObject(ntdllFileName);
+
+    if (NT_SUCCESS(status) && ldrInitBlockBaseAddress)
+    {
+        PPS_SYSTEM_DLL_INIT_BLOCK ldrInitBlock;
+
+        ldrInitBlock = PhAllocate(sizeof(PS_SYSTEM_DLL_INIT_BLOCK));
+        memset(ldrInitBlock, 0, sizeof(PS_SYSTEM_DLL_INIT_BLOCK));
+
+        status = NtReadVirtualMemory(
+            ProcessHandle,
+            ldrInitBlockBaseAddress,
+            ldrInitBlock,
+            sizeof(PS_SYSTEM_DLL_INIT_BLOCK),
+            NULL
+            );
+
+        if (NT_SUCCESS(status))
+            *SystemDllInitBlock = ldrInitBlock;
+        else
+            PhFree(ldrInitBlock);
+    }
+
+    return status;
 }

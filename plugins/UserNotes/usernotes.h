@@ -26,11 +26,9 @@
 
 #include <phdk.h>
 #include <phappresource.h>
+#include <settings.h>
 #include <mxml.h>
-
-#include <windowsx.h>
 #include <shlobj.h>
-#include <uxtheme.h>
 
 #include "db.h"
 #include "resource.h"

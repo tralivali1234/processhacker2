@@ -2,20 +2,20 @@
 #define PH_SRVPRV_H
 
 extern PPH_OBJECT_TYPE PhServiceItemType;
-
-PHAPPAPI extern PH_CALLBACK PhServiceAddedEvent; // phapppub
-PHAPPAPI extern PH_CALLBACK PhServiceModifiedEvent; // phapppub
-PHAPPAPI extern PH_CALLBACK PhServiceRemovedEvent; // phapppub
-PHAPPAPI extern PH_CALLBACK PhServicesUpdatedEvent; // phapppub
-
 extern BOOLEAN PhEnableServiceNonPoll;
 
 // begin_phapppub
+typedef enum _VERIFY_RESULT VERIFY_RESULT;
+
 typedef struct _PH_SERVICE_ITEM
 {
     PH_STRINGREF Key; // points to Name
     PPH_STRING Name;
     PPH_STRING DisplayName;
+    PPH_STRING FileName; // only available after first update
+
+    HICON SmallIcon;
+    HICON LargeIcon;
 
     // State
     ULONG Type;
@@ -28,14 +28,25 @@ typedef struct _PH_SERVICE_ITEM
     ULONG StartType;
     ULONG ErrorControl;
 // end_phapppub
-    BOOLEAN DelayedStart;
-    BOOLEAN HasTriggers;
 
-    BOOLEAN PendingProcess;
-    BOOLEAN NeedsConfigUpdate;
+    union
+    {
+        BOOLEAN BitFlags;
+        struct
+        {
+            BOOLEAN DelayedStart : 1;
+            BOOLEAN HasTriggers : 1;
+            BOOLEAN PendingProcess : 1;
+            BOOLEAN NeedsConfigUpdate : 1;
+            BOOLEAN JustProcessed : 1;
+            BOOLEAN Spare : 3;
+        };
+    };
+// begin_phapppub
+    VERIFY_RESULT VerifyResult;
+    PPH_STRING VerifySignerName;
 
     WCHAR ProcessIdString[PH_INT32_STR_LEN_1];
-// begin_phapppub
 } PH_SERVICE_ITEM, *PPH_SERVICE_ITEM;
 // end_phapppub
 
@@ -87,6 +98,10 @@ PhGetServiceChange(
 
 VOID PhUpdateProcessItemServices(
     _In_ PPH_PROCESS_ITEM ProcessItem
+    );
+
+VOID PhQueueServiceQueryStage2( // HACK
+    _In_ PPH_SERVICE_ITEM ServiceItem
     );
 
 VOID PhServiceProviderUpdate(

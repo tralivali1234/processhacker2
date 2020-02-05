@@ -15,8 +15,7 @@ typedef struct _PHSVC_STOP
 } PHSVC_STOP, *PPHSVC_STOP;
 
 NTSTATUS PhSvcMain(
-    _In_opt_ PUNICODE_STRING PortName,
-    _In_opt_ PLARGE_INTEGER Timeout,
+    _In_opt_ PPH_STRING PortName,
     _Inout_opt_ PPHSVC_STOP Stop
     );
 
@@ -36,10 +35,6 @@ typedef struct _PHSVC_CLIENT
     PVOID ClientViewBase;
     PVOID ClientViewLimit;
 } PHSVC_CLIENT, *PPHSVC_CLIENT;
-
-NTSTATUS PhSvcClientInitialization(
-    VOID
-    );
 
 PPHSVC_CLIENT PhSvcCreateClient(
     _In_opt_ PCLIENT_ID ClientId
@@ -82,10 +77,6 @@ VOID PhSvcHandleConnectionRequest(
     );
 
 // svcapi
-
-NTSTATUS PhSvcApiInitialization(
-    VOID
-    );
 
 typedef NTSTATUS (NTAPI *PPHSVC_API_PROCEDURE)(
     _In_ PPHSVC_CLIENT Client,
@@ -221,11 +212,6 @@ NTSTATUS PhSvcApiCreateProcessIgnoreIfeoDebugger(
     );
 
 NTSTATUS PhSvcApiSetServiceSecurity(
-    _In_ PPHSVC_CLIENT Client,
-    _Inout_ PPHSVC_API_PAYLOAD Payload
-    );
-
-NTSTATUS PhSvcApiLoadDbgHelp(
     _In_ PPHSVC_CLIENT Client,
     _Inout_ PPHSVC_API_PAYLOAD Payload
     );

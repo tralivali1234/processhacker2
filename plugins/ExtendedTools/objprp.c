@@ -41,13 +41,6 @@ INT CALLBACK EtpCommonPropPageProc(
     _In_ LPPROPSHEETPAGE ppsp
     );
 
-INT_PTR CALLBACK EtpAlpcPortPageDlgProc(
-    _In_ HWND hwndDlg,
-    _In_ UINT uMsg,
-    _In_ WPARAM wParam,
-    _In_ LPARAM lParam
-    );
-
 INT_PTR CALLBACK EtpTpWorkerFactoryPageDlgProc(
     _In_ HWND hwndDlg,
     _In_ UINT uMsg,
@@ -62,19 +55,14 @@ VOID EtHandlePropertiesInitializing(
     PPH_PLUGIN_OBJECT_PROPERTIES objectProperties = Parameter;
     PPH_PLUGIN_HANDLE_PROPERTIES_CONTEXT context = objectProperties->Parameter;
 
+    if (PhIsNullOrEmptyString(context->HandleItem->TypeName))
+        return;
+
     if (objectProperties->NumberOfPages < objectProperties->MaximumNumberOfPages)
     {
         HPROPSHEETPAGE page = NULL;
 
-        if (PhEqualString2(context->HandleItem->TypeName, L"ALPC Port", TRUE))
-        {
-            page = EtpCommonCreatePage(
-                context,
-                MAKEINTRESOURCE(IDD_OBJALPCPORT),
-                EtpAlpcPortPageDlgProc
-                );
-        }
-        else if (PhEqualString2(context->HandleItem->TypeName, L"TpWorkerFactory", TRUE))
+        if (PhEqualString2(context->HandleItem->TypeName, L"TpWorkerFactory", TRUE))
         {
             page = EtpCommonCreatePage(
                 context,
@@ -177,57 +165,6 @@ static NTSTATUS EtpDuplicateHandleFromProcess(
     return status;
 }
 
-INT_PTR CALLBACK EtpAlpcPortPageDlgProc(
-    _In_ HWND hwndDlg,
-    _In_ UINT uMsg,
-    _In_ WPARAM wParam,
-    _In_ LPARAM lParam
-    )
-{
-    switch (uMsg)
-    {
-    case WM_INITDIALOG:
-        {
-            LPPROPSHEETPAGE propSheetPage = (LPPROPSHEETPAGE)lParam;
-            PCOMMON_PAGE_CONTEXT context = (PCOMMON_PAGE_CONTEXT)propSheetPage->lParam;
-            HANDLE portHandle;
-
-            if (NT_SUCCESS(EtpDuplicateHandleFromProcess(&portHandle, READ_CONTROL, context)))
-            {
-                ALPC_BASIC_INFORMATION basicInfo;
-
-                if (NT_SUCCESS(NtAlpcQueryInformation(
-                    portHandle,
-                    AlpcBasicInformation,
-                    &basicInfo,
-                    sizeof(ALPC_BASIC_INFORMATION),
-                    NULL
-                    )))
-                {
-                    PH_FORMAT format[2];
-                    PPH_STRING string;
-
-                    PhInitFormatS(&format[0], L"Sequence Number: ");
-                    PhInitFormatD(&format[1], basicInfo.SequenceNo);
-                    format[1].Type |= FormatGroupDigits;
-
-                    string = PhFormat(format, 2, 128);
-                    SetDlgItemText(hwndDlg, IDC_SEQUENCENUMBER, string->Buffer);
-                    PhDereferenceObject(string);
-
-                    SetDlgItemText(hwndDlg, IDC_PORTCONTEXT,
-                        PhaFormatString(L"Port Context: 0x%Ix", basicInfo.PortContext)->Buffer);
-                }
-
-                NtClose(portHandle);
-            }
-        }
-        break;
-    }
-
-    return FALSE;
-}
-
 static BOOLEAN NTAPI EnumGenericModulesCallback(
     _In_ PPH_MODULE_INFO Module,
     _In_opt_ PVOID Context
@@ -271,35 +208,58 @@ INT_PTR CALLBACK EtpTpWorkerFactoryPageDlgProc(
                 {
                     PPH_SYMBOL_PROVIDER symbolProvider;
                     PPH_STRING symbol = NULL;
+                    WCHAR value[PH_PTR_STR_LEN_1];
 
                     symbolProvider = PhCreateSymbolProvider(basicInfo.ProcessId);
                     PhLoadSymbolProviderOptions(symbolProvider);
 
                     if (symbolProvider->IsRealHandle)
                     {
-                        PhEnumGenericModules(basicInfo.ProcessId, symbolProvider->ProcessHandle,
-                            0, EnumGenericModulesCallback, symbolProvider);
+                        PhEnumGenericModules(
+                            basicInfo.ProcessId,
+                            symbolProvider->ProcessHandle,
+                            0,
+                            EnumGenericModulesCallback,
+                            symbolProvider
+                            );
 
-                        symbol = PhGetSymbolFromAddress(symbolProvider, (ULONG64)basicInfo.StartRoutine,
-                            NULL, NULL, NULL, NULL);
+                        symbol = PhGetSymbolFromAddress(
+                            symbolProvider,
+                            (ULONG64)basicInfo.StartRoutine,
+                            NULL,
+                            NULL,
+                            NULL,
+                            NULL
+                            );
                     }
 
                     PhDereferenceObject(symbolProvider);
 
                     if (symbol)
                     {
-                        SetDlgItemText(hwndDlg, IDC_WORKERTHREADSTART,
-                            PhaFormatString(L"Worker Thread Start: %s", symbol->Buffer)->Buffer);
+                        PhSetDialogItemText(
+                            hwndDlg,
+                            IDC_WORKERTHREADSTART,
+                            PhaFormatString(L"Worker Thread Start: %s", symbol->Buffer)->Buffer
+                            );
                         PhDereferenceObject(symbol);
                     }
                     else
                     {
-                        SetDlgItemText(hwndDlg, IDC_WORKERTHREADSTART,
-                            PhaFormatString(L"Worker Thread Start: 0x%Ix", basicInfo.StartRoutine)->Buffer);
+                        PhPrintPointer(value, basicInfo.StartRoutine);
+                        PhSetDialogItemText(
+                            hwndDlg,
+                            IDC_WORKERTHREADSTART,
+                            PhaFormatString(L"Worker Thread Start: %s", value)->Buffer
+                            );
                     }
 
-                    SetDlgItemText(hwndDlg, IDC_WORKERTHREADCONTEXT,
-                        PhaFormatString(L"Worker Thread Context: 0x%Ix", basicInfo.StartParameter)->Buffer);
+                    PhPrintPointer(value, basicInfo.StartParameter);
+                    PhSetDialogItemText(
+                        hwndDlg,
+                        IDC_WORKERTHREADCONTEXT,
+                        PhaFormatString(L"Worker Thread Context: %s", value)->Buffer
+                        );
                 }
 
                 NtClose(workerFactoryHandle);

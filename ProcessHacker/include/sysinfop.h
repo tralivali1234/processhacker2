@@ -5,8 +5,8 @@
 
 #define PH_SYSINFO_FADE_ADD 50
 #define PH_SYSINFO_PANEL_PADDING 3
-#define PH_SYSINFO_WINDOW_PADDING 13
-#define PH_SYSINFO_GRAPH_PADDING 9
+#define PH_SYSINFO_WINDOW_PADDING 7
+#define PH_SYSINFO_GRAPH_PADDING 4
 #define PH_SYSINFO_SMALL_GRAPH_WIDTH 48
 #define PH_SYSINFO_SMALL_GRAPH_PADDING 5
 #define PH_SYSINFO_SEPARATOR_WIDTH 2
@@ -56,11 +56,6 @@ VOID PhSipOnNcDestroy(
     VOID
     );
 
-VOID PhSipOnShowWindow(
-    _In_ BOOLEAN Showing,
-    _In_ ULONG State
-    );
-
 BOOLEAN PhSipOnSysCommand(
     _In_ ULONG Type,
     _In_ LONG CursorScreenX,
@@ -81,10 +76,12 @@ VOID PhSipOnThemeChanged(
     );
 
 VOID PhSipOnCommand(
+    _In_ HWND HwndControl,
     _In_ ULONG Id,
     _In_ ULONG Code
     );
 
+_Success_(return)
 BOOLEAN PhSipOnNotify(
     _In_ NMHDR *Header,
     _Out_ LRESULT *Result
@@ -92,7 +89,7 @@ BOOLEAN PhSipOnNotify(
 
 BOOLEAN PhSipOnDrawItem(
     _In_ ULONG_PTR Id,
-    _In_ DRAWITEMSTRUCT *DrawItemStruct
+    _In_ PDRAWITEMSTRUCT DrawItemStruct
     );
 
 VOID PhSipOnUserMessage(
@@ -142,13 +139,11 @@ PPH_SYSINFO_SECTION PhSipCreateInternalSection(
     );
 
 VOID PhSipDrawRestoreSummaryPanel(
-    _In_ HDC hdc,
-    _In_ PRECT Rect
+    _In_ PDRAWITEMSTRUCT DrawItemStruct
     );
 
 VOID PhSipDrawSeparator(
-    _In_ HDC hdc,
-    _In_ PRECT Rect
+    _In_ PDRAWITEMSTRUCT DrawItemStruct
     );
 
 VOID PhSipDrawPanel(
@@ -209,10 +204,6 @@ VOID PhSipUpdateThemeData(
     VOID
     );
 
-VOID PhSipSetAlwaysOnTop(
-    VOID
-    );
-
 VOID PhSipSaveWindowState(
     VOID
     );
@@ -228,12 +219,6 @@ PPH_STRING PhSipFormatSizeWithPrecision(
     );
 
 // CPU section
-
-typedef struct _SYSTEM_PROCESSOR_PERFORMANCE_HITCOUNT_WIN8
-{
-    ULONG Hits;
-    UCHAR PercentFrequency;
-} SYSTEM_PROCESSOR_PERFORMANCE_HITCOUNT_WIN8, *PSYSTEM_PROCESSOR_PERFORMANCE_HITCOUNT_WIN8;
 
 BOOLEAN PhSipCpuSectionCallback(
     _In_ PPH_SYSINFO_SECTION Section,
@@ -301,10 +286,11 @@ PPH_STRING PhSipGetMaxCpuString(
     _In_ LONG Index
     );
 
-VOID PhSipGetCpuBrandString(
-    _Out_writes_(49) PWSTR BrandString
+PPH_STRING PhSipGetCpuBrandString(
+    VOID
     );
 
+_Success_(return)
 BOOLEAN PhSipGetCpuFrequencyFromDistribution(
     _Out_ DOUBLE *Fraction
     );

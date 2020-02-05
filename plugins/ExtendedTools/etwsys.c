@@ -155,8 +155,8 @@ BOOLEAN EtpDiskSysInfoSectionCallback(
 
             PhMoveReference(&Section->GraphState.TooltipText, PhFormatString(
                 L"R: %s\nW: %s%s\n%s",
-                PhaFormatSize(diskRead, -1)->Buffer,
-                PhaFormatSize(diskWrite, -1)->Buffer,
+                PhaFormatSize(diskRead, ULONG_MAX)->Buffer,
+                PhaFormatSize(diskWrite, ULONG_MAX)->Buffer,
                 PhGetStringOrEmpty(EtpGetMaxDiskString(getTooltipText->Index)),
                 ((PPH_STRING)PH_AUTO(PhGetStatisticsTimeString(NULL, getTooltipText->Index)))->Buffer
                 ));
@@ -170,8 +170,8 @@ BOOLEAN EtpDiskSysInfoSectionCallback(
             drawPanel->Title = PhCreateString(L"Disk");
             drawPanel->SubTitle = PhFormatString(
                 L"R: %s\nW: %s",
-                PhaFormatSize(EtDiskReadDelta.Delta, -1)->Buffer,
-                PhaFormatSize(EtDiskWriteDelta.Delta, -1)->Buffer
+                PhaFormatSize(EtDiskReadDelta.Delta, ULONG_MAX)->Buffer,
+                PhaFormatSize(EtDiskWriteDelta.Delta, ULONG_MAX)->Buffer
                 );
         }
         return TRUE;
@@ -201,7 +201,7 @@ INT_PTR CALLBACK EtpDiskDialogProc(
             graphItem = PhAddLayoutItem(&DiskLayoutManager, GetDlgItem(hwndDlg, IDC_GRAPH_LAYOUT), NULL, PH_ANCHOR_ALL);
             panelItem = PhAddLayoutItem(&DiskLayoutManager, GetDlgItem(hwndDlg, IDC_PANEL_LAYOUT), NULL, PH_ANCHOR_LEFT | PH_ANCHOR_RIGHT | PH_ANCHOR_BOTTOM);
 
-            SendMessage(GetDlgItem(hwndDlg, IDC_TITLE), WM_SETFONT, (WPARAM)DiskSection->Parameters->LargeFont, FALSE);
+            SetWindowFont(GetDlgItem(hwndDlg, IDC_TITLE), DiskSection->Parameters->LargeFont, FALSE);
 
             DiskPanel = CreateDialog(PluginInstance->DllBase, MAKEINTRESOURCE(IDD_SYSINFO_DISKPANEL), hwndDlg, EtpDiskPanelDialogProc);
             ShowWindow(DiskPanel, SW_SHOW);
@@ -341,8 +341,8 @@ VOID EtpNotifyDiskGraph(
 
                     PhMoveReference(&DiskGraphState.TooltipText, PhFormatString(
                         L"R: %s\nW: %s%s\n%s",
-                        PhaFormatSize(diskRead, -1)->Buffer,
-                        PhaFormatSize(diskWrite, -1)->Buffer,
+                        PhaFormatSize(diskRead, ULONG_MAX)->Buffer,
+                        PhaFormatSize(diskWrite, ULONG_MAX)->Buffer,
                         PhGetStringOrEmpty(EtpGetMaxDiskString(getTooltipText->Index)),
                         ((PPH_STRING)PH_AUTO(PhGetStatisticsTimeString(NULL, getTooltipText->Index)))->Buffer
                         ));
@@ -379,7 +379,7 @@ VOID EtpUpdateDiskGraph(
     )
 {
     DiskGraphState.Valid = FALSE;
-    DiskGraphState.TooltipIndex = -1;
+    DiskGraphState.TooltipIndex = ULONG_MAX;
     Graph_MoveGrid(DiskGraphHandle, 1);
     Graph_Draw(DiskGraphHandle);
     Graph_UpdateTooltip(DiskGraphHandle);
@@ -390,10 +390,10 @@ VOID EtpUpdateDiskPanel(
     VOID
     )
 {
-    SetDlgItemText(DiskPanel, IDC_ZREADSDELTA_V, PhaFormatUInt64(EtDiskReadCountDelta.Delta, TRUE)->Buffer);
-    SetDlgItemText(DiskPanel, IDC_ZREADBYTESDELTA_V, PhaFormatSize(EtDiskReadDelta.Delta, -1)->Buffer);
-    SetDlgItemText(DiskPanel, IDC_ZWRITESDELTA_V, PhaFormatUInt64(EtDiskWriteCountDelta.Delta, TRUE)->Buffer);
-    SetDlgItemText(DiskPanel, IDC_ZWRITEBYTESDELTA_V, PhaFormatSize(EtDiskWriteDelta.Delta, -1)->Buffer);
+    PhSetDialogItemText(DiskPanel, IDC_ZREADSDELTA_V, PhaFormatUInt64(EtDiskReadCountDelta.Delta, TRUE)->Buffer);
+    PhSetDialogItemText(DiskPanel, IDC_ZREADBYTESDELTA_V, PhaFormatSize(EtDiskReadDelta.Delta, ULONG_MAX)->Buffer);
+    PhSetDialogItemText(DiskPanel, IDC_ZWRITESDELTA_V, PhaFormatUInt64(EtDiskWriteCountDelta.Delta, TRUE)->Buffer);
+    PhSetDialogItemText(DiskPanel, IDC_ZWRITEBYTESDELTA_V, PhaFormatSize(EtDiskWriteDelta.Delta, ULONG_MAX)->Buffer);
 }
 
 PPH_PROCESS_RECORD EtpReferenceMaxDiskRecord(
@@ -531,8 +531,8 @@ BOOLEAN EtpNetworkSysInfoSectionCallback(
 
             PhMoveReference(&Section->GraphState.TooltipText, PhFormatString(
                 L"R: %s\nS: %s%s\n%s",
-                PhaFormatSize(networkReceive, -1)->Buffer,
-                PhaFormatSize(networkSend, -1)->Buffer,
+                PhaFormatSize(networkReceive, ULONG_MAX)->Buffer,
+                PhaFormatSize(networkSend, ULONG_MAX)->Buffer,
                 PhGetStringOrEmpty(EtpGetMaxNetworkString(getTooltipText->Index)),
                 ((PPH_STRING)PH_AUTO(PhGetStatisticsTimeString(NULL, getTooltipText->Index)))->Buffer
                 ));
@@ -546,8 +546,8 @@ BOOLEAN EtpNetworkSysInfoSectionCallback(
             drawPanel->Title = PhCreateString(L"Network");
             drawPanel->SubTitle = PhFormatString(
                 L"R: %s\nS: %s",
-                PhaFormatSize(EtNetworkReceiveDelta.Delta, -1)->Buffer,
-                PhaFormatSize(EtNetworkSendDelta.Delta, -1)->Buffer
+                PhaFormatSize(EtNetworkReceiveDelta.Delta, ULONG_MAX)->Buffer,
+                PhaFormatSize(EtNetworkSendDelta.Delta, ULONG_MAX)->Buffer
                 );
         }
         return TRUE;
@@ -577,7 +577,7 @@ INT_PTR CALLBACK EtpNetworkDialogProc(
             graphItem = PhAddLayoutItem(&NetworkLayoutManager, GetDlgItem(hwndDlg, IDC_GRAPH_LAYOUT), NULL, PH_ANCHOR_ALL);
             panelItem = PhAddLayoutItem(&NetworkLayoutManager, GetDlgItem(hwndDlg, IDC_PANEL_LAYOUT), NULL, PH_ANCHOR_LEFT | PH_ANCHOR_RIGHT | PH_ANCHOR_BOTTOM);
 
-            SendMessage(GetDlgItem(hwndDlg, IDC_TITLE), WM_SETFONT, (WPARAM)NetworkSection->Parameters->LargeFont, FALSE);
+            SetWindowFont(GetDlgItem(hwndDlg, IDC_TITLE), NetworkSection->Parameters->LargeFont, FALSE);
 
             NetworkPanel = CreateDialog(PluginInstance->DllBase, MAKEINTRESOURCE(IDD_SYSINFO_NETPANEL), hwndDlg, EtpNetworkPanelDialogProc);
             ShowWindow(NetworkPanel, SW_SHOW);
@@ -717,8 +717,8 @@ VOID EtpNotifyNetworkGraph(
 
                     PhMoveReference(&NetworkGraphState.TooltipText, PhFormatString(
                         L"R: %s\nS: %s%s\n%s",
-                        PhaFormatSize(networkReceive, -1)->Buffer,
-                        PhaFormatSize(networkSend, -1)->Buffer,
+                        PhaFormatSize(networkReceive, ULONG_MAX)->Buffer,
+                        PhaFormatSize(networkSend, ULONG_MAX)->Buffer,
                         PhGetStringOrEmpty(EtpGetMaxNetworkString(getTooltipText->Index)),
                         ((PPH_STRING)PH_AUTO(PhGetStatisticsTimeString(NULL, getTooltipText->Index)))->Buffer
                         ));
@@ -755,7 +755,7 @@ VOID EtpUpdateNetworkGraph(
     )
 {
     NetworkGraphState.Valid = FALSE;
-    NetworkGraphState.TooltipIndex = -1;
+    NetworkGraphState.TooltipIndex = ULONG_MAX;
     Graph_MoveGrid(NetworkGraphHandle, 1);
     Graph_Draw(NetworkGraphHandle);
     Graph_UpdateTooltip(NetworkGraphHandle);
@@ -766,10 +766,10 @@ VOID EtpUpdateNetworkPanel(
     VOID
     )
 {
-    SetDlgItemText(NetworkPanel, IDC_ZRECEIVESDELTA_V, PhaFormatUInt64(EtNetworkReceiveCountDelta.Delta, TRUE)->Buffer);
-    SetDlgItemText(NetworkPanel, IDC_ZRECEIVEBYTESDELTA_V, PhaFormatSize(EtNetworkReceiveDelta.Delta, -1)->Buffer);
-    SetDlgItemText(NetworkPanel, IDC_ZSENDSDELTA_V, PhaFormatUInt64(EtNetworkSendCountDelta.Delta, TRUE)->Buffer);
-    SetDlgItemText(NetworkPanel, IDC_ZSENDBYTESDELTA_V, PhaFormatSize(EtNetworkSendDelta.Delta, -1)->Buffer);
+    PhSetDialogItemText(NetworkPanel, IDC_ZRECEIVESDELTA_V, PhaFormatUInt64(EtNetworkReceiveCountDelta.Delta, TRUE)->Buffer);
+    PhSetDialogItemText(NetworkPanel, IDC_ZRECEIVEBYTESDELTA_V, PhaFormatSize(EtNetworkReceiveDelta.Delta, ULONG_MAX)->Buffer);
+    PhSetDialogItemText(NetworkPanel, IDC_ZSENDSDELTA_V, PhaFormatUInt64(EtNetworkSendCountDelta.Delta, TRUE)->Buffer);
+    PhSetDialogItemText(NetworkPanel, IDC_ZSENDBYTESDELTA_V, PhaFormatSize(EtNetworkSendDelta.Delta, ULONG_MAX)->Buffer);
 }
 
 PPH_PROCESS_RECORD EtpReferenceMaxNetworkRecord(

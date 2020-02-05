@@ -4,6 +4,7 @@
  *
  * Copyright (C) 2010 wj32
  * Copyright (C) 2010 evilpie
+ * Copyright (C) 2016-2019 dmex
  *
  * This file is part of Process Hacker.
  *
@@ -22,15 +23,13 @@
  */
 
 #include <phapp.h>
+#include <phplug.h>
+#include <phsettings.h>
 #include <netprv.h>
-
-#include <ws2tcpip.h>
-#include <ws2ipdef.h>
-#include <iphlpapi.h>
-
 #include <svcsup.h>
 #include <workqueue.h>
 
+#include <apiimport.h>
 #include <extmgri.h>
 #include <procprv.h>
 
@@ -43,6 +42,8 @@ typedef struct _PH_NETWORK_CONNECTION
     HANDLE ProcessId;
     LARGE_INTEGER CreateTime;
     ULONGLONG OwnerInfo[PH_NETWORK_OWNER_INFO_SIZE];
+    ULONG LocalScopeId; // Ipv6
+    ULONG RemoteScopeId; // Ipv6
 } PH_NETWORK_CONNECTION, *PPH_NETWORK_CONNECTION;
 
 typedef struct _PH_NETWORK_ITEM_QUERY_DATA
@@ -60,47 +61,6 @@ typedef struct _PHP_RESOLVE_CACHE_ITEM
     PH_IP_ADDRESS Address;
     PPH_STRING HostString;
 } PHP_RESOLVE_CACHE_ITEM, *PPHP_RESOLVE_CACHE_ITEM;
-
-typedef DWORD (WINAPI *_GetExtendedTcpTable)(
-    _Out_writes_bytes_opt_(*pdwSize) PVOID pTcpTable,
-    _Inout_ PDWORD pdwSize,
-    _In_ BOOL bOrder,
-    _In_ ULONG ulAf,
-    _In_ TCP_TABLE_CLASS TableClass,
-    _In_ ULONG Reserved
-    );
-
-typedef DWORD (WINAPI *_GetExtendedUdpTable)(
-    _Out_writes_bytes_opt_(*pdwSize) PVOID pUdpTable,
-    _Inout_ PDWORD pdwSize,
-    _In_ BOOL bOrder,
-    _In_ ULONG ulAf,
-    _In_ UDP_TABLE_CLASS TableClass,
-    _In_ ULONG Reserved
-    );
-
-typedef int (WSAAPI *_WSAStartup)(
-    _In_ WORD wVersionRequested,
-    _Out_ LPWSADATA lpWSAData
-    );
-
-typedef int (WSAAPI *_WSAGetLastError)();
-
-typedef INT (WSAAPI *_GetNameInfoW)(
-    _In_reads_bytes_(SockaddrLength) const SOCKADDR *pSockaddr,
-    _In_ socklen_t SockaddrLength,
-    _Out_writes_opt_(NodeBufferSize) PWCHAR pNodeBuffer,
-    _In_ DWORD NodeBufferSize,
-    _Out_writes_opt_(ServiceBufferSize) PWCHAR pServiceBuffer,
-    _In_ DWORD ServiceBufferSize,
-    _In_ INT Flags
-    );
-
-typedef struct hostent *(WSAAPI *_gethostbyaddr)(
-    _In_reads_bytes_(len) const char *addr,
-    _In_ int len,
-    _In_ int type
-    );
 
 VOID NTAPI PhpNetworkItemDeleteProcedure(
     _In_ PVOID Object,
@@ -130,32 +90,18 @@ BOOLEAN PhGetNetworkConnections(
     _Out_ PULONG NumberOfConnections
     );
 
-PPH_OBJECT_TYPE PhNetworkItemType;
-
-PPH_HASHTABLE PhNetworkHashtable;
+PPH_OBJECT_TYPE PhNetworkItemType = NULL;
+PPH_HASHTABLE PhNetworkHashtable = NULL;
 PH_QUEUED_LOCK PhNetworkHashtableLock = PH_QUEUED_LOCK_INIT;
-
-PHAPPAPI PH_CALLBACK_DECLARE(PhNetworkItemAddedEvent);
-PHAPPAPI PH_CALLBACK_DECLARE(PhNetworkItemModifiedEvent);
-PHAPPAPI PH_CALLBACK_DECLARE(PhNetworkItemRemovedEvent);
-PHAPPAPI PH_CALLBACK_DECLARE(PhNetworkItemsUpdatedEvent);
-
-BOOLEAN PhEnableNetworkProviderResolve = TRUE;
 
 PH_INITONCE PhNetworkProviderWorkQueueInitOnce = PH_INITONCE_INIT;
 PH_WORK_QUEUE PhNetworkProviderWorkQueue;
 SLIST_HEADER PhNetworkItemQueryListHead;
 
-static PPH_HASHTABLE PhpResolveCacheHashtable;
-static PH_QUEUED_LOCK PhpResolveCacheHashtableLock = PH_QUEUED_LOCK_INIT;
-
+BOOLEAN PhEnableNetworkProviderResolve = TRUE;
 static BOOLEAN NetworkImportDone = FALSE;
-static _GetExtendedTcpTable GetExtendedTcpTable_I;
-static _GetExtendedUdpTable GetExtendedUdpTable_I;
-static _WSAStartup WSAStartup_I;
-static _WSAGetLastError WSAGetLastError_I;
-static _GetNameInfoW GetNameInfoW_I;
-static _gethostbyaddr gethostbyaddr_I;
+static PPH_HASHTABLE PhpResolveCacheHashtable = NULL;
+static PH_QUEUED_LOCK PhpResolveCacheHashtableLock = PH_QUEUED_LOCK_INIT;
 
 BOOLEAN PhNetworkProviderInitialization(
     VOID
@@ -214,6 +160,10 @@ VOID NTAPI PhpNetworkItemDeleteProcedure(
         PhDereferenceObject(networkItem->LocalHostString);
     if (networkItem->RemoteHostString)
         PhDereferenceObject(networkItem->RemoteHostString);
+
+    // NOTE: Dereferencing the ProcessItem will destroy the NetworkItem->ProcessIcon handle.
+    if (networkItem->ProcessItem)
+        PhDereferenceObject(networkItem->ProcessItem);
 }
 
 BOOLEAN PhpNetworkHashtableEqualFunction(
@@ -241,7 +191,7 @@ ULONG NTAPI PhpNetworkHashtableHashFunction(
         networkItem->ProtocolType ^
         PhHashIpEndpoint(&networkItem->LocalEndpoint) ^
         PhHashIpEndpoint(&networkItem->RemoteEndpoint) ^
-        HandleToUlong(networkItem->ProcessId);
+        (HandleToUlong(networkItem->ProcessId) / 4);
 }
 
 PPH_NETWORK_ITEM PhReferenceNetworkItem(
@@ -333,77 +283,217 @@ PPHP_RESOLVE_CACHE_ITEM PhpLookupResolveCacheItem(
         return NULL;
 }
 
-PPH_STRING PhGetHostNameFromAddress(
+//PPH_STRING PhGetHostNameFromAddress(
+//    _In_ PPH_IP_ADDRESS Address
+//    )
+//{
+//    SOCKADDR_IN ipv4Address;
+//    SOCKADDR_IN6 ipv6Address;
+//    PSOCKADDR address;
+//    socklen_t length;
+//    PPH_STRING hostName;
+//
+//    if (Address->Type == PH_IPV4_NETWORK_TYPE)
+//    {
+//        ipv4Address.sin_family = AF_INET;
+//        ipv4Address.sin_port = 0;
+//        ipv4Address.sin_addr = Address->InAddr;
+//        address = (PSOCKADDR)&ipv4Address;
+//        length = sizeof(ipv4Address);
+//    }
+//    else if (Address->Type == PH_IPV6_NETWORK_TYPE)
+//    {
+//        ipv6Address.sin6_family = AF_INET6;
+//        ipv6Address.sin6_port = 0;
+//        ipv6Address.sin6_flowinfo = 0;
+//        ipv6Address.sin6_addr = Address->In6Addr;
+//        ipv6Address.sin6_scope_id = 0;
+//        address = (PSOCKADDR)&ipv6Address;
+//        length = sizeof(ipv6Address);
+//    }
+//    else
+//    {
+//        return NULL;
+//    }
+//
+//    hostName = PhCreateStringEx(NULL, 128);
+//
+//    if (GetNameInfo(
+//        address,
+//        length,
+//        hostName->Buffer,
+//        (ULONG)hostName->Length / sizeof(WCHAR) + 1,
+//        NULL,
+//        0,
+//        NI_NAMEREQD
+//        ) != 0)
+//    {
+//        // Try with the maximum host name size.
+//        PhDereferenceObject(hostName);
+//        hostName = PhCreateStringEx(NULL, NI_MAXHOST * sizeof(WCHAR));
+//
+//        if (GetNameInfo(
+//            address,
+//            length,
+//            hostName->Buffer,
+//            (ULONG)hostName->Length / sizeof(WCHAR) + 1,
+//            NULL,
+//            0,
+//            NI_NAMEREQD
+//            ) != 0)
+//        {
+//            PhDereferenceObject(hostName);
+//
+//            return NULL;
+//        }
+//    }
+//
+//    PhTrimToNullTerminatorString(hostName);
+//
+//    return hostName;
+//}
+
+PPH_STRING PhpGetDnsReverseNameFromAddress(
     _In_ PPH_IP_ADDRESS Address
     )
 {
-    struct sockaddr_in ipv4Address;
-    struct sockaddr_in6 ipv6Address;
-    struct sockaddr *address;
-    socklen_t length;
-    PPH_STRING hostName;
+    switch (Address->Type)
+    {
+    case PH_IPV4_NETWORK_TYPE:
+        {
+            PH_STRING_BUILDER stringBuilder;
 
-    if (!GetNameInfoW_I)
+            PhInitializeStringBuilder(&stringBuilder, DNS_MAX_IP4_REVERSE_NAME_LENGTH);
+
+            PhAppendFormatStringBuilder(
+                &stringBuilder,
+                L"%hhu.%hhu.%hhu.%hhu.",
+                Address->InAddr.s_impno,
+                Address->InAddr.s_lh,
+                Address->InAddr.s_host,
+                Address->InAddr.s_net
+                );
+
+            PhAppendStringBuilder2(&stringBuilder, DNS_IP4_REVERSE_DOMAIN_STRING);
+
+            return PhFinalStringBuilderString(&stringBuilder);
+        }
+    case PH_IPV6_NETWORK_TYPE:
+        {
+            PH_STRING_BUILDER stringBuilder;
+
+            PhInitializeStringBuilder(&stringBuilder, DNS_MAX_IP6_REVERSE_NAME_LENGTH);
+
+            for (INT i = sizeof(IN6_ADDR) - 1; i >= 0; i--)
+            {
+                PhAppendFormatStringBuilder(
+                    &stringBuilder,
+                    L"%hhx.%hhx.",
+                    Address->In6Addr.s6_addr[i] & 0xF,
+                    (Address->In6Addr.s6_addr[i] >> 4) & 0xF
+                    );
+            }
+
+            PhAppendStringBuilder2(&stringBuilder, DNS_IP6_REVERSE_DOMAIN_STRING);
+
+            return PhFinalStringBuilderString(&stringBuilder);
+        }
+    default:
         return NULL;
+    }
+}
+
+PPH_STRING PhGetHostNameFromAddressEx(
+    _In_ PPH_IP_ADDRESS Address
+    )
+{
+    BOOLEAN dnsLocalQuery = FALSE;
+    PPH_STRING dnsHostNameString = NULL;
+    PPH_STRING dnsReverseNameString = NULL;
+    PDNS_RECORD dnsRecordList = NULL;
 
     if (Address->Type == PH_IPV4_NETWORK_TYPE)
     {
-        ipv4Address.sin_family = AF_INET;
-        ipv4Address.sin_port = 0;
-        ipv4Address.sin_addr = Address->InAddr;
-        address = (struct sockaddr *)&ipv4Address;
-        length = sizeof(ipv4Address);
+        if (
+            IN4_IS_ADDR_UNSPECIFIED(&Address->InAddr) ||
+            IN4_IS_ADDR_LOOPBACK(&Address->InAddr) ||
+            IN4_IS_ADDR_RFC1918(&Address->InAddr)
+            )
+        {
+            dnsLocalQuery = TRUE;
+        }
     }
     else if (Address->Type == PH_IPV6_NETWORK_TYPE)
     {
-        ipv6Address.sin6_family = AF_INET6;
-        ipv6Address.sin6_port = 0;
-        ipv6Address.sin6_flowinfo = 0;
-        ipv6Address.sin6_addr = Address->In6Addr;
-        ipv6Address.sin6_scope_id = 0;
-        address = (struct sockaddr *)&ipv6Address;
-        length = sizeof(ipv6Address);
-    }
-    else
-    {
-        return NULL;
-    }
-
-    hostName = PhCreateStringEx(NULL, 128);
-
-    if (GetNameInfoW_I(
-        address,
-        length,
-        hostName->Buffer,
-        (ULONG)hostName->Length / 2 + 1,
-        NULL,
-        0,
-        NI_NAMEREQD
-        ) != 0)
-    {
-        // Try with the maximum host name size.
-        PhDereferenceObject(hostName);
-        hostName = PhCreateStringEx(NULL, NI_MAXHOST * 2);
-
-        if (GetNameInfoW_I(
-            address,
-            length,
-            hostName->Buffer,
-            (ULONG)hostName->Length / 2 + 1,
-            NULL,
-            0,
-            NI_NAMEREQD
-            ) != 0)
+        if (
+            IN6_IS_ADDR_UNSPECIFIED(&Address->In6Addr) ||
+            IN6_IS_ADDR_LOOPBACK(&Address->In6Addr) ||
+            IN6_IS_ADDR_LINKLOCAL(&Address->In6Addr)
+            )
         {
-            PhDereferenceObject(hostName);
-
-            return NULL;
+            dnsLocalQuery = TRUE;
         }
     }
 
-    PhTrimToNullTerminatorString(hostName);
+    if (!(dnsReverseNameString = PhpGetDnsReverseNameFromAddress(Address)))
+        return NULL;
 
-    return hostName;
+    if (PhEnableNetworkResolveDoHSupport)
+    {
+        if (!dnsLocalQuery)
+        {
+            dnsRecordList = PhHttpDnsQuery(
+                NULL,
+                dnsReverseNameString->Buffer,
+                DNS_TYPE_PTR
+                );
+        }
+
+        if (!dnsRecordList && DnsQuery_W_Import())
+        {
+            DnsQuery_W_Import()(
+                dnsReverseNameString->Buffer,
+                DNS_TYPE_PTR,
+                DNS_QUERY_NO_HOSTS_FILE, // DNS_QUERY_BYPASS_CACHE
+                NULL,
+                &dnsRecordList,
+                NULL
+                );
+        }
+    }
+    else
+    {
+        if (DnsQuery_W_Import())
+        {
+            DnsQuery_W_Import()(
+                dnsReverseNameString->Buffer,
+                DNS_TYPE_PTR,
+                DNS_QUERY_NO_HOSTS_FILE, // DNS_QUERY_BYPASS_CACHE
+                NULL,
+                &dnsRecordList,
+                NULL
+                );
+        }
+    }
+
+    if (dnsRecordList)
+    {
+        for (PDNS_RECORD dnsRecord = dnsRecordList; dnsRecord; dnsRecord = dnsRecord->pNext)
+        {
+            if (dnsRecord->wType == DNS_TYPE_PTR)
+            {
+                dnsHostNameString = PhCreateString(dnsRecord->Data.PTR.pNameHost); // Return the first result (dmex)
+                break;
+            }
+        }
+
+        if (DnsFree_Import())
+            DnsFree_Import()(dnsRecordList, DnsFreeRecordList);
+    }
+
+    PhDereferenceObject(dnsReverseNameString);
+
+    return dnsHostNameString;
 }
 
 NTSTATUS PhpNetworkItemQueryWorker(
@@ -422,7 +512,7 @@ NTSTATUS PhpNetworkItemQueryWorker(
 
     if (!cacheItem)
     {
-        hostString = PhGetHostNameFromAddress(&data->Address);
+        hostString = PhGetHostNameFromAddressEx(&data->Address);
 
         if (hostString)
         {
@@ -445,10 +535,6 @@ NTSTATUS PhpNetworkItemQueryWorker(
             }
 
             PhReleaseQueuedLockExclusive(&PhpResolveCacheHashtableLock);
-        }
-        else
-        {
-            dprintf("resolve failed, error %u\n", WSAGetLastError_I());
         }
     }
     else
@@ -512,6 +598,35 @@ VOID PhpUpdateNetworkItemOwner(
     }
 }
 
+VOID PhFlushNetworkQueryData(
+    VOID
+    )
+{
+    PSLIST_ENTRY entry;
+    PPH_NETWORK_ITEM_QUERY_DATA data;
+
+    if (!RtlFirstEntrySList(&PhNetworkItemQueryListHead))
+        return;
+
+    entry = RtlInterlockedFlushSList(&PhNetworkItemQueryListHead);
+
+    while (entry)
+    {
+        data = CONTAINING_RECORD(entry, PH_NETWORK_ITEM_QUERY_DATA, ListEntry);
+        entry = entry->Next;
+
+        if (data->Remote)
+            PhMoveReference(&data->NetworkItem->RemoteHostString, data->HostString);
+        else
+            PhMoveReference(&data->NetworkItem->LocalHostString, data->HostString);
+
+        data->NetworkItem->JustResolved = TRUE;
+
+        PhDereferenceObject(data->NetworkItem);
+        PhFree(data);
+    }
+}
+
 VOID PhNetworkProviderUpdate(
     _In_ PVOID Object
     )
@@ -523,30 +638,15 @@ VOID PhNetworkProviderUpdate(
     if (!NetworkImportDone)
     {
         WSADATA wsaData;
-        HMODULE iphlpapi;
-        HMODULE ws2_32;
-
-        iphlpapi = LoadLibrary(L"iphlpapi.dll");
-        GetExtendedTcpTable_I = (PVOID)GetProcAddress(iphlpapi, "GetExtendedTcpTable");
-        GetExtendedUdpTable_I = (PVOID)GetProcAddress(iphlpapi, "GetExtendedUdpTable");
-        ws2_32 = LoadLibrary(L"ws2_32.dll");
-        WSAStartup_I = (PVOID)GetProcAddress(ws2_32, "WSAStartup");
-        WSAGetLastError_I = (PVOID)GetProcAddress(ws2_32, "WSAGetLastError");
-        GetNameInfoW_I = (PVOID)GetProcAddress(ws2_32, "GetNameInfoW");
-        gethostbyaddr_I = (PVOID)GetProcAddress(ws2_32, "gethostbyaddr");
-
-        // Make sure WSA is initialized.
-        if (WSAStartup_I)
-        {
-            WSAStartup_I(MAKEWORD(2, 2), &wsaData);
-        }
-
+        // Make sure WSA is initialized. (wj32)
+        WSAStartup(WINSOCK_VERSION, &wsaData);
         NetworkImportDone = TRUE;
     }
 
     if (!PhGetNetworkConnections(&connections, &numberOfConnections))
         return;
 
+    // Look for closed connections.
     {
         PPH_LIST connectionsToRemove = NULL;
         PH_HASHTABLE_ENUM_CONTEXT enumContext;
@@ -574,7 +674,7 @@ VOID PhNetworkProviderUpdate(
 
             if (!found)
             {
-                PhInvokeCallback(&PhNetworkItemRemovedEvent, *networkItem);
+                PhInvokeCallback(PhGetGeneralCallback(GeneralCallbackNetworkProviderRemovedEvent), *networkItem);
 
                 if (!connectionsToRemove)
                     connectionsToRemove = PhCreateList(2);
@@ -598,29 +698,9 @@ VOID PhNetworkProviderUpdate(
     }
 
     // Go through the queued network item query data.
-    {
-        PSLIST_ENTRY entry;
-        PPH_NETWORK_ITEM_QUERY_DATA data;
+    PhFlushNetworkQueryData();
 
-        entry = RtlInterlockedFlushSList(&PhNetworkItemQueryListHead);
-
-        while (entry)
-        {
-            data = CONTAINING_RECORD(entry, PH_NETWORK_ITEM_QUERY_DATA, ListEntry);
-            entry = entry->Next;
-
-            if (data->Remote)
-                PhMoveReference(&data->NetworkItem->RemoteHostString, data->HostString);
-            else
-                PhMoveReference(&data->NetworkItem->LocalHostString, data->HostString);
-
-            data->NetworkItem->JustResolved = TRUE;
-
-            PhDereferenceObject(data->NetworkItem);
-            PhFree(data);
-        }
-    }
-
+    // Look for new network connections and update existing ones.
     for (i = 0; i < numberOfConnections; i++)
     {
         PPH_NETWORK_ITEM networkItem;
@@ -650,6 +730,8 @@ VOID PhNetworkProviderUpdate(
             networkItem->ProcessId = connections[i].ProcessId;
             networkItem->CreateTime = connections[i].CreateTime;
             memcpy(networkItem->OwnerInfo, connections[i].OwnerInfo, sizeof(ULONGLONG) * PH_NETWORK_OWNER_INFO_SIZE);
+            networkItem->LocalScopeId = connections[i].LocalScopeId;
+            networkItem->RemoteScopeId = connections[i].RemoteScopeId;
 
             // Format various strings.
 
@@ -718,8 +800,9 @@ VOID PhNetworkProviderUpdate(
             // Get process information.
             if (processItem = PhReferenceProcessItem(networkItem->ProcessId))
             {
-                networkItem->ProcessName = processItem->ProcessName;
-                PhReferenceObject(processItem->ProcessName);
+                networkItem->ProcessItem = processItem;
+                PhSetReference(&networkItem->ProcessName, processItem->ProcessName);
+                networkItem->SubsystemProcess = !!processItem->IsSubsystemProcess;
                 PhpUpdateNetworkItemOwner(networkItem, processItem);
 
                 if (PhTestEvent(&processItem->Stage1Event))
@@ -728,7 +811,35 @@ VOID PhNetworkProviderUpdate(
                     networkItem->ProcessIconValid = TRUE;
                 }
 
-                PhDereferenceObject(processItem);
+                // NOTE: We dereference processItem in PhpNetworkItemDeleteProcedure. (dmex)
+            }
+            else
+            {
+                HANDLE processHandle;
+                PPH_STRING fileName;
+                PROCESS_EXTENDED_BASIC_INFORMATION basicInfo;
+
+                // HACK HACK HACK
+                // WSL subsystem processes (e.g. apache/nginx) create sockets, clone/fork themselves, duplicate the socket into the child process and then terminate.
+                // The socket handle remains valid and in-use by the child process BUT the socket continues returning the PID of the exited process???
+                // Fixing this causes a major performance problem; If we have 100,000 sockets then on previous versions of Windows we would only need 2 system calls maximum
+                // (for the process list) to identify the owner of every socket but now we need to make 4 system calls for every_last_socket totaling 400,000 system calls... great. (dmex)
+                if (NT_SUCCESS(PhOpenProcess(&processHandle, PROCESS_QUERY_LIMITED_INFORMATION, networkItem->ProcessId)))
+                {
+                    if (NT_SUCCESS(PhGetProcessExtendedBasicInformation(processHandle, &basicInfo)))
+                    {
+                        networkItem->SubsystemProcess = !!basicInfo.IsSubsystemProcess;
+                    }
+
+                    if (NT_SUCCESS(PhGetProcessImageFileName(processHandle, &fileName)))
+                    {
+                        PhMoveReference(&networkItem->ProcessName, PhGetBaseName(fileName));
+                    }
+
+                    NtClose(processHandle);
+                }
+
+                networkItem->UnknownProcess = TRUE;
             }
 
             // Add the network item to the hashtable.
@@ -737,14 +848,13 @@ VOID PhNetworkProviderUpdate(
             PhReleaseQueuedLockExclusive(&PhNetworkHashtableLock);
 
             // Raise the network item added event.
-            PhInvokeCallback(&PhNetworkItemAddedEvent, networkItem);
+            PhInvokeCallback(PhGetGeneralCallback(GeneralCallbackNetworkProviderAddedEvent), networkItem);
         }
         else
         {
             BOOLEAN modified = FALSE;
-            PPH_PROCESS_ITEM processItem;
 
-            if (networkItem->JustResolved)
+            if (InterlockedExchange(&networkItem->JustResolved, 0) != 0)
                 modified = TRUE;
 
             if (networkItem->State != connections[i].State)
@@ -753,35 +863,33 @@ VOID PhNetworkProviderUpdate(
                 modified = TRUE;
             }
 
-            if (!networkItem->ProcessName || !networkItem->ProcessIconValid)
+            if (!networkItem->ProcessItem)
             {
-                if (processItem = PhReferenceProcessItem(networkItem->ProcessId))
-                {
-                    if (!networkItem->ProcessName)
-                    {
-                        networkItem->ProcessName = processItem->ProcessName;
-                        PhReferenceObject(processItem->ProcessName);
-                        PhpUpdateNetworkItemOwner(networkItem, processItem);
-                        modified = TRUE;
-                    }
-
-                    if (!networkItem->ProcessIconValid && PhTestEvent(&processItem->Stage1Event))
-                    {
-                        networkItem->ProcessIcon = processItem->SmallIcon;
-                        networkItem->ProcessIconValid = TRUE;
-                        modified = TRUE;
-                    }
-
-                    PhDereferenceObject(processItem);
-                }
+                networkItem->ProcessItem = PhReferenceProcessItem(networkItem->ProcessId);
+                // NOTE: We dereference processItem in PhpNetworkItemDeleteProcedure. (dmex)
             }
 
-            networkItem->JustResolved = FALSE;
+            if (networkItem->ProcessItem)
+            {
+                if (!networkItem->ProcessName)
+                {
+                    networkItem->ProcessName = PhReferenceObject(networkItem->ProcessItem->ProcessName);
+                    PhpUpdateNetworkItemOwner(networkItem, networkItem->ProcessItem);
+                    modified = TRUE;
+                }
+
+                if (!networkItem->ProcessIconValid && PhTestEvent(&networkItem->ProcessItem->Stage1Event))
+                {
+                    networkItem->ProcessIcon = networkItem->ProcessItem->SmallIcon;
+                    networkItem->ProcessIconValid = TRUE;
+                    modified = TRUE;
+                }
+            }
 
             if (modified)
             {
                 // Raise the network item modified event.
-                PhInvokeCallback(&PhNetworkItemModifiedEvent, networkItem);
+                PhInvokeCallback(PhGetGeneralCallback(GeneralCallbackNetworkProviderModifiedEvent), networkItem);
             }
 
             PhDereferenceObject(networkItem);
@@ -790,7 +898,7 @@ VOID PhNetworkProviderUpdate(
 
     PhFree(connections);
 
-    PhInvokeCallback(&PhNetworkItemsUpdatedEvent, NULL);
+    PhInvokeCallback(PhGetGeneralCallback(GeneralCallbackNetworkProviderUpdatedEvent), NULL);
 }
 
 PWSTR PhGetProtocolTypeName(
@@ -853,7 +961,7 @@ BOOLEAN PhGetNetworkConnections(
     )
 {
     PVOID table;
-    DWORD tableSize;
+    ULONG tableSize;
     PMIB_TCPTABLE_OWNER_MODULE tcp4Table;
     PMIB_UDPTABLE_OWNER_MODULE udp4Table;
     PMIB_TCP6TABLE_OWNER_MODULE tcp6Table;
@@ -863,16 +971,13 @@ BOOLEAN PhGetNetworkConnections(
     ULONG index = 0;
     PPH_NETWORK_CONNECTION connections;
 
-    if (!GetExtendedTcpTable_I || !GetExtendedUdpTable_I)
-        return FALSE;
-
     // TCP IPv4
 
     tableSize = 0;
-    GetExtendedTcpTable_I(NULL, &tableSize, FALSE, AF_INET, TCP_TABLE_OWNER_MODULE_ALL, 0);
+    GetExtendedTcpTable(NULL, &tableSize, FALSE, AF_INET, TCP_TABLE_OWNER_MODULE_ALL, 0);
     table = PhAllocate(tableSize);
 
-    if (GetExtendedTcpTable_I(table, &tableSize, FALSE, AF_INET, TCP_TABLE_OWNER_MODULE_ALL, 0) == 0)
+    if (GetExtendedTcpTable(table, &tableSize, FALSE, AF_INET, TCP_TABLE_OWNER_MODULE_ALL, 0) == NO_ERROR)
     {
         tcp4Table = table;
         count += tcp4Table->dwNumEntries;
@@ -886,24 +991,11 @@ BOOLEAN PhGetNetworkConnections(
     // TCP IPv6
 
     tableSize = 0;
-    GetExtendedTcpTable_I(NULL, &tableSize, FALSE, AF_INET6, TCP_TABLE_OWNER_MODULE_ALL, 0);
-
-    // Note: On Windows XP, GetExtendedTcpTable had a bug where it calculated the required buffer size
-    // for IPv6 TCP_TABLE_OWNER_MODULE_ALL requests incorrectly, causing it to return the wrong size
-    // and overrun the provided buffer instead of returning an error. The size should be:
-    // = FIELD_OFFSET(MIB_TCP6TABLE_OWNER_MODULE, table) + sizeof(MIB_TCP6ROW_OWNER_MODULE) * (number of entries)
-    // However, the function calculated it as:
-    // = FIELD_OFFSET(MIB_TCP6TABLE_OWNER_MODULE, table) + sizeof(MIB_TCP6ROW_OWNER_PID) * (number of entries)
-    // A workaround is implemented below.
-    if (WindowsVersion <= WINDOWS_XP && tableSize >= (ULONG)FIELD_OFFSET(MIB_TCP6TABLE_OWNER_MODULE, table)) // make sure we don't wrap around
-    {
-        tableSize = FIELD_OFFSET(MIB_TCP6TABLE_OWNER_MODULE, table) +
-            (tableSize - FIELD_OFFSET(MIB_TCP6TABLE_OWNER_MODULE, table)) / sizeof(MIB_TCP6ROW_OWNER_PID) * sizeof(MIB_TCP6ROW_OWNER_MODULE);
-    }
+    GetExtendedTcpTable(NULL, &tableSize, FALSE, AF_INET6, TCP_TABLE_OWNER_MODULE_ALL, 0);
 
     table = PhAllocate(tableSize);
 
-    if (GetExtendedTcpTable_I(table, &tableSize, FALSE, AF_INET6, TCP_TABLE_OWNER_MODULE_ALL, 0) == 0)
+    if (GetExtendedTcpTable(table, &tableSize, FALSE, AF_INET6, TCP_TABLE_OWNER_MODULE_ALL, 0) == NO_ERROR)
     {
         tcp6Table = table;
         count += tcp6Table->dwNumEntries;
@@ -917,10 +1009,10 @@ BOOLEAN PhGetNetworkConnections(
     // UDP IPv4
 
     tableSize = 0;
-    GetExtendedUdpTable_I(NULL, &tableSize, FALSE, AF_INET, UDP_TABLE_OWNER_MODULE, 0);
+    GetExtendedUdpTable(NULL, &tableSize, FALSE, AF_INET, UDP_TABLE_OWNER_MODULE, 0);
     table = PhAllocate(tableSize);
 
-    if (GetExtendedUdpTable_I(table, &tableSize, FALSE, AF_INET, UDP_TABLE_OWNER_MODULE, 0) == 0)
+    if (GetExtendedUdpTable(table, &tableSize, FALSE, AF_INET, UDP_TABLE_OWNER_MODULE, 0) == NO_ERROR)
     {
         udp4Table = table;
         count += udp4Table->dwNumEntries;
@@ -934,10 +1026,10 @@ BOOLEAN PhGetNetworkConnections(
     // UDP IPv6
 
     tableSize = 0;
-    GetExtendedUdpTable_I(NULL, &tableSize, FALSE, AF_INET6, UDP_TABLE_OWNER_MODULE, 0);
+    GetExtendedUdpTable(NULL, &tableSize, FALSE, AF_INET6, UDP_TABLE_OWNER_MODULE, 0);
     table = PhAllocate(tableSize);
 
-    if (GetExtendedUdpTable_I(table, &tableSize, FALSE, AF_INET6, UDP_TABLE_OWNER_MODULE, 0) == 0)
+    if (GetExtendedUdpTable(table, &tableSize, FALSE, AF_INET6, UDP_TABLE_OWNER_MODULE, 0) == NO_ERROR)
     {
         udp6Table = table;
         count += udp6Table->dwNumEntries;
@@ -1002,6 +1094,9 @@ BOOLEAN PhGetNetworkConnections(
                 tcp6Table->table[i].OwningModuleInfo,
                 sizeof(ULONGLONG) * min(PH_NETWORK_OWNER_INFO_SIZE, TCPIP_OWNING_MODULE_SIZE)
                 );
+
+            connections[index].LocalScopeId = tcp6Table->table[i].dwLocalScopeId;
+            connections[index].RemoteScopeId = tcp6Table->table[i].dwRemoteScopeId;
 
             index++;
         }

@@ -1,3 +1,25 @@
+/*
+ * Process Hacker -
+ *   Provider Event Queue
+ *
+ * Copyright (C) 2009-2016 wj32
+ *
+ * This file is part of Process Hacker.
+ *
+ * Process Hacker is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * Process Hacker is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with Process Hacker.  If not, see <http://www.gnu.org/licenses/>.
+ */
+
 #ifndef PH_PHUISUP_H
 #define PH_PHUISUP_H
 
@@ -8,7 +30,7 @@ typedef struct _PH_SH_STATE
 {
     PH_ITEM_STATE State;
     HANDLE StateListHandle;
-    ULONG TickCount;
+    ULONG64 TickCount;
 } PH_SH_STATE, *PPH_SH_STATE;
 // end_phapppub
 
@@ -27,7 +49,7 @@ FORCEINLINE VOID PhChangeShStateTn(
     if (ShState->State == NormalItemState)
         ShState->StateListHandle = PhAddItemPointerList(*StateList, Node);
 
-    ShState->TickCount = GetTickCount();
+    ShState->TickCount = NtGetTickCount64();
     ShState->State = NewState;
 
     Node->UseTempBackColor = TRUE;
@@ -41,16 +63,15 @@ FORCEINLINE VOID PhChangeShStateTn(
     do { \
         NodeType *node; \
         ULONG enumerationKey = 0; \
-        ULONG tickCount; \
+        ULONG64 tickCount; \
         BOOLEAN preferFullInvalidate; \
         HANDLE stateListHandle; \
-        BOOLEAN redrawDisabled = FALSE; \
         BOOLEAN needsFullInvalidate = FALSE; \
 \
         if (!StateList || StateList->Count == 0) \
             break; \
 \
-        tickCount = GetTickCount(); \
+        tickCount = NtGetTickCount64(); \
         preferFullInvalidate = StateList->Count > 8; \
 \
         while (PhEnumPointerList(StateList, &enumerationKey, &node)) \
@@ -72,21 +93,13 @@ FORCEINLINE VOID PhChangeShStateTn(
                     } \
                     else \
                     { \
-                        TreeNew_InvalidateNode(TreeNewHandleForUpdate, node); \
+                        if (TreeNewHandleForUpdate) \
+                            TreeNew_InvalidateNode((TreeNewHandleForUpdate), node); \
                     } \
                 } \
             } \
             else if (node->ShStateFieldName.State == RemovingItemState) \
             { \
-                if (TreeNewHandleForUpdate) \
-                { \
-                    if (!redrawDisabled) \
-                    { \
-                        TreeNew_SetRedraw((TreeNewHandleForUpdate), FALSE); \
-                        redrawDisabled = TRUE; \
-                    } \
-                } \
-\
                 RemoveFunction(node, __VA_ARGS__); \
                 needsFullInvalidate = TRUE; \
             } \
@@ -96,8 +109,6 @@ FORCEINLINE VOID PhChangeShStateTn(
 \
         if (TreeNewHandleForUpdate) \
         { \
-            if (redrawDisabled) \
-                TreeNew_SetRedraw((TreeNewHandleForUpdate), TRUE); \
             if (needsFullInvalidate) \
             { \
                 InvalidateRect((TreeNewHandleForUpdate), NULL, FALSE); \
@@ -107,6 +118,7 @@ FORCEINLINE VOID PhChangeShStateTn(
         } \
     } while (0)
 
+// begin_phapppub
 // Provider event queues
 
 typedef enum _PH_PROVIDER_EVENT_TYPE
@@ -209,5 +221,6 @@ FORCEINLINE PPH_PROVIDER_EVENT PhFlushProviderEventQueue(
 
     return events;
 }
+// end_phapppub
 
 #endif

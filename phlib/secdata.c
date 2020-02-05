@@ -3,6 +3,7 @@
  *   object security data
  *
  * Copyright (C) 2010-2016 wj32
+ * Copyright (C) 2017-2019 dmex
  *
  * This file is part of Process Hacker.
  *
@@ -256,6 +257,7 @@ ACCESS_ENTRIES(Process60)
     { L"Query limited information", PROCESS_QUERY_LIMITED_INFORMATION, TRUE, TRUE },
     { L"Query information", PROCESS_QUERY_INFORMATION | PROCESS_QUERY_LIMITED_INFORMATION, TRUE, TRUE },
     { L"Set information", PROCESS_SET_INFORMATION, TRUE, TRUE },
+    { L"Set limited information", PROCESS_SET_LIMITED_INFORMATION, TRUE, TRUE },
     { L"Set quotas", PROCESS_SET_QUOTA, TRUE, TRUE },
     { L"Set session ID", PROCESS_SET_SESSIONID, TRUE, TRUE },
     { L"Create threads", PROCESS_CREATE_THREAD, TRUE, TRUE },
@@ -384,6 +386,17 @@ ACCESS_ENTRIES(Service)
     { L"User-defined control", SERVICE_USER_DEFINED_CONTROL, TRUE, TRUE }
 };
 
+ACCESS_ENTRIES(SCManager)
+{
+    { L"Full control", SC_MANAGER_ALL_ACCESS, TRUE, TRUE },
+    { L"Create service", SC_MANAGER_CREATE_SERVICE, TRUE, TRUE },
+    { L"Connect", SC_MANAGER_CONNECT, TRUE, TRUE },
+    { L"Enumerate services", SC_MANAGER_ENUMERATE_SERVICE, TRUE, TRUE },
+    { L"Lock", SC_MANAGER_LOCK, TRUE, TRUE },
+    { L"Modify boot config", SC_MANAGER_MODIFY_BOOT_CONFIG, TRUE, TRUE },
+    { L"Query lock status", SC_MANAGER_QUERY_LOCK_STATUS, TRUE, TRUE }
+};
+
 ACCESS_ENTRIES(Session)
 {
     { L"Full control", SESSION_ALL_ACCESS, TRUE, TRUE },
@@ -495,18 +508,26 @@ ACCESS_ENTRIES(TmTx)
 ACCESS_ENTRIES(Token)
 {
     { L"Full control", TOKEN_ALL_ACCESS, TRUE, TRUE },
-    { L"Read", TOKEN_READ, TRUE, FALSE },
-    { L"Write", TOKEN_WRITE, TRUE, FALSE },
-    { L"Execute", TOKEN_EXECUTE, TRUE, FALSE },
-    { L"Adjust privileges", TOKEN_ADJUST_PRIVILEGES, FALSE, TRUE },
-    { L"Adjust groups", TOKEN_ADJUST_GROUPS, FALSE, TRUE },
-    { L"Adjust defaults", TOKEN_ADJUST_DEFAULT, FALSE, TRUE },
-    { L"Adjust session ID", TOKEN_ADJUST_SESSIONID, FALSE, TRUE },
-    { L"Assign as primary token", TOKEN_ASSIGN_PRIMARY, FALSE, TRUE, L"Assign primary" },
-    { L"Duplicate", TOKEN_DUPLICATE, FALSE, TRUE },
-    { L"Impersonate", TOKEN_IMPERSONATE, FALSE, TRUE },
-    { L"Query", TOKEN_QUERY, FALSE, TRUE },
+    { L"Read", TOKEN_READ, FALSE, FALSE },
+    { L"Write", TOKEN_WRITE, FALSE, FALSE },
+    { L"Execute", TOKEN_EXECUTE, FALSE, FALSE },
+    { L"Adjust privileges", TOKEN_ADJUST_PRIVILEGES, TRUE, TRUE },
+    { L"Adjust groups", TOKEN_ADJUST_GROUPS, TRUE, TRUE },
+    { L"Adjust defaults", TOKEN_ADJUST_DEFAULT, TRUE, TRUE },
+    { L"Adjust session ID", TOKEN_ADJUST_SESSIONID, TRUE, TRUE },
+    { L"Assign as primary token", TOKEN_ASSIGN_PRIMARY, TRUE, TRUE, L"Assign primary" },
+    { L"Duplicate", TOKEN_DUPLICATE, TRUE, TRUE },
+    { L"Impersonate", TOKEN_IMPERSONATE, TRUE, TRUE },
+    { L"Query", TOKEN_QUERY, TRUE, TRUE },
     { L"Query source", TOKEN_QUERY_SOURCE, FALSE, TRUE }
+};
+
+ACCESS_ENTRIES(TokenDefault)
+{
+    { L"Full control", GENERIC_ALL, TRUE, TRUE },
+    { L"Read", GENERIC_READ, TRUE, TRUE },
+    { L"Write", GENERIC_WRITE, TRUE, TRUE },
+    { L"Execute", GENERIC_EXECUTE, TRUE, TRUE }
 };
 
 ACCESS_ENTRIES(TpWorkerFactory)
@@ -594,6 +615,7 @@ static PH_SPECIFIC_TYPE PhSpecificTypes[] =
     ACCESS_ENTRY(Section, FALSE),
     ACCESS_ENTRY(Semaphore, TRUE),
     ACCESS_ENTRY(Service, FALSE),
+    ACCESS_ENTRY(SCManager, FALSE),
     ACCESS_ENTRY(Session, FALSE),
     ACCESS_ENTRY(SymbolicLink, FALSE),
     ACCESS_ENTRY(Thread, TRUE),
@@ -604,6 +626,7 @@ static PH_SPECIFIC_TYPE PhSpecificTypes[] =
     ACCESS_ENTRY(TmTm, FALSE),
     ACCESS_ENTRY(TmTx, FALSE),
     ACCESS_ENTRY(Token, FALSE),
+    ACCESS_ENTRY(TokenDefault, FALSE),
     ACCESS_ENTRY(TpWorkerFactory, FALSE),
     ACCESS_ENTRY(Type, FALSE),
     ACCESS_ENTRY(WindowStation, FALSE),
@@ -644,13 +667,15 @@ BOOLEAN PhGetAccessEntries(
     }
     else if (PhEqualStringZ(Type, L"Process", TRUE))
     {
-        if (WindowsVersion >= WINDOWS_VISTA)
-            Type = L"Process60";
+        Type = L"Process60";
     }
     else if (PhEqualStringZ(Type, L"Thread", TRUE))
     {
-        if (WindowsVersion >= WINDOWS_VISTA)
-            Type = L"Thread60";
+        Type = L"Thread60";
+    }
+    else if (PhEqualStringZ(Type, L"FileObject", TRUE))
+    {
+        Type = L"File";
     }
 
     // Find the specific type.
@@ -699,10 +724,7 @@ BOOLEAN PhGetAccessEntries(
     }
     else
     {
-        accessEntries = PhAllocate(sizeof(PhStandardAccessEntries));
-        memcpy(accessEntries, PhStandardAccessEntries, sizeof(PhStandardAccessEntries));
-
-        *AccessEntries = accessEntries;
+        *AccessEntries = PhAllocateCopy(PhStandardAccessEntries, sizeof(PhStandardAccessEntries));
         *NumberOfAccessEntries = sizeof(PhStandardAccessEntries) / sizeof(PH_ACCESS_ENTRY);
     }
 

@@ -21,9 +21,6 @@
  */
 
 #include <phapp.h>
-
-#include <windowsx.h>
-
 #include <hexedit.h>
 
 #include <mainwnd.h>
@@ -47,8 +44,10 @@ typedef struct _MEMORY_EDITOR_CONTEXT
     };
     HANDLE ProcessHandle;
     HWND WindowHandle;
-    PH_LAYOUT_MANAGER LayoutManager;
+    HWND OwnerHandle;
     HWND HexEditHandle;
+    PH_LAYOUT_MANAGER LayoutManager;
+
     PUCHAR Buffer;
     ULONG SelectOffset;
     PPH_STRING Title;
@@ -74,6 +73,7 @@ PH_AVL_TREE PhMemoryEditorSet = PH_AVL_TREE_INIT(PhpMemoryEditorCompareFunction)
 static RECT MinimumSize = { -1, -1, -1, -1 };
 
 VOID PhShowMemoryEditorDialog(
+    _In_ HWND OwnerWindow,
     _In_ HANDLE ProcessId,
     _In_ PVOID BaseAddress,
     _In_ SIZE_T RegionSize,
@@ -98,6 +98,7 @@ VOID PhShowMemoryEditorDialog(
         context = PhAllocate(sizeof(MEMORY_EDITOR_CONTEXT));
         memset(context, 0, sizeof(MEMORY_EDITOR_CONTEXT));
 
+        context->OwnerHandle = OwnerWindow;
         context->ProcessId = ProcessId;
         context->BaseAddress = BaseAddress;
         context->RegionSize = RegionSize;
@@ -119,24 +120,25 @@ VOID PhShowMemoryEditorDialog(
             return;
         }
 
-        if (SelectOffset != -1)
+        if (SelectOffset != ULONG_MAX)
             PostMessage(context->WindowHandle, WM_PH_SELECT_OFFSET, SelectOffset, SelectLength);
 
         PhRegisterDialog(context->WindowHandle);
         PhAddElementAvlTree(&PhMemoryEditorSet, &context->Links);
 
         ShowWindow(context->WindowHandle, SW_SHOW);
+        SetForegroundWindow(context->WindowHandle);
     }
     else
     {
         context = CONTAINING_RECORD(links, MEMORY_EDITOR_CONTEXT, Links);
 
-        if (IsIconic(context->WindowHandle))
+        if (IsMinimized(context->WindowHandle))
             ShowWindow(context->WindowHandle, SW_RESTORE);
         else
             SetForegroundWindow(context->WindowHandle);
 
-        if (SelectOffset != -1)
+        if (SelectOffset != ULONG_MAX)
             PostMessage(context->WindowHandle, WM_PH_SELECT_OFFSET, SelectOffset, SelectLength);
 
         // Just in case.
@@ -167,12 +169,12 @@ INT_PTR CALLBACK PhpMemoryEditorDlgProc(
 
     if (uMsg != WM_INITDIALOG)
     {
-        context = GetProp(hwndDlg, PhMakeContextAtom());
+        context = PhGetWindowContext(hwndDlg, PH_WINDOW_CONTEXT_DEFAULT);
     }
     else
     {
         context = (PMEMORY_EDITOR_CONTEXT)lParam;
-        SetProp(hwndDlg, PhMakeContextAtom(), (HANDLE)context);
+        PhSetWindowContext(hwndDlg, PH_WINDOW_CONTEXT_DEFAULT, context);
     }
 
     if (!context)
@@ -184,9 +186,12 @@ INT_PTR CALLBACK PhpMemoryEditorDlgProc(
         {
             NTSTATUS status;
 
+            SendMessage(hwndDlg, WM_SETICON, ICON_SMALL, (LPARAM)PH_LOAD_SHARED_ICON_SMALL(PhInstanceHandle, MAKEINTRESOURCE(IDI_PROCESSHACKER)));
+            SendMessage(hwndDlg, WM_SETICON, ICON_BIG, (LPARAM)PH_LOAD_SHARED_ICON_LARGE(PhInstanceHandle, MAKEINTRESOURCE(IDI_PROCESSHACKER)));
+
             if (context->Title)
             {
-                SetWindowText(hwndDlg, context->Title->Buffer);
+                PhSetWindowText(hwndDlg, context->Title->Buffer);
             }
             else
             {
@@ -194,7 +199,7 @@ INT_PTR CALLBACK PhpMemoryEditorDlgProc(
 
                 if (processItem = PhReferenceProcessItem(context->ProcessId))
                 {
-                    SetWindowText(hwndDlg, PhaFormatString(L"%s (%u) (0x%Ix - 0x%Ix)",
+                    PhSetWindowText(hwndDlg, PhaFormatString(L"%s (%u) (0x%Ix - 0x%Ix)",
                         processItem->ProcessName->Buffer, HandleToUlong(context->ProcessId),
                         context->BaseAddress, (ULONG_PTR)context->BaseAddress + context->RegionSize)->Buffer);
                     PhDereferenceObject(processItem);
@@ -205,7 +210,7 @@ INT_PTR CALLBACK PhpMemoryEditorDlgProc(
 
             if (context->RegionSize > 1024 * 1024 * 1024) // 1 GB
             {
-                PhShowError(NULL, L"Unable to edit the memory region because it is too large.");
+                PhShowError(context->OwnerHandle, L"Unable to edit the memory region because it is too large.");
                 return TRUE;
             }
 
@@ -215,7 +220,7 @@ INT_PTR CALLBACK PhpMemoryEditorDlgProc(
                 context->ProcessId
                 )))
             {
-                PhShowStatus(NULL, L"Unable to open the process", status, 0);
+                PhShowStatus(context->OwnerHandle, L"Unable to open the process", status, 0);
                 return TRUE;
             }
 
@@ -223,7 +228,7 @@ INT_PTR CALLBACK PhpMemoryEditorDlgProc(
 
             if (!context->Buffer)
             {
-                PhShowError(NULL, L"Unable to allocate memory for the buffer.");
+                PhShowError(context->OwnerHandle, L"Unable to allocate memory for the buffer.");
                 return TRUE;
             }
 
@@ -235,7 +240,7 @@ INT_PTR CALLBACK PhpMemoryEditorDlgProc(
                 NULL
                 )))
             {
-                PhShowStatus(PhMainWndHandle, L"Unable to read memory", status, 0);
+                PhShowStatus(context->OwnerHandle, L"Unable to read memory", status, 0);
                 return TRUE;
             }
 
@@ -320,7 +325,7 @@ INT_PTR CALLBACK PhpMemoryEditorDlgProc(
                 PhUnregisterDialog(hwndDlg);
             }
 
-            RemoveProp(hwndDlg, PhMakeContextAtom());
+            PhRemoveWindowContext(hwndDlg, PH_WINDOW_CONTEXT_DEFAULT);
 
             PhDeleteLayoutManager(&context->LayoutManager);
 
@@ -336,12 +341,12 @@ INT_PTR CALLBACK PhpMemoryEditorDlgProc(
         break;
     case WM_SHOWWINDOW:
         {
-            SendMessage(hwndDlg, WM_NEXTDLGCTL, (WPARAM)context->HexEditHandle, TRUE);
+            PhSetDialogFocus(hwndDlg, context->HexEditHandle);
         }
         break;
     case WM_COMMAND:
         {
-            switch (LOWORD(wParam))
+            switch (GET_WM_COMMAND_ID(wParam, lParam))
             {
             case IDCANCEL:
             case IDOK:
@@ -431,7 +436,7 @@ INT_PTR CALLBACK PhpMemoryEditorDlgProc(
                                 continue;
                             }
 
-                            SendMessage(hwndDlg, WM_NEXTDLGCTL, (WPARAM)context->HexEditHandle, TRUE);
+                            PhSetDialogFocus(hwndDlg, context->HexEditHandle);
                             HexEdit_SetSel(context->HexEditHandle, (LONG)offset, (LONG)offset);
                             break;
                         }
@@ -441,6 +446,17 @@ INT_PTR CALLBACK PhpMemoryEditorDlgProc(
             case IDC_WRITE:
                 {
                     NTSTATUS status;
+
+                    if (PhGetIntegerSetting(L"EnableWarnings") && !PhShowConfirmMessage(
+                        hwndDlg,
+                        L"write",
+                        L"process memory",
+                        L"Some programs may restrict access or ban your account when editing the memory of the process.",
+                        FALSE
+                        ))
+                    {
+                        break;
+                    }
 
                     if (!context->WriteAccess)
                     {
@@ -505,7 +521,7 @@ INT_PTR CALLBACK PhpMemoryEditorDlgProc(
                         {
                             PhSetIntegerSetting(L"MemEditBytesPerRow", (ULONG)bytesPerRow64);
                             HexEdit_SetBytesPerRow(context->HexEditHandle, (ULONG)bytesPerRow64);
-                            SendMessage(hwndDlg, WM_NEXTDLGCTL, (WPARAM)context->HexEditHandle, TRUE);
+                            PhSetDialogFocus(hwndDlg, context->HexEditHandle);
                         }
                     }
                 }
@@ -526,7 +542,7 @@ INT_PTR CALLBACK PhpMemoryEditorDlgProc(
     case WM_PH_SELECT_OFFSET:
         {
             HexEdit_SetEditMode(context->HexEditHandle, EDIT_ASCII);
-            HexEdit_SetSel(context->HexEditHandle, (ULONG)wParam, (ULONG)wParam + (ULONG)lParam);
+            HexEdit_SetSel(context->HexEditHandle, (ULONG)wParam, PtrToUlong(PTR_ADD_OFFSET(wParam, lParam)));
         }
         break;
     }

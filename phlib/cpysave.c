@@ -320,8 +320,12 @@ PPH_STRING PhGetTreeNewText(
             PhInitializeEmptyStringRef(&getCellText.Text);
             TreeNew_GetCellText(TreeNewHandle, &getCellText);
 
-            PhAppendStringBuilder(&stringBuilder, &getCellText.Text);
-            PhAppendStringBuilder2(&stringBuilder, L", ");
+            // Ignore empty columns. -dmex
+            if (getCellText.Text.Length != 0)
+            {
+                PhAppendStringBuilder(&stringBuilder, &getCellText.Text);
+                PhAppendStringBuilder2(&stringBuilder, L", ");
+            }
         }
 
         // Remove the trailing comma and space.
@@ -445,7 +449,7 @@ VOID PhaMapDisplayIndexListView(
     *NumberOfColumns = count;
 }
 
-PPH_STRING PhaGetListViewItemText(
+PPH_STRING PhGetListViewItemText(
     _In_ HWND ListViewHandle,
     _In_ INT Index,
     _In_ INT SubItemIndex
@@ -471,7 +475,7 @@ PPH_STRING PhaGetListViewItemText(
 
         allocatedCount *= 2;
         buffer = PhCreateStringEx(NULL, allocatedCount * sizeof(WCHAR));
-        buffer->Buffer[0] = 0;
+        buffer->Buffer[0] = UNICODE_NULL;
 
         lvItem.iSubItem = SubItemIndex;
         lvItem.cchTextMax = (INT)allocatedCount + 1;
@@ -480,9 +484,26 @@ PPH_STRING PhaGetListViewItemText(
     }
 
     PhTrimToNullTerminatorString(buffer);
-    PH_AUTO(buffer);
 
     return buffer;
+}
+
+PPH_STRING PhaGetListViewItemText(
+    _In_ HWND ListViewHandle,
+    _In_ INT Index,
+    _In_ INT SubItemIndex
+    )
+{
+    PPH_STRING value;
+
+    if (value = PhGetListViewItemText(ListViewHandle, Index, SubItemIndex))
+    {
+        PH_AUTO(value);
+
+        return value;
+    }
+
+    return NULL;
 }
 
 PPH_STRING PhGetListViewText(

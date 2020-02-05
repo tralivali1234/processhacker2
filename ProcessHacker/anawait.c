@@ -40,18 +40,6 @@
 
 #include <procprv.h>
 
-typedef HWND (WINAPI *_GetSendMessageReceiver)(
-    _In_ HANDLE ThreadId
-    );
-
-typedef NTSTATUS (NTAPI *_NtAlpcQueryInformation)(
-    _In_ HANDLE PortHandle,
-    _In_ ALPC_PORT_INFORMATION_CLASS PortInformationClass,
-    _Out_writes_bytes_(Length) PVOID PortInformation,
-    _In_ ULONG Length,
-    _Out_opt_ PULONG ReturnLength
-    );
-
 typedef struct _ANALYZE_WAIT_CONTEXT
 {
     BOOLEAN Found;
@@ -109,9 +97,9 @@ PPH_STRING PhpaGetAlpcInformation(
     );
 
 static PH_INITONCE ServiceNumbersInitOnce = PH_INITONCE_INIT;
-static USHORT NumberForWfso = -1;
-static USHORT NumberForWfmo = -1;
-static USHORT NumberForRf = -1;
+static USHORT NumberForWfso = USHRT_MAX;
+static USHORT NumberForWfmo = USHRT_MAX;
+static USHORT NumberForRf = USHRT_MAX;
 
 VOID PhUiAnalyzeWaitThread(
     _In_ HWND hWnd,
@@ -132,7 +120,7 @@ VOID PhUiAnalyzeWaitThread(
 #ifdef _WIN64
     // Determine if the process is WOW64. If not, we use the passive method.
 
-    if (!NT_SUCCESS(status = PhOpenProcess(&processHandle, ProcessQueryAccess, ProcessId)))
+    if (!NT_SUCCESS(status = PhOpenProcess(&processHandle, PROCESS_QUERY_LIMITED_INFORMATION, ProcessId)))
     {
         PhShowStatus(hWnd, L"Unable to open the process", status, 0);
         return;
@@ -149,14 +137,15 @@ VOID PhUiAnalyzeWaitThread(
 
     if (!NT_SUCCESS(status = PhOpenThread(
         &threadHandle,
-        ThreadQueryAccess | THREAD_GET_CONTEXT | THREAD_SUSPEND_RESUME,
+        THREAD_QUERY_LIMITED_INFORMATION | THREAD_GET_CONTEXT | THREAD_SUSPEND_RESUME,
         ThreadId
         )))
     {
-        PhShowStatus(hWnd, L"Unable to open the thread", status, 0);
+        PhShowStatus(hWnd, L"Unable to open the thread.", status, 0);
         return;
     }
 
+    memset(&context, 0, sizeof(ANALYZE_WAIT_CONTEXT));
     context.ProcessId = ProcessId;
     context.ThreadId = ThreadId;
 
@@ -186,7 +175,7 @@ VOID PhUiAnalyzeWaitThread(
     }
     else
     {
-        PhShowInformation(hWnd, L"The thread does not appear to be waiting.");
+        PhShowInformation2(hWnd, L"The thread does not appear to be waiting.", L"");
     }
 
     PhDeleteStringBuilder(&context.StringBuilder);
@@ -209,27 +198,21 @@ VOID PhpAnalyzeWaitPassive(
 
     if (!NT_SUCCESS(status = PhOpenThread(&threadHandle, THREAD_GET_CONTEXT, ThreadId)))
     {
-        PhShowStatus(hWnd, L"Unable to open the thread", status, 0);
+        PhShowStatus(hWnd, L"Unable to open the thread.", status, 0);
         return;
     }
 
-    if (!NT_SUCCESS(status = NtQueryInformationThread(
-        threadHandle,
-        ThreadLastSystemCall,
-        &lastSystemCall,
-        sizeof(THREAD_LAST_SYSCALL_INFORMATION),
-        NULL
-        )))
+    if (!NT_SUCCESS(status = PhGetThreadLastSystemCall(threadHandle, &lastSystemCall)))
     {
         NtClose(threadHandle);
-        PhShowInformation(hWnd, L"Unable to determine whether the thread is waiting.");
+        PhShowStatus(hWnd, L"Unable to determine whether the thread is waiting.", status, 0);
         return;
     }
 
     if (!NT_SUCCESS(status = PhOpenProcess(&processHandle, PROCESS_DUP_HANDLE, ProcessId)))
     {
         NtClose(threadHandle);
-        PhShowStatus(hWnd, L"Unable to open the process", status, 0);
+        PhShowStatus(hWnd, L"Unable to open the process.", status, 0);
         return;
     }
 
@@ -244,7 +227,7 @@ VOID PhpAnalyzeWaitPassive(
     }
     else if (lastSystemCall.SystemCallNumber == NumberForWfmo)
     {
-        PhAppendFormatStringBuilder(&stringBuilder, L"Thread is waiting for multiple (%u) objects.", PtrToUlong(lastSystemCall.FirstArgument));
+        PhAppendFormatStringBuilder(&stringBuilder, L"Thread is waiting for multiple (%lu) objects.", PtrToUlong(lastSystemCall.FirstArgument));
     }
     else if (lastSystemCall.SystemCallNumber == NumberForRf)
     {
@@ -320,7 +303,7 @@ static BOOLEAN NTAPI PhpWalkThreadStackAnalyzeCallback(
     {
         PhAppendFormatStringBuilder(
             &context->StringBuilder,
-            L"Thread is sleeping. Timeout: %u milliseconds.",
+            L"Thread is sleeping. Timeout: %lu milliseconds.",
             PtrToUlong(StackFrame->Params[0])
             );
     }
@@ -439,7 +422,7 @@ static BOOLEAN NTAPI PhpWalkThreadStackAnalyzeCallback(
 
         PhAppendStringBuilder2(
             &context->StringBuilder,
-            WindowsVersion >= WINDOWS_VISTA ? L"Thread is waiting for an ALPC port:\r\n" : L"Thread is waiting for a LPC port:\r\n"
+            L"Thread is waiting for an ALPC port:\r\n"
             );
         PhAppendStringBuilder(
             &context->StringBuilder,
@@ -664,15 +647,13 @@ static BOOLEAN PhpWaitUntilThreadIsWaiting(
     if (!NT_SUCCESS(PhGetThreadBasicInformation(ThreadHandle, &basicInfo)))
         return FALSE;
 
-    for (attempts = 0; attempts < 5; attempts++)
+    for (attempts = 0; attempts < 20; attempts++)
     {
         PVOID processes;
         PSYSTEM_PROCESS_INFORMATION processInfo;
         ULONG i;
-        LARGE_INTEGER interval;
 
-        interval.QuadPart = -100 * PH_TIMEOUT_MS;
-        NtDelayExecution(FALSE, &interval);
+        PhDelayExecution(100);
 
         if (!NT_SUCCESS(PhEnumProcesses(&processes)))
             break;
@@ -701,8 +682,7 @@ static BOOLEAN PhpWaitUntilThreadIsWaiting(
         if (isWaiting)
             break;
 
-        interval.QuadPart = -500 * PH_TIMEOUT_MS;
-        NtDelayExecution(FALSE, &interval);
+        PhDelayExecution(500);
     }
 
     return isWaiting;
@@ -715,13 +695,7 @@ static VOID PhpGetThreadLastSystemCallNumber(
 {
     THREAD_LAST_SYSCALL_INFORMATION lastSystemCall;
 
-    if (NT_SUCCESS(NtQueryInformationThread(
-        ThreadHandle,
-        ThreadLastSystemCall,
-        &lastSystemCall,
-        sizeof(THREAD_LAST_SYSCALL_INFORMATION),
-        NULL
-        )))
+    if (NT_SUCCESS(PhGetThreadLastSystemCall(ThreadHandle, &lastSystemCall)))
     {
         *LastSystemCallNumber = lastSystemCall.SystemCallNumber;
     }
@@ -736,7 +710,7 @@ static NTSTATUS PhpWfsoThreadStart(
 
     eventHandle = Parameter;
 
-    timeout.QuadPart = -5 * PH_TIMEOUT_SEC;
+    timeout.QuadPart = -(LONGLONG)UInt32x32To64(5, PH_TIMEOUT_SEC);
     NtWaitForSingleObject(eventHandle, FALSE, &timeout);
 
     return STATUS_SUCCESS;
@@ -751,7 +725,7 @@ static NTSTATUS PhpWfmoThreadStart(
 
     eventHandle = Parameter;
 
-    timeout.QuadPart = -5 * PH_TIMEOUT_SEC;
+    timeout.QuadPart = -(LONGLONG)UInt32x32To64(5, PH_TIMEOUT_SEC);
     NtWaitForMultipleObjects(1, &eventHandle, WaitAll, FALSE, &timeout);
 
     return STATUS_SUCCESS;
@@ -795,7 +769,7 @@ static VOID PhpInitializeServiceNumbers(
 
         if (NT_SUCCESS(status))
         {
-            if (threadHandle = PhCreateThread(0, PhpWfsoThreadStart, eventHandle))
+            if (NT_SUCCESS(PhCreateThreadEx(&threadHandle, PhpWfsoThreadStart, eventHandle)))
             {
                 if (PhpWaitUntilThreadIsWaiting(threadHandle))
                 {
@@ -816,7 +790,7 @@ static VOID PhpInitializeServiceNumbers(
 
         if (NT_SUCCESS(status))
         {
-            if (threadHandle = PhCreateThread(0, PhpWfmoThreadStart, eventHandle))
+            if (NT_SUCCESS(PhCreateThreadEx(&threadHandle, PhpWfmoThreadStart, eventHandle)))
             {
                 if (PhpWaitUntilThreadIsWaiting(threadHandle))
                 {
@@ -832,9 +806,11 @@ static VOID PhpInitializeServiceNumbers(
 
         // NtReadFile
 
-        if (CreatePipe(&pipeReadHandle, &pipeWriteHandle, NULL, 0))
+        status = PhCreatePipe(&pipeReadHandle, &pipeWriteHandle);
+
+        if (NT_SUCCESS(status))
         {
-            if (threadHandle = PhCreateThread(0, PhpRfThreadStart, pipeReadHandle))
+            if (NT_SUCCESS(PhCreateThreadEx(&threadHandle, PhpRfThreadStart, pipeReadHandle)))
             {
                 ULONG data = 0;
                 IO_STATUS_BLOCK isb;
@@ -982,7 +958,9 @@ static PPH_STRING PhpaGetSendMessageReceiver(
     _In_ HANDLE ThreadId
     )
 {
-    static _GetSendMessageReceiver GetSendMessageReceiver_I;
+    static HWND (WINAPI *GetSendMessageReceiver_I)(
+        _In_ HANDLE ThreadId
+        );
 
     HWND windowHandle;
     ULONG threadId;
@@ -997,7 +975,7 @@ static PPH_STRING PhpaGetSendMessageReceiver(
     // is sending a message to.
 
     if (!GetSendMessageReceiver_I)
-        GetSendMessageReceiver_I = PhGetModuleProcAddress(L"user32.dll", "GetSendMessageReceiver");
+        GetSendMessageReceiver_I = PhGetDllProcedureAddress(L"user32.dll", "GetSendMessageReceiver", 0);
 
     if (!GetSendMessageReceiver_I)
         return NULL;
@@ -1014,30 +992,22 @@ static PPH_STRING PhpaGetSendMessageReceiver(
     clientIdName = PH_AUTO(PhGetClientIdName(&clientId));
 
     if (!GetClassName(windowHandle, windowClass, sizeof(windowClass) / sizeof(WCHAR)))
-        windowClass[0] = 0;
+        windowClass[0] = UNICODE_NULL;
 
     windowText = PH_AUTO(PhGetWindowText(windowHandle));
 
     return PhaFormatString(L"Window 0x%Ix (%s): %s \"%s\"", windowHandle, clientIdName->Buffer, windowClass, PhGetStringOrEmpty(windowText));
 }
 
-static PPH_STRING PhpaGetAlpcInformation(
+PPH_STRING PhpaGetAlpcInformation(
     _In_ HANDLE ThreadId
     )
 {
-    static _NtAlpcQueryInformation NtAlpcQueryInformation_I;
-
     NTSTATUS status;
     PPH_STRING string = NULL;
     HANDLE threadHandle;
     PALPC_SERVER_INFORMATION serverInfo;
     ULONG bufferLength;
-
-    if (!NtAlpcQueryInformation_I)
-        NtAlpcQueryInformation_I = PhGetModuleProcAddress(L"ntdll.dll", "NtAlpcQueryInformation");
-
-    if (!NtAlpcQueryInformation_I)
-        return NULL;
 
     if (!NT_SUCCESS(PhOpenThread(&threadHandle, THREAD_QUERY_INFORMATION, ThreadId)))
         return NULL;
@@ -1046,7 +1016,7 @@ static PPH_STRING PhpaGetAlpcInformation(
     serverInfo = PhAllocate(bufferLength);
     serverInfo->In.ThreadHandle = threadHandle;
 
-    status = NtAlpcQueryInformation_I(NULL, AlpcServerInformation, serverInfo, bufferLength, &bufferLength);
+    status = NtAlpcQueryInformation(NULL, AlpcServerInformation, serverInfo, bufferLength, &bufferLength);
 
     if (status == STATUS_INFO_LENGTH_MISMATCH)
     {
@@ -1054,7 +1024,7 @@ static PPH_STRING PhpaGetAlpcInformation(
         serverInfo = PhAllocate(bufferLength);
         serverInfo->In.ThreadHandle = threadHandle;
 
-        status = NtAlpcQueryInformation_I(NULL, AlpcServerInformation, serverInfo, bufferLength, &bufferLength);
+        status = NtAlpcQueryInformation(NULL, AlpcServerInformation, serverInfo, bufferLength, &bufferLength);
     }
 
     if (NT_SUCCESS(status) && serverInfo->Out.ThreadBlocked)
@@ -1066,7 +1036,7 @@ static PPH_STRING PhpaGetAlpcInformation(
         clientId.UniqueThread = NULL;
         clientIdName = PH_AUTO(PhGetClientIdName(&clientId));
 
-        string = PhaFormatString(L"ALPC Port: %.*s (%s)", serverInfo->Out.ConnectionPortName.Length / 2, serverInfo->Out.ConnectionPortName.Buffer, clientIdName->Buffer);
+        string = PhaFormatString(L"ALPC Port: %.*s (%s)", serverInfo->Out.ConnectionPortName.Length / sizeof(WCHAR), serverInfo->Out.ConnectionPortName.Buffer, clientIdName->Buffer);
     }
 
     PhFree(serverInfo);

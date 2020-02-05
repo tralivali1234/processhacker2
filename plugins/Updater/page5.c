@@ -2,7 +2,7 @@
  * Process Hacker Plugins -
  *   Update Checker Plugin
  *
- * Copyright (C) 2016 dmex
+ * Copyright (C) 2016-2019 dmex
  *
  * This file is part of Process Hacker.
  *
@@ -29,6 +29,70 @@ static TASKDIALOG_BUTTON TaskDialogButtonArray[] =
     { IDYES, L"Install" }
 };
 
+BOOLEAN UpdaterCheckKphInstallState(
+    VOID
+    )
+{
+    static PH_STRINGREF kph3ServiceKeyName = PH_STRINGREF_INIT(L"System\\CurrentControlSet\\Services\\KProcessHacker3");
+    BOOLEAN kphInstallRequired = FALSE;
+    HANDLE runKeyHandle;
+
+    if (NT_SUCCESS(PhOpenKey(
+        &runKeyHandle,
+        KEY_READ,
+        PH_KEY_LOCAL_MACHINE,
+        &kph3ServiceKeyName,
+        0
+        )))
+    {
+        // Make sure we re-install the driver when KPH was installed as a service. 
+        if (PhQueryRegistryUlong(runKeyHandle, L"Start") == SERVICE_SYSTEM_START)
+        {
+            kphInstallRequired = TRUE;
+        }
+
+        NtClose(runKeyHandle);
+    }
+
+    return kphInstallRequired;
+}
+
+BOOLEAN UpdaterCheckApplicationDirectory(
+    VOID
+    )
+{
+    HANDLE fileHandle;
+    PPH_STRING directory;
+    PPH_STRING file;
+
+    if (UpdaterCheckKphInstallState())
+        return FALSE;
+
+    directory = PhGetApplicationDirectory();
+    file = PhConcatStrings(2, PhGetStringOrEmpty(directory), L"\\processhacker.update");
+
+    if (NT_SUCCESS(PhCreateFileWin32(
+        &fileHandle,
+        PhGetString(file),
+        FILE_GENERIC_WRITE | DELETE,
+        FILE_ATTRIBUTE_NORMAL,
+        FILE_SHARE_READ | FILE_SHARE_DELETE,
+        FILE_OPEN_IF,
+        FILE_NON_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT | FILE_DELETE_ON_CLOSE
+        )))
+    {
+        PhDereferenceObject(file);
+        PhDereferenceObject(directory);
+
+        NtClose(fileHandle);
+        return TRUE;
+    }
+
+    PhDereferenceObject(file);
+    PhDereferenceObject(directory);
+    return FALSE;
+}
+
 HRESULT CALLBACK FinalTaskDialogCallbackProc(
     _In_ HWND hwndDlg,
     _In_ UINT uMsg,
@@ -43,7 +107,7 @@ HRESULT CALLBACK FinalTaskDialogCallbackProc(
     {
     case TDN_NAVIGATED:
         {
-            if (!PhGetOwnTokenAttributes().Elevated)
+            if (!UpdaterCheckApplicationDirectory())
             {
                 SendMessage(hwndDlg, TDM_SET_BUTTON_ELEVATION_REQUIRED_STATE, IDYES, TRUE);
             }
@@ -51,39 +115,57 @@ HRESULT CALLBACK FinalTaskDialogCallbackProc(
         break;
     case TDN_BUTTON_CLICKED:
         {
-            if ((INT)wParam == IDRETRY)
+            INT buttonId = (INT)wParam;
+
+            if (buttonId == IDRETRY)
             {
-                ShowCheckingForUpdatesDialog(context);
+                ShowCheckForUpdatesDialog(context);
                 return S_FALSE;
             }
-
-            if ((INT)wParam == IDYES)
+            else if (buttonId == IDYES)
             {
                 SHELLEXECUTEINFO info = { sizeof(SHELLEXECUTEINFO) };
+                PPH_STRING parameters;
 
                 if (PhIsNullOrEmptyString(context->SetupFilePath))
                     break;
 
-                info.lpFile = context->SetupFilePath->Buffer;
-                info.lpVerb = PhGetOwnTokenAttributes().Elevated ? NULL : L"runas";
+                parameters = PH_AUTO(PhGetApplicationDirectory());
+                parameters = PH_AUTO(PhBufferToHexString((PUCHAR)parameters->Buffer, (ULONG)parameters->Length));
+                parameters = PH_AUTO(PhConcatStrings(3, L"-update \"", PhGetStringOrEmpty(parameters), L"\""));
+
+                info.lpFile = PhGetStringOrEmpty(context->SetupFilePath);
+                info.lpParameters = PhGetString(parameters);
+                info.lpVerb = UpdaterCheckApplicationDirectory() ? NULL : L"runas";
                 info.nShow = SW_SHOW;
                 info.hwnd = hwndDlg;
+                info.fMask = SEE_MASK_NOASYNC | SEE_MASK_FLAG_NO_UI | SEE_MASK_NOZONECHECKS;
 
                 ProcessHacker_PrepareForEarlyShutdown(PhMainWndHandle);
 
-                if (!ShellExecuteEx(&info))
+                if (ShellExecuteEx(&info))
                 {
-                    // Install failed, cancel the shutdown.
-                    ProcessHacker_CancelEarlyShutdown(PhMainWndHandle);
-
-                    // Set button text for next action
-                    //Button_SetText(GetDlgItem(hwndDlg, IDOK), L"Retry");
-
-                    return S_FALSE;
+                    ProcessHacker_Destroy(PhMainWndHandle);
                 }
                 else
                 {
-                    ProcessHacker_Destroy(PhMainWndHandle);
+                    ULONG errorCode = GetLastError();
+
+                    // Install failed, cancel the shutdown.
+                    ProcessHacker_CancelEarlyShutdown(PhMainWndHandle);
+
+                    // Show error dialog.
+                    if (errorCode != ERROR_CANCELLED) // Ignore UAC decline.
+                    {
+                        PhShowStatus(hwndDlg, L"Unable to execute the setup.", 0, errorCode);
+
+                        if (context->StartupCheck)
+                            ShowAvailableDialog(context);
+                        else
+                            ShowCheckForUpdatesDialog(context);
+                    }
+
+                    return S_FALSE;
                 }
             }
         }
@@ -91,6 +173,7 @@ HRESULT CALLBACK FinalTaskDialogCallbackProc(
     case TDN_HYPERLINK_CLICKED:
         {
             TaskDialogLinkClicked(context);
+            return S_FALSE;
         }
         break;
     }
@@ -109,81 +192,78 @@ VOID ShowUpdateInstallDialog(
     config.dwFlags = TDF_USE_HICON_MAIN | TDF_ALLOW_DIALOG_CANCELLATION | TDF_CAN_BE_MINIMIZED;
     config.dwCommonButtons = TDCBF_CLOSE_BUTTON;
     config.hMainIcon = Context->IconLargeHandle;
-
-    config.pszWindowTitle = L"Process Hacker - Updater";
-    config.pszMainInstruction = L"Ready to install update";
-    config.pszContent = L"The update has been successfully downloaded and verified.\r\n\r\nClick Install to continue.";
-
-    config.pButtons = TaskDialogButtonArray;
-    config.cButtons = ARRAYSIZE(TaskDialogButtonArray);
-
     config.cxWidth = 200;
     config.pfCallback = FinalTaskDialogCallbackProc;
     config.lpCallbackData = (LONG_PTR)Context;
+    config.pButtons = TaskDialogButtonArray;
+    config.cButtons = RTL_NUMBER_OF(TaskDialogButtonArray);
 
-    SendMessage(Context->DialogHandle, TDM_NAVIGATE_PAGE, 0, (LPARAM)&config);
+    config.pszWindowTitle = L"Process Hacker - Updater";
+    config.pszMainInstruction = L"Ready to install update?";
+    config.pszContent = L"The update has been successfully downloaded and verified.\r\n\r\nClick Install to continue.";
+
+    TaskDialogNavigatePage(Context->DialogHandle, &config);
 }
 
 VOID ShowLatestVersionDialog(
     _In_ PPH_UPDATER_CONTEXT Context
     )
 {
-    PPH_UPDATER_CONTEXT context;
     TASKDIALOGCONFIG config;
-
-    context = (PPH_UPDATER_CONTEXT)Context;
+    LARGE_INTEGER time;
+    SYSTEMTIME systemTime = { 0 };
+    PIMAGE_DOS_HEADER imageDosHeader;
+    PIMAGE_NT_HEADERS imageNtHeader;
 
     memset(&config, 0, sizeof(TASKDIALOGCONFIG));
     config.cbSize = sizeof(TASKDIALOGCONFIG);
     config.dwFlags = TDF_USE_HICON_MAIN | TDF_ALLOW_DIALOG_CANCELLATION | TDF_CAN_BE_MINIMIZED | TDF_ENABLE_HYPERLINKS;
     config.dwCommonButtons = TDCBF_CLOSE_BUTTON;
-    config.hMainIcon = context->IconLargeHandle;
-
-    config.pszWindowTitle = L"Process Hacker - Updater";
-    config.pszMainInstruction = L"You're running the latest version.";
-        config.pszContent = PhaFormatString(
-        L"Stable release build: v%lu.%lu.%lu\r\n\r\n<A HREF=\"executablestring\">View Changelog</A>",
-        context->CurrentMajorVersion,
-        context->CurrentMinorVersion,
-        context->CurrentRevisionVersion
-        )->Buffer;
-
+    config.hMainIcon = Context->IconLargeHandle;
     config.cxWidth = 200;
     config.pfCallback = FinalTaskDialogCallbackProc;
     config.lpCallbackData = (LONG_PTR)Context;
+    
+    // HACK
+    imageDosHeader = (PIMAGE_DOS_HEADER)NtCurrentPeb()->ImageBaseAddress;
+    imageNtHeader = (PIMAGE_NT_HEADERS)PTR_ADD_OFFSET(imageDosHeader, imageDosHeader->e_lfanew);
+    RtlSecondsSince1970ToTime(imageNtHeader->FileHeader.TimeDateStamp, &time);
+    PhLargeIntegerToLocalSystemTime(&systemTime, &time);
 
-    SendMessage(Context->DialogHandle, TDM_NAVIGATE_PAGE, 0, (LPARAM)&config);
+    config.pszWindowTitle = L"Process Hacker - Updater";
+    config.pszMainInstruction = L"You're running the latest version.";
+    config.pszContent = PhaFormatString(
+        L"Version: v%s\r\nCompiled: %s\r\n\r\n<A HREF=\"changelog.txt\">View Changelog</A>",
+        PhGetStringOrEmpty(Context->CurrentVersionString),
+        PhaFormatDateTime(&systemTime)->Buffer
+        )->Buffer;
+
+    TaskDialogNavigatePage(Context->DialogHandle, &config);
 }
 
 VOID ShowNewerVersionDialog(
     _In_ PPH_UPDATER_CONTEXT Context
     )
 {
-    PPH_UPDATER_CONTEXT context;
     TASKDIALOGCONFIG config;
-
-    context = (PPH_UPDATER_CONTEXT)Context;
 
     memset(&config, 0, sizeof(TASKDIALOGCONFIG));
     config.cbSize = sizeof(TASKDIALOGCONFIG);
     config.dwFlags = TDF_USE_HICON_MAIN | TDF_ALLOW_DIALOG_CANCELLATION | TDF_CAN_BE_MINIMIZED;
     config.dwCommonButtons = TDCBF_CLOSE_BUTTON;
-    config.hMainIcon = context->IconLargeHandle;
-
-    config.pszWindowTitle = L"Process Hacker - Updater";
-    config.pszMainInstruction = L"You're running a pre-release version!";
-    config.pszContent = PhaFormatString(
-        L"Pre-release build: v%lu.%lu.%lu\r\n",
-        context->CurrentMajorVersion,
-        context->CurrentMinorVersion,
-        context->CurrentRevisionVersion
-        )->Buffer;
-
+    config.hMainIcon = Context->IconLargeHandle;
     config.cxWidth = 200;
     config.pfCallback = FinalTaskDialogCallbackProc;
     config.lpCallbackData = (LONG_PTR)Context;
 
-    SendMessage(Context->DialogHandle, TDM_NAVIGATE_PAGE, 0, (LPARAM)&config);
+    config.pszWindowTitle = L"Process Hacker - Updater";
+    config.pszMainInstruction = L"You're running a pre-release build.";
+    config.pszContent = PhaFormatString(
+        L"Pre-release build: v%s\r\n",
+        PhGetStringOrEmpty(Context->CurrentVersionString)
+        )->Buffer;
+
+    TaskDialogNavigatePage(Context->DialogHandle, &config);
 }
 
 VOID ShowUpdateFailedDialog(
@@ -202,7 +282,7 @@ VOID ShowUpdateFailedDialog(
     config.hMainIcon = Context->IconLargeHandle;
 
     config.pszWindowTitle = L"Process Hacker - Updater";
-    config.pszMainInstruction = L"An error was encountered while downloading the update.";
+    config.pszMainInstruction = L"Error downloading the update.";
 
     if (SignatureFailed)
     {
@@ -214,12 +294,29 @@ VOID ShowUpdateFailedDialog(
     }
     else
     {
-        config.pszContent = L"Click Retry to download the update again.";
+        if (Context->ErrorCode)
+        {
+            PPH_STRING errorMessage;
+          
+            if (errorMessage = PhHttpSocketGetErrorMessage(Context->ErrorCode))
+            {
+                config.pszContent = PhaFormatString(L"[%lu] %s", Context->ErrorCode, errorMessage->Buffer)->Buffer;
+                PhDereferenceObject(errorMessage);
+            }
+            else
+            {
+                config.pszContent = L"Click Retry to download the update again.";
+            }
+        }
+        else
+        {
+            config.pszContent = L"Click Retry to download the update again.";
+        }
     }
 
     config.cxWidth = 200;
     config.pfCallback = FinalTaskDialogCallbackProc;
     config.lpCallbackData = (LONG_PTR)Context;
 
-    SendMessage(Context->DialogHandle, TDM_NAVIGATE_PAGE, 0, (LPARAM)&config);
+    TaskDialogNavigatePage(Context->DialogHandle, &config);
 }

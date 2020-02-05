@@ -1,14 +1,38 @@
 #ifndef PH_NOTIFICO_H
 #define PH_NOTIFICO_H
 
-#define PH_ICON_MINIMUM 0x1
-#define PH_ICON_CPU_HISTORY 0x1
-#define PH_ICON_IO_HISTORY 0x2
-#define PH_ICON_COMMIT_HISTORY 0x4
-#define PH_ICON_PHYSICAL_HISTORY 0x8
-#define PH_ICON_CPU_USAGE 0x10
-#define PH_ICON_DEFAULT_MAXIMUM 0x20
-#define PH_ICON_DEFAULT_ALL 0x1f
+extern PPH_LIST PhTrayIconItemList;
+
+typedef enum _PH_TRAY_ICON_ID
+{
+    PH_TRAY_ICON_ID_NONE,
+    PH_TRAY_ICON_ID_CPU_USAGE,
+    PH_TRAY_ICON_ID_CPU_HISTORY,
+    PH_TRAY_ICON_ID_IO_HISTORY,
+    PH_TRAY_ICON_ID_COMMIT_HISTORY,
+    PH_TRAY_ICON_ID_PHYSICAL_HISTORY,
+    PH_TRAY_ICON_ID_CPU_TEXT,
+    PH_TRAY_ICON_ID_IO_TEXT,
+    PH_TRAY_ICON_ID_COMMIT_TEXT,
+    PH_TRAY_ICON_ID_PHYSICAL_TEXT,
+    PH_TRAY_ICON_ID_MAXIMUM
+} PH_TRAY_ICON_ID;
+
+typedef enum _PH_TRAY_ICON_GUID
+{
+    PH_TRAY_ICON_GUID_CPU_USAGE,
+    PH_TRAY_ICON_GUID_CPU_HISTORY,
+    PH_TRAY_ICON_GUID_IO_HISTORY,
+    PH_TRAY_ICON_GUID_COMMIT_HISTORY,
+    PH_TRAY_ICON_GUID_PHYSICAL_HISTORY,
+    PH_TRAY_ICON_GUID_CPU_TEXT,
+    PH_TRAY_ICON_GUID_IO_TEXT,
+    PH_TRAY_ICON_GUID_COMMIT_TEXT,
+    PH_TRAY_ICON_GUID_PHYSICAL_TEXT,
+    PH_TRAY_ICON_GUID_MAXIMUM
+} PH_TRAY_ICON_GUID;
+
+#define PH_TRAY_ICON_ID_PLUGIN 0x80
 
 #define PH_ICON_LIMIT 0x80000000
 #define PH_ICON_ALL 0xffffffff
@@ -29,7 +53,6 @@ typedef VOID (NTAPI *PPH_NF_BEGIN_BITMAP)(
 
 typedef struct _PH_NF_POINTERS
 {
-    PPH_NF_UPDATE_REGISTERED_ICON UpdateRegisteredIcon;
     PPH_NF_BEGIN_BITMAP BeginBitmap;
 } PH_NF_POINTERS, *PPH_NF_POINTERS;
 
@@ -63,8 +86,9 @@ typedef struct _PH_NF_MSG_SHOWMINIINFOSECTION_DATA
 
 // Structures and internal functions
 
-#define PH_NF_ICON_UNAVAILABLE 0x1
-#define PH_NF_ICON_SHOW_MINIINFO 0x2
+#define PH_NF_ICON_ENABLED 0x1
+#define PH_NF_ICON_UNAVAILABLE 0x2
+#define PH_NF_ICON_NOSHOW_MINIINFO 0x4
 // end_phapppub
 
 // begin_phapppub
@@ -83,8 +107,11 @@ typedef struct _PH_NF_ICON
     PWSTR Text;
     ULONG Flags;
     ULONG IconId;
+    GUID IconGuid;
     PPH_NF_ICON_UPDATE_CALLBACK UpdateCallback;
     PPH_NF_ICON_MESSAGE_CALLBACK MessageCallback;
+
+    PPH_STRING TextCache;
 // begin_phapppub
 } PH_NF_ICON, *PPH_NF_ICON;
 // end_phapppub
@@ -106,25 +133,17 @@ VOID PhNfUninitialization(
     );
 
 VOID PhNfForwardMessage(
+    _In_ HWND WindowHandle,
     _In_ ULONG_PTR WParam,
     _In_ ULONG_PTR LParam
     );
 
-ULONG PhNfGetMaximumIconId(
-    VOID
-    );
-
-ULONG PhNfTestIconMask(
-    _In_ ULONG Id
-    );
-
 VOID PhNfSetVisibleIcon(
-    _In_ ULONG Id,
+    _In_ PPH_NF_ICON Icon,
     _In_ BOOLEAN Visible
     );
 
 BOOLEAN PhNfShowBalloonTip(
-    _In_opt_ ULONG Id,
     _In_ PWSTR Title,
     _In_ PWSTR Text,
     _In_ ULONG Timeout,
@@ -135,9 +154,20 @@ HICON PhNfBitmapToIcon(
     _In_ HBITMAP Bitmap
     );
 
-PPH_NF_ICON PhNfRegisterIcon(
-    _In_ struct _PH_PLUGIN *Plugin,
+struct _PH_NF_ICON *PhNfPluginRegisterIcon(
+    _In_ struct _PH_PLUGIN * Plugin,
     _In_ ULONG SubId,
+    _In_ GUID Guid,
+    _In_opt_ PVOID Context,
+    _In_ PWSTR Text,
+    _In_ ULONG Flags,
+    _In_ struct _PH_NF_ICON_REGISTRATION_DATA *RegistrationData
+    );
+
+PPH_NF_ICON PhNfRegisterIcon(
+    _In_opt_ struct _PH_PLUGIN *Plugin,
+    _In_ ULONG Id,
+    _In_ GUID Guid,
     _In_opt_ PVOID Context,
     _In_ PWSTR Text,
     _In_ ULONG Flags,
@@ -154,6 +184,10 @@ PPH_NF_ICON PhNfFindIcon(
     _In_ ULONG SubId
     );
 
+BOOLEAN PhNfIconsEnabled(
+    VOID
+    );
+
 VOID PhNfNotifyMiniInfoPinned(
     _In_ BOOLEAN Pinned
     );
@@ -167,5 +201,6 @@ typedef struct _PH_NF_ICON_REGISTRATION_DATA
     PPH_NF_ICON_MESSAGE_CALLBACK MessageCallback;
 } PH_NF_ICON_REGISTRATION_DATA, *PPH_NF_ICON_REGISTRATION_DATA;
 // end_phapppub
+
 
 #endif

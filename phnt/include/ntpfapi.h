@@ -126,13 +126,26 @@ typedef struct _PF_PRIVSOURCE_INFO
     SIZE_T TotalPrivatePages;
     ULONG SessionID;
     CHAR ImageName[16];
+    union {
+        ULONG_PTR WsSwapPages;                 // process only PF_PRIVSOURCE_QUERY_WS_SWAP_PAGES.
+        ULONG_PTR SessionPagedPoolPages;       // session only.
+        ULONG_PTR StoreSizePages;              // process only PF_PRIVSOURCE_QUERY_STORE_INFO.
+    };
+    ULONG_PTR WsTotalPages;         // process/session only.
+    ULONG DeepFreezeTimeMs;         // process only.
+    ULONG ModernApp : 1;            // process only.
+    ULONG DeepFrozen : 1;           // process only. If set, DeepFreezeTimeMs contains the time at which the freeze occurred
+    ULONG Foreground : 1;           // process only.
+    ULONG PerProcessStore : 1;      // process only.
+    ULONG Spare : 28;
 } PF_PRIVSOURCE_INFO, *PPF_PRIVSOURCE_INFO;
 
-#define PF_PRIVSOURCE_QUERY_REQUEST_VERSION 3
+#define PF_PRIVSOURCE_QUERY_REQUEST_VERSION 8
 
 typedef struct _PF_PRIVSOURCE_QUERY_REQUEST
 {
     ULONG Version;
+    ULONG Flags;
     ULONG InfoCount;
     PF_PRIVSOURCE_INFO InfoArray[1];
 } PF_PRIVSOURCE_QUERY_REQUEST, *PPF_PRIVSOURCE_QUERY_REQUEST;
@@ -185,14 +198,24 @@ typedef struct _PF_PHYSICAL_MEMORY_RANGE
     ULONG_PTR PageCount;
 } PF_PHYSICAL_MEMORY_RANGE, *PPF_PHYSICAL_MEMORY_RANGE;
 
-#define PF_PHYSICAL_MEMORY_RANGE_INFO_VERSION 1
+#define PF_PHYSICAL_MEMORY_RANGE_INFO_V1_VERSION 1
 
-typedef struct _PF_PHYSICAL_MEMORY_RANGE_INFO
+typedef struct _PF_PHYSICAL_MEMORY_RANGE_INFO_V1
 {
     ULONG Version;
     ULONG RangeCount;
     PF_PHYSICAL_MEMORY_RANGE Ranges[1];
-} PF_PHYSICAL_MEMORY_RANGE_INFO, *PPF_PHYSICAL_MEMORY_RANGE_INFO;
+} PF_PHYSICAL_MEMORY_RANGE_INFO_V1, *PPF_PHYSICAL_MEMORY_RANGE_INFO_V1;
+
+#define PF_PHYSICAL_MEMORY_RANGE_INFO_V2_VERSION 2
+
+typedef struct _PF_PHYSICAL_MEMORY_RANGE_INFO_V2
+{
+    ULONG Version;
+    ULONG Flags;
+    ULONG RangeCount;
+    PF_PHYSICAL_MEMORY_RANGE Ranges[ANYSIZE_ARRAY];
+} PF_PHYSICAL_MEMORY_RANGE_INFO_V2, *PPF_PHYSICAL_MEMORY_RANGE_INFO_V2;
 
 // begin_rev
 

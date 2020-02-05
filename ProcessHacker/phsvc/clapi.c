@@ -116,6 +116,13 @@ NTSTATUS PhSvcConnectToServer(
         return STATUS_INSUFFICIENT_RESOURCES;
     }
 
+    RtlSetHeapInformation(
+        PhSvcClPortHeap,
+        HeapCompatibilityInformation,
+        &(ULONG){ HEAP_COMPATIBILITY_LFH },
+        sizeof(ULONG)
+        );
+
     return status;
 }
 
@@ -153,7 +160,7 @@ PVOID PhSvcpAllocateHeap(
     if (!memory)
         return NULL;
 
-    *Offset = (ULONG)((ULONG_PTR)memory - (ULONG_PTR)PhSvcClPortHeap);
+    *Offset = PtrToUlong(PTR_SUB_OFFSET(memory, PhSvcClPortHeap));
 
     return memory;
 }
@@ -283,6 +290,7 @@ NTSTATUS PhSvcpCallExecuteRunAsCommand(
     m.p.u.ExecuteRunAsCommand.i.LogonType = Parameters->LogonType;
     m.p.u.ExecuteRunAsCommand.i.SessionId = Parameters->SessionId;
     m.p.u.ExecuteRunAsCommand.i.UseLinkedToken = Parameters->UseLinkedToken;
+    m.p.u.ExecuteRunAsCommand.i.CreateSuspendedProcess = Parameters->CreateSuspendedProcess;
 
     status = STATUS_NO_MEMORY;
 
@@ -895,11 +903,11 @@ NTSTATUS PhSvcCallSetTcpEntry(
     PHSVC_API_MSG m;
     struct
     {
-        DWORD dwState;
-        DWORD dwLocalAddr;
-        DWORD dwLocalPort;
-        DWORD dwRemoteAddr;
-        DWORD dwRemotePort;
+        ULONG dwState;
+        ULONG dwLocalAddr;
+        ULONG dwLocalPort;
+        ULONG dwRemoteAddr;
+        ULONG dwRemotePort;
     } *tcpRow = TcpRow;
 
     if (!PhSvcClPortHandle)
@@ -1128,33 +1136,6 @@ CleanupExit:
     return status;
 }
 
-NTSTATUS PhSvcCallLoadDbgHelp(
-    _In_ PWSTR DbgHelpPath
-    )
-{
-    NTSTATUS status;
-    PHSVC_API_MSG m;
-    PVOID dbgHelpPath = NULL;
-
-    memset(&m, 0, sizeof(PHSVC_API_MSG));
-
-    if (!PhSvcClPortHandle)
-        return STATUS_PORT_DISCONNECTED;
-
-    m.p.ApiNumber = PhSvcLoadDbgHelpApiNumber;
-    dbgHelpPath = PhSvcpCreateString(DbgHelpPath, -1, &m.p.u.LoadDbgHelp.i.DbgHelpPath);
-
-    if (!dbgHelpPath)
-        return STATUS_NO_MEMORY;
-
-    status = PhSvcpCallServer(&m);
-
-    if (dbgHelpPath)
-        PhSvcpFreeHeap(dbgHelpPath);
-
-    return status;
-}
-
 NTSTATUS PhSvcCallWriteMiniDumpProcess(
     _In_ HANDLE ProcessHandle,
     _In_ HANDLE ProcessId,
@@ -1178,22 +1159,40 @@ NTSTATUS PhSvcCallWriteMiniDumpProcess(
 
     m.p.ApiNumber = PhSvcWriteMiniDumpProcessApiNumber;
 
-    if (!NT_SUCCESS(status = PhOpenProcess(&serverHandle, PROCESS_DUP_HANDLE, PhSvcClServerProcessId)))
-    {
-        goto CleanupExit;
-    }
+    status = PhOpenProcess(
+        &serverHandle, 
+        PROCESS_DUP_HANDLE, 
+        PhSvcClServerProcessId
+        );
 
-    if (!NT_SUCCESS(status = NtDuplicateObject(NtCurrentProcess(), ProcessHandle, serverHandle, &remoteProcessHandle,
-        PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, 0, 0)))
-    {
+    if (!NT_SUCCESS(status))
         goto CleanupExit;
-    }
 
-    if (!NT_SUCCESS(status = NtDuplicateObject(NtCurrentProcess(), FileHandle, serverHandle, &remoteFileHandle,
-        FILE_GENERIC_WRITE, 0, 0)))
-    {
+    status = NtDuplicateObject(
+        NtCurrentProcess(), 
+        ProcessHandle,
+        serverHandle, 
+        &remoteProcessHandle,
+        PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, 
+        0, 
+        0
+        );
+
+    if (!NT_SUCCESS(status))
         goto CleanupExit;
-    }
+
+    status = NtDuplicateObject(
+        NtCurrentProcess(),
+        FileHandle,
+        serverHandle, 
+        &remoteFileHandle, 
+        FILE_GENERIC_WRITE,
+        0, 
+        0
+        );
+
+    if (!NT_SUCCESS(status))
+        goto CleanupExit;
 
     m.p.u.WriteMiniDumpProcess.i.LocalProcessHandle = HandleToUlong(remoteProcessHandle);
     m.p.u.WriteMiniDumpProcess.i.ProcessId = HandleToUlong(ProcessId);

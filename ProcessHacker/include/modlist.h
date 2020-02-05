@@ -26,8 +26,10 @@
 #define PHMOTLC_LOADREASON 15
 #define PHMOTLC_FILEMODIFIEDTIME 16
 #define PHMOTLC_FILESIZE 17
+#define PHMOTLC_ENTRYPOINT 18
+#define PHMOTLC_PARENTBASEADDRESS 19
 
-#define PHMOTLC_MAXIMUM 18
+#define PHMOTLC_MAXIMUM 20
 
 // begin_phapppub
 typedef struct _PH_MODULE_NODE
@@ -51,22 +53,60 @@ typedef struct _PH_MODULE_NODE
     PPH_STRING LoadTimeText;
     PPH_STRING FileModifiedTimeText;
     PPH_STRING FileSizeText;
+
+    struct _PH_MODULE_NODE *Parent;
+    PPH_LIST Children;
 // begin_phapppub
 } PH_MODULE_NODE, *PPH_MODULE_NODE;
 // end_phapppub
+
+#define PH_MODULE_FLAGS_DYNAMIC_OPTION 1
+#define PH_MODULE_FLAGS_MAPPED_OPTION 2
+#define PH_MODULE_FLAGS_STATIC_OPTION 3
+#define PH_MODULE_FLAGS_SIGNED_OPTION 4
+#define PH_MODULE_FLAGS_HIGHLIGHT_UNSIGNED_OPTION 5
+#define PH_MODULE_FLAGS_HIGHLIGHT_DOTNET_OPTION 6
+#define PH_MODULE_FLAGS_HIGHLIGHT_IMMERSIVE_OPTION 7
+#define PH_MODULE_FLAGS_HIGHLIGHT_RELOCATED_OPTION 8
+#define PH_MODULE_FLAGS_LOAD_MODULE_OPTION 9
+#define PH_MODULE_FLAGS_MODULE_STRINGS_OPTION 10
+#define PH_MODULE_FLAGS_SYSTEM_OPTION 11
+#define PH_MODULE_FLAGS_HIGHLIGHT_SYSTEM_OPTION 12
 
 typedef struct _PH_MODULE_LIST_CONTEXT
 {
     HWND ParentWindowHandle;
     HWND TreeNewHandle;
     ULONG TreeNewSortColumn;
+    PH_TN_FILTER_SUPPORT TreeFilterSupport;
     PH_SORT_ORDER TreeNewSortOrder;
     PH_CM_MANAGER Cm;
 
+    BOOLEAN EnableStateHighlighting;
+
+    union
+    {
+        ULONG Flags;
+        struct
+        {
+            ULONG Reserved : 1;
+            ULONG HideDynamicModules : 1;
+            ULONG HideMappedModules : 1;
+            ULONG HideSignedModules : 1;
+            ULONG HideStaticModules : 1;
+            ULONG HighlightUntrustedModules : 1;
+            ULONG HighlightDotNetModules : 1;
+            ULONG HighlightImmersiveModules : 1;
+            ULONG HighlightRelocatedModules : 1;
+            ULONG HideSystemModules : 1;
+            ULONG HighlightSystemModules : 1;
+            ULONG Spare : 21;
+        };
+    };
+
     PPH_HASHTABLE NodeHashtable;
     PPH_LIST NodeList;
-
-    BOOLEAN EnableStateHighlighting;
+    PPH_LIST NodeRootList;
     PPH_POINTER_LIST NodeStateList;
 
     HFONT BoldFont;
@@ -90,6 +130,11 @@ VOID PhSaveSettingsModuleList(
     _Inout_ PPH_MODULE_LIST_CONTEXT Context
     );
 
+VOID PhSetOptionsModuleList(
+    _Inout_ PPH_MODULE_LIST_CONTEXT Context,
+    _In_ ULONG Options
+    );
+
 PPH_MODULE_NODE PhAddModuleNode(
     _Inout_ PPH_MODULE_LIST_CONTEXT Context,
     _In_ PPH_MODULE_ITEM ModuleItem,
@@ -109,6 +154,11 @@ VOID PhRemoveModuleNode(
 VOID PhUpdateModuleNode(
     _In_ PPH_MODULE_LIST_CONTEXT Context,
     _In_ PPH_MODULE_NODE ModuleNode
+    );
+
+VOID PhExpandAllModuleNodes(
+    _In_ PPH_MODULE_LIST_CONTEXT Context,
+    _In_ BOOLEAN Expand
     );
 
 VOID PhTickModuleNodes(

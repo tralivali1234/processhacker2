@@ -21,9 +21,9 @@
  */
 
 #include <phapp.h>
-
-#include <windowsx.h>
-
+#include <phplug.h>
+#include <phsettings.h>
+#include <settings.h>
 #include <mainwnd.h>
 
 #define WM_PH_LOG_UPDATED (WM_APP + 300)
@@ -51,14 +51,14 @@ VOID PhShowLogDialog(
         PhLogWindowHandle = CreateDialog(
             PhInstanceHandle,
             MAKEINTRESOURCE(IDD_LOG),
-            PhMainWndHandle,
+            NULL,
             PhpLogDlgProc
             );
         PhRegisterDialog(PhLogWindowHandle);
         ShowWindow(PhLogWindowHandle, SW_SHOW);
     }
 
-    if (IsIconic(PhLogWindowHandle))
+    if (IsMinimized(PhLogWindowHandle))
         ShowWindow(PhLogWindowHandle, SW_RESTORE);
     else
         SetForegroundWindow(PhLogWindowHandle);
@@ -155,6 +155,9 @@ INT_PTR CALLBACK PhpLogDlgProc(
     {
     case WM_INITDIALOG:
         {
+            SendMessage(hwndDlg, WM_SETICON, ICON_SMALL, (LPARAM)PH_LOAD_SHARED_ICON_SMALL(PhInstanceHandle, MAKEINTRESOURCE(IDI_PROCESSHACKER)));
+            SendMessage(hwndDlg, WM_SETICON, ICON_BIG, (LPARAM)PH_LOAD_SHARED_ICON_LARGE(PhInstanceHandle, MAKEINTRESOURCE(IDI_PROCESSHACKER)));
+
             ListViewHandle = GetDlgItem(hwndDlg, IDC_LIST);
             PhSetListViewStyle(ListViewHandle, FALSE, TRUE);
             PhSetControlTheme(ListViewHandle, L"explorer");
@@ -163,18 +166,12 @@ INT_PTR CALLBACK PhpLogDlgProc(
             PhLoadListViewColumnsFromSetting(L"LogListViewColumns", ListViewHandle);
 
             PhInitializeLayoutManager(&WindowLayoutManager, hwndDlg);
-            PhAddLayoutItem(&WindowLayoutManager, GetDlgItem(hwndDlg, IDC_LIST), NULL,
-                PH_ANCHOR_ALL);
-            PhAddLayoutItem(&WindowLayoutManager, GetDlgItem(hwndDlg, IDOK), NULL,
-                PH_ANCHOR_RIGHT | PH_ANCHOR_BOTTOM);
-            PhAddLayoutItem(&WindowLayoutManager, GetDlgItem(hwndDlg, IDC_COPY), NULL,
-                PH_ANCHOR_RIGHT | PH_ANCHOR_BOTTOM);
-            PhAddLayoutItem(&WindowLayoutManager, GetDlgItem(hwndDlg, IDC_SAVE), NULL,
-                PH_ANCHOR_RIGHT | PH_ANCHOR_BOTTOM);
-            PhAddLayoutItem(&WindowLayoutManager, GetDlgItem(hwndDlg, IDC_AUTOSCROLL), NULL,
-                PH_ANCHOR_BOTTOM | PH_ANCHOR_LEFT);
-            PhAddLayoutItem(&WindowLayoutManager, GetDlgItem(hwndDlg, IDC_CLEAR), NULL,
-                PH_ANCHOR_BOTTOM | PH_ANCHOR_LEFT);
+            PhAddLayoutItem(&WindowLayoutManager, GetDlgItem(hwndDlg, IDC_LIST), NULL, PH_ANCHOR_ALL);
+            PhAddLayoutItem(&WindowLayoutManager, GetDlgItem(hwndDlg, IDOK), NULL, PH_ANCHOR_RIGHT | PH_ANCHOR_BOTTOM);
+            PhAddLayoutItem(&WindowLayoutManager, GetDlgItem(hwndDlg, IDC_COPY), NULL, PH_ANCHOR_RIGHT | PH_ANCHOR_BOTTOM);
+            PhAddLayoutItem(&WindowLayoutManager, GetDlgItem(hwndDlg, IDC_SAVE), NULL, PH_ANCHOR_RIGHT | PH_ANCHOR_BOTTOM);
+            PhAddLayoutItem(&WindowLayoutManager, GetDlgItem(hwndDlg, IDC_AUTOSCROLL), NULL, PH_ANCHOR_BOTTOM | PH_ANCHOR_LEFT);
+            PhAddLayoutItem(&WindowLayoutManager, GetDlgItem(hwndDlg, IDC_CLEAR), NULL, PH_ANCHOR_BOTTOM | PH_ANCHOR_LEFT);
 
             MinimumSize.left = 0;
             MinimumSize.top = 0;
@@ -182,13 +179,18 @@ INT_PTR CALLBACK PhpLogDlgProc(
             MinimumSize.bottom = 150;
             MapDialogRect(hwndDlg, &MinimumSize);
 
-            PhLoadWindowPlacementFromSetting(L"LogWindowPosition", L"LogWindowSize", hwndDlg);
+            if (PhGetIntegerPairSetting(L"LogWindowPosition").X)
+                PhLoadWindowPlacementFromSetting(L"LogWindowPosition", L"LogWindowSize", hwndDlg);
+            else
+                PhCenterWindow(hwndDlg, PhMainWndHandle);
 
             Button_SetCheck(GetDlgItem(hwndDlg, IDC_AUTOSCROLL), BST_CHECKED);
 
-            PhRegisterCallback(&PhLoggedCallback, LoggedCallback, NULL, &LoggedRegistration);
+            PhRegisterCallback(PhGetGeneralCallback(GeneralCallbackLoggedEvent), LoggedCallback, NULL, &LoggedRegistration);
             PhpUpdateLogList();
             ListView_EnsureVisible(ListViewHandle, ListViewCount - 1, FALSE);
+
+            PhInitializeWindowTheme(hwndDlg, PhEnableThemeSupport);
         }
         break;
     case WM_DESTROY:
@@ -198,14 +200,14 @@ INT_PTR CALLBACK PhpLogDlgProc(
 
             PhDeleteLayoutManager(&WindowLayoutManager);
 
-            PhUnregisterCallback(&PhLoggedCallback, &LoggedRegistration);
+            PhUnregisterCallback(PhGetGeneralCallback(GeneralCallbackLoggedEvent), &LoggedRegistration);
             PhUnregisterDialog(PhLogWindowHandle);
             PhLogWindowHandle = NULL;
         }
         break;
     case WM_COMMAND:
         {
-            switch (LOWORD(wParam))
+            switch (GET_WM_COMMAND_ID(wParam, lParam))
             {
             case IDCANCEL:
             case IDOK:
@@ -238,7 +240,7 @@ INT_PTR CALLBACK PhpLogDlgProc(
                     PhSetClipboardString(hwndDlg, &string->sr);
                     PhDereferenceObject(string);
 
-                    SendMessage(hwndDlg, WM_NEXTDLGCTL, (WPARAM)ListViewHandle, TRUE);
+                    PhSetDialogFocus(hwndDlg, ListViewHandle);
                 }
                 break;
             case IDC_SAVE:

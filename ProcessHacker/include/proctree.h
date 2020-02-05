@@ -89,8 +89,14 @@
 #define PHPRTLC_TIMESTAMP 76
 #define PHPRTLC_FILEMODIFIEDTIME 77
 #define PHPRTLC_FILESIZE 78
+#define PHPRTLC_SUBPROCESSCOUNT 79
+#define PHPRTLC_JOBOBJECTID 80
+#define PHPRTLC_PROTECTION 81
+#define PHPRTLC_DESKTOP 82
+#define PHPRTLC_CRITICAL 83
+#define PHPRTLC_PIDHEX 84
 
-#define PHPRTLC_MAXIMUM 79
+#define PHPRTLC_MAXIMUM 85
 #define PHPRTLC_IOGROUP_COUNT 9
 
 #define PHPN_WSCOUNTERS 0x1
@@ -105,6 +111,9 @@
 #define PHPN_APPID 0x200
 #define PHPN_DPIAWARENESS 0x400
 #define PHPN_FILEATTRIBUTES 0x800
+#define PHPN_DESKTOPINFO 0x1000
+#define PHPN_USERNAME 0x2000
+#define PHPN_CRITICAL 0x4000
 
 // begin_phapppub
 typedef struct _PH_PROCESS_NODE
@@ -161,25 +170,25 @@ typedef struct _PH_PROCESS_NODE
     USHORT ImageDllCharacteristics;
     // App ID
     PPH_STRING AppIdText;
-    // Cycles (Vista only)
-    PH_UINT64_DELTA CyclesDelta;
     // DPI awareness
     ULONG DpiAwareness;
     // File attributes
     LARGE_INTEGER FileLastWriteTime;
     LARGE_INTEGER FileEndOfFile;
+    // Critical
+    BOOLEAN BreakOnTerminationEnabled;
 
     PPH_STRING TooltipText;
-    ULONG TooltipTextValidToTickCount;
+    ULONG64 TooltipTextValidToTickCount;
 
     // Text buffers
-    WCHAR CpuUsageText[PH_INT32_STR_LEN_1];
-    PPH_STRING IoTotalRateText;
-    PPH_STRING PrivateBytesText;
+    WCHAR CpuUsageText[PH_INT32_STR_LEN_1 + 3];
+    WCHAR IoTotalRateText[PH_INT32_STR_LEN_1 + 3];
+    WCHAR PrivateBytesText[PH_INT32_STR_LEN_1];
     PPH_STRING PeakPrivateBytesText;
     PPH_STRING WorkingSetText;
     PPH_STRING PeakWorkingSetText;
-    PPH_STRING PrivateWsText;
+    WCHAR PrivateWsText[PH_INT32_STR_LEN_1];
     PPH_STRING SharedWsText;
     PPH_STRING ShareableWsText;
     PPH_STRING VirtualSizeText;
@@ -215,6 +224,11 @@ typedef struct _PH_PROCESS_NODE
     PPH_STRING TimeStampText;
     PPH_STRING FileModifiedTimeText;
     PPH_STRING FileSizeText;
+    PPH_STRING SubprocessCountText;
+    WCHAR JobObjectIdText[PH_INT32_STR_LEN_1];
+    PPH_STRING ProtectionText;
+    PPH_STRING DesktopInfoText;
+    WCHAR PidHexText[PH_PTR_STR_LEN_1];
 
     // Graph buffers
     PH_GRAPH_BUFFERS CpuGraphBuffers;
@@ -238,6 +252,16 @@ VOID PhLoadSettingsProcessTreeList(
 
 VOID PhSaveSettingsProcessTreeList(
     VOID
+    );
+
+VOID PhLoadSettingsProcessTreeListEx(
+    _In_ PPH_STRING TreeListSettings,
+    _In_ PPH_STRING TreeSortSettings
+    );
+
+VOID PhSaveSettingsProcessTreeListEx(
+    _Out_ PPH_STRING *TreeListSettings,
+    _Out_ PPH_STRING *TreeSortSettings
     );
 
 VOID PhReloadSettingsProcessTreeList(

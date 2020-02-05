@@ -149,6 +149,22 @@ PhDereferenceObjectEx(
     );
 
 PHLIBAPI
+VOID
+NTAPI
+PhReferenceObjects(
+    _In_reads_(NumberOfObjects) PVOID *Objects,
+    _In_ ULONG NumberOfObjects
+    );
+
+PHLIBAPI
+VOID
+NTAPI
+PhDereferenceObjects(
+    _In_reads_(NumberOfObjects) PVOID *Objects,
+    _In_ ULONG NumberOfObjects
+    );
+
+PHLIBAPI
 PPH_OBJECT_TYPE
 NTAPI
 PhGetObjectType(
@@ -241,6 +257,23 @@ PhClearReference(
     )
 {
     PhMoveReference(ObjectReference, NULL);
+}
+
+// Convenience functions
+
+FORCEINLINE
+PVOID
+PhCreateObjectZero(
+    _In_ SIZE_T ObjectSize,
+    _In_ PPH_OBJECT_TYPE ObjectType
+    )
+{
+    PVOID object;
+
+    object = PhCreateObject(ObjectSize, ObjectType);
+    memset(object, 0, ObjectSize);
+
+    return object;
 }
 
 // Auto-dereference pool

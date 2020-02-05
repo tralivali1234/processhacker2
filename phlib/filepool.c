@@ -169,7 +169,7 @@ NTSTATUS PhCreateFilePool(
         header->SegmentCount = 1;
 
         for (i = 0; i < PH_FP_FREE_LIST_COUNT; i++)
-            header->FreeLists[i] = -1;
+            header->FreeLists[i] = ULONG_MAX;
     }
     else
     {
@@ -223,7 +223,7 @@ NTSTATUS PhCreateFilePool(
         // Set up the first segment properly.
 
         pool->FirstBlockOfFirstSegment->Span = pool->FileHeaderBlockSpan;
-        segmentHeaderBlock = (PPH_FP_BLOCK_HEADER)((PCHAR)pool->FirstBlockOfFirstSegment + (pool->FileHeaderBlockSpan << pool->BlockShift));
+        segmentHeaderBlock = (PPH_FP_BLOCK_HEADER)PTR_ADD_OFFSET(pool->FirstBlockOfFirstSegment, (pool->FileHeaderBlockSpan << pool->BlockShift));
         PhFppInitializeSegment(pool, segmentHeaderBlock, pool->FileHeaderBlockSpan);
 
         pool->Header->FreeLists[1] = 0;
@@ -437,7 +437,7 @@ PVOID PhAllocateFilePool(
     {
         segmentIndex = Pool->Header->FreeLists[freeListIndex];
 
-        while (segmentIndex != -1)
+        while (segmentIndex != ULONG_MAX)
         {
             firstBlock = PhFppReferenceSegment(Pool, segmentIndex);
 
@@ -568,7 +568,7 @@ BOOLEAN PhFreeFilePoolByRva(
 
     offset = PhFppDecodeRva(Pool, Rva, &segmentIndex);
 
-    if (offset == -1)
+    if (offset == ULONG_MAX)
         return FALSE;
 
     firstBlock = PhFppReferenceSegment(Pool, segmentIndex);
@@ -576,7 +576,7 @@ BOOLEAN PhFreeFilePoolByRva(
     if (!firstBlock)
         return FALSE;
 
-    PhpFreeFilePool(Pool, segmentIndex, firstBlock, (PCHAR)firstBlock + offset);
+    PhpFreeFilePool(Pool, segmentIndex, firstBlock, PTR_ADD_OFFSET(firstBlock, offset));
     PhFppDereferenceSegment(Pool, segmentIndex);
 
     return TRUE;
@@ -631,7 +631,7 @@ PVOID PhReferenceFilePoolByRva(
 
     offset = PhFppDecodeRva(Pool, Rva, &segmentIndex);
 
-    if (offset == -1)
+    if (offset == ULONG_MAX)
         return NULL;
 
     firstBlock = PhFppReferenceSegment(Pool, segmentIndex);
@@ -639,7 +639,7 @@ PVOID PhReferenceFilePoolByRva(
     if (!firstBlock)
         return NULL;
 
-    return (PCHAR)firstBlock + offset;
+    return PTR_ADD_OFFSET(firstBlock, offset);
 }
 
 /**
@@ -658,7 +658,7 @@ BOOLEAN PhDereferenceFilePoolByRva(
 
     offset = PhFppDecodeRva(Pool, Rva, &segmentIndex);
 
-    if (offset == -1)
+    if (offset == ULONG_MAX)
         return FALSE;
 
     PhFppDereferenceSegment(Pool, segmentIndex);
@@ -820,8 +820,8 @@ VOID PhFppInitializeSegment(
     RtlInitializeBitMap(&bitmap, segmentHeader->Bitmap, PH_FP_BLOCK_COUNT);
     RtlSetBits(&bitmap, 0, Pool->SegmentHeaderBlockSpan + AdditionalBlocksUsed);
     segmentHeader->FreeBlocks = PH_FP_BLOCK_COUNT - (Pool->SegmentHeaderBlockSpan + AdditionalBlocksUsed);
-    segmentHeader->FreeFlink = -1;
-    segmentHeader->FreeBlink = -1;
+    segmentHeader->FreeFlink = ULONG_MAX;
+    segmentHeader->FreeBlink = ULONG_MAX;
 }
 
 /**
@@ -877,7 +877,7 @@ PPH_FP_SEGMENT_HEADER PhFppGetHeaderSegment(
     else
     {
         // In the first segment, the segment header is after the file header.
-        return (PPH_FP_SEGMENT_HEADER)&((PPH_FP_BLOCK_HEADER)((PCHAR)FirstBlock + (Pool->FileHeaderBlockSpan << Pool->BlockShift)))->Body;
+        return (PPH_FP_SEGMENT_HEADER)&((PPH_FP_BLOCK_HEADER)PTR_ADD_OFFSET(FirstBlock, (Pool->FileHeaderBlockSpan << Pool->BlockShift)))->Body;
     }
 }
 
@@ -1240,7 +1240,7 @@ PPH_FP_BLOCK_HEADER PhFppAllocateBlocks(
     // Find a range of free blocks and mark them as in-use.
     foundIndex = RtlFindClearBitsAndSet(&bitmap, NumberOfBlocks, hintIndex);
 
-    if (foundIndex == -1)
+    if (foundIndex == ULONG_MAX)
     {
         // No more space.
         return NULL;
@@ -1248,7 +1248,7 @@ PPH_FP_BLOCK_HEADER PhFppAllocateBlocks(
 
     SegmentHeader->FreeBlocks -= NumberOfBlocks;
 
-    blockHeader = (PPH_FP_BLOCK_HEADER)((PCHAR)FirstBlock + (foundIndex << Pool->BlockShift));
+    blockHeader = (PPH_FP_BLOCK_HEADER)PTR_ADD_OFFSET(FirstBlock, (foundIndex << Pool->BlockShift));
     blockHeader->Flags = 0;
     blockHeader->Span = NumberOfBlocks;
 
@@ -1277,7 +1277,7 @@ VOID PhFppFreeBlocks(
     RtlInitializeBitMap(&bitmap, SegmentHeader->Bitmap, PH_FP_BLOCK_COUNT);
 
     // Mark the blocks as free.
-    startIndex = (ULONG)((PCHAR)BlockHeader - (PCHAR)FirstBlock) >> Pool->BlockShift;
+    startIndex = PtrToUlong(PTR_SUB_OFFSET(BlockHeader, FirstBlock)) >> Pool->BlockShift;
     blockSpan = BlockHeader->Span;
     RtlClearBits(&bitmap, startIndex, blockSpan);
     SegmentHeader->FreeBlocks += blockSpan;
@@ -1355,7 +1355,7 @@ BOOLEAN PhFppInsertFreeList(
 
     // Try to reference the segment before we commit any changes.
 
-    if (oldSegmentIndex != -1)
+    if (oldSegmentIndex != ULONG_MAX)
     {
         oldSegmentFirstBlock = PhFppReferenceSegment(Pool, oldSegmentIndex);
 
@@ -1365,11 +1365,11 @@ BOOLEAN PhFppInsertFreeList(
 
     // Insert the segment into the list.
 
-    SegmentHeader->FreeBlink = -1;
+    SegmentHeader->FreeBlink = ULONG_MAX;
     SegmentHeader->FreeFlink = oldSegmentIndex;
     Pool->Header->FreeLists[FreeListIndex] = SegmentIndex;
 
-    if (oldSegmentIndex != -1)
+    if (oldSegmentIndex != ULONG_MAX)
     {
         oldSegmentHeader = PhFppGetHeaderSegment(Pool, oldSegmentFirstBlock);
         oldSegmentHeader->FreeBlink = SegmentIndex;
@@ -1406,7 +1406,7 @@ BOOLEAN PhFppRemoveFreeList(
 
     // Try to reference the segments before we commit any changes.
 
-    if (flinkSegmentIndex != -1)
+    if (flinkSegmentIndex != ULONG_MAX)
     {
         flinkSegmentFirstBlock = PhFppReferenceSegment(Pool, flinkSegmentIndex);
 
@@ -1414,13 +1414,13 @@ BOOLEAN PhFppRemoveFreeList(
             return FALSE;
     }
 
-    if (blinkSegmentIndex != -1)
+    if (blinkSegmentIndex != ULONG_MAX)
     {
         blinkSegmentFirstBlock = PhFppReferenceSegment(Pool, blinkSegmentIndex);
 
         if (!blinkSegmentFirstBlock)
         {
-            if (flinkSegmentIndex != -1)
+            if (flinkSegmentIndex != ULONG_MAX)
                 PhFppDereferenceSegment(Pool, flinkSegmentIndex);
 
             return FALSE;
@@ -1429,14 +1429,14 @@ BOOLEAN PhFppRemoveFreeList(
 
     // Unlink the segment from the list.
 
-    if (flinkSegmentIndex != -1)
+    if (flinkSegmentIndex != ULONG_MAX)
     {
         flinkSegmentHeader = PhFppGetHeaderSegment(Pool, flinkSegmentFirstBlock);
         flinkSegmentHeader->FreeBlink = blinkSegmentIndex;
         PhFppDereferenceSegment(Pool, flinkSegmentIndex);
     }
 
-    if (blinkSegmentIndex != -1)
+    if (blinkSegmentIndex != ULONG_MAX)
     {
         blinkSegmentHeader = PhFppGetHeaderSegment(Pool, blinkSegmentFirstBlock);
         blinkSegmentHeader->FreeFlink = flinkSegmentIndex;
@@ -1480,7 +1480,7 @@ ULONG PhFppEncodeRva(
     _In_ PVOID Address
     )
 {
-    return (SegmentIndex << Pool->SegmentShift) + (ULONG)((PCHAR)Address - (PCHAR)FirstBlock);
+    return (SegmentIndex << Pool->SegmentShift) + PtrToUlong(PTR_SUB_OFFSET(Address, FirstBlock));
 }
 
 /**
@@ -1503,7 +1503,7 @@ ULONG PhFppDecodeRva(
     segmentIndex = Rva >> Pool->SegmentShift;
 
     if (segmentIndex >= Pool->Header->SegmentCount)
-        return -1;
+        return ULONG_MAX;
 
     *SegmentIndex = segmentIndex;
 

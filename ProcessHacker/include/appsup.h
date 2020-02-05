@@ -6,9 +6,7 @@ extern GUID VISTA_CONTEXT_GUID;
 extern GUID WIN7_CONTEXT_GUID;
 extern GUID WIN8_CONTEXT_GUID;
 extern GUID WINBLUE_CONTEXT_GUID;
-extern GUID WINTHRESHOLD_CONTEXT_GUID;
-
-typedef struct PACKAGE_ID PACKAGE_ID;
+extern GUID WIN10_CONTEXT_GUID;
 
 // begin_phapppub
 PHAPPAPI
@@ -17,23 +15,18 @@ NTAPI
 PhGetProcessIsSuspended(
     _In_ PSYSTEM_PROCESS_INFORMATION Process
     );
+
+PHAPPAPI
+BOOLEAN
+NTAPI
+PhIsProcessSuspended(
+    _In_ HANDLE ProcessId
+    );
 // end_phapppub
 
 NTSTATUS PhGetProcessSwitchContext(
     _In_ HANDLE ProcessHandle,
     _Out_ PGUID Guid
-    );
-
-PPH_STRING PhGetProcessPackageFullName(
-    _In_ HANDLE ProcessHandle
-    );
-
-PACKAGE_ID *PhPackageIdFromFullName(
-    _In_ PWSTR PackageFullName
-    );
-
-PPH_STRING PhGetPackagePath(
-    _In_ PACKAGE_ID *PackageId
     );
 
 // begin_phapppub
@@ -54,6 +47,8 @@ typedef enum _PH_KNOWN_PROCESS_TYPE
     TaskHostProcessType, // taskeng, taskhost, taskhostex
     ExplorerProcessType, // explorer
     UmdfHostProcessType, // wudfhost
+    EdgeProcessType, // Microsoft Edge
+    WmiProviderHostType,
     MaximumProcessType,
     KnownProcessTypeMask = 0xffff,
 
@@ -66,6 +61,14 @@ NTAPI
 PhGetProcessKnownType(
     _In_ HANDLE ProcessHandle,
     _Out_ PH_KNOWN_PROCESS_TYPE *KnownProcessType
+    );
+
+PHAPPAPI
+PH_KNOWN_PROCESS_TYPE
+NTAPI
+PhGetProcessKnownTypeEx(
+    _In_ HANDLE ProcessId,
+    _In_ PPH_STRING FileName
     );
 
 typedef union _PH_KNOWN_PROCESS_COMMAND_LINE
@@ -88,6 +91,7 @@ typedef union _PH_KNOWN_PROCESS_COMMAND_LINE
 } PH_KNOWN_PROCESS_COMMAND_LINE, *PPH_KNOWN_PROCESS_COMMAND_LINE;
 
 PHAPPAPI
+_Success_(return)
 BOOLEAN
 NTAPI
 PhaGetProcessKnownCommandLine(
@@ -96,18 +100,6 @@ PhaGetProcessKnownCommandLine(
     _Out_ PPH_KNOWN_PROCESS_COMMAND_LINE KnownCommandLine
     );
 // end_phapppub
-
-VOID PhEnumChildWindows(
-    _In_opt_ HWND hWnd,
-    _In_ ULONG Limit,
-    _In_ WNDENUMPROC Callback,
-    _In_ LPARAM lParam
-    );
-
-HWND PhGetProcessMainWindow(
-    _In_ HANDLE ProcessId,
-    _In_opt_ HANDLE ProcessHandle
-    );
 
 PPH_STRING PhGetServiceRelevantFileName(
     _In_ PPH_STRINGREF ServiceName,
@@ -122,12 +114,6 @@ PPH_STRING PhEscapeStringForDelimiter(
 PPH_STRING PhUnescapeStringForDelimiter(
     _In_ PPH_STRING String,
     _In_ WCHAR Delimiter
-    );
-
-typedef struct mxml_node_s mxml_node_t;
-
-PPH_STRING PhGetOpaqueXmlNodeText(
-    _In_ mxml_node_t *node
     );
 
 // begin_phapppub
@@ -156,13 +142,7 @@ NTAPI
 PhLoadSymbolProviderOptions(
     _Inout_ PPH_SYMBOL_PROVIDER SymbolProvider
     );
-// end_phapppub
 
-PWSTR PhMakeContextAtom(
-    VOID
-    );
-
-// begin_phapppub
 PHAPPAPI
 VOID
 NTAPI
@@ -185,19 +165,20 @@ PhHandleListViewNotifyForCopy(
     _In_ LPARAM lParam,
     _In_ HWND ListViewHandle
     );
-// end_phapppub
 
 #define PH_LIST_VIEW_CTRL_C_BEHAVIOR 0x1
 #define PH_LIST_VIEW_CTRL_A_BEHAVIOR 0x2
 #define PH_LIST_VIEW_DEFAULT_1_BEHAVIORS (PH_LIST_VIEW_CTRL_C_BEHAVIOR | PH_LIST_VIEW_CTRL_A_BEHAVIOR)
 
-VOID PhHandleListViewNotifyBehaviors(
+PHAPPAPI
+VOID
+NTAPI
+PhHandleListViewNotifyBehaviors(
     _In_ LPARAM lParam,
     _In_ HWND ListViewHandle,
     _In_ ULONG Behaviors
     );
 
-// begin_phapppub
 PHAPPAPI
 BOOLEAN
 NTAPI
@@ -206,11 +187,6 @@ PhGetListViewContextMenuPoint(
     _Out_ PPOINT Point
     );
 // end_phapppub
-
-HFONT PhDuplicateFontWithNewWeight(
-    _In_ HFONT Font,
-    _In_ LONG NewWeight
-    );
 
 VOID PhSetWindowOpacity(
     _In_ HWND WindowHandle,
@@ -221,40 +197,6 @@ VOID PhSetWindowOpacity(
 #define PH_ID_TO_OPACITY(Id) (100 - (((Id) - ID_OPACITY_10) + 1) * 10)
 
 // begin_phapppub
-PHAPPAPI
-VOID
-NTAPI
-PhLoadWindowPlacementFromSetting(
-    _In_opt_ PWSTR PositionSettingName,
-    _In_opt_ PWSTR SizeSettingName,
-    _In_ HWND WindowHandle
-    );
-
-PHAPPAPI
-VOID
-NTAPI
-PhSaveWindowPlacementToSetting(
-    _In_opt_ PWSTR PositionSettingName,
-    _In_opt_ PWSTR SizeSettingName,
-    _In_ HWND WindowHandle
-    );
-
-PHAPPAPI
-VOID
-NTAPI
-PhLoadListViewColumnsFromSetting(
-    _In_ PWSTR Name,
-    _In_ HWND ListViewHandle
-    );
-
-PHAPPAPI
-VOID
-NTAPI
-PhSaveListViewColumnsToSetting(
-    _In_ PWSTR Name,
-    _In_ HWND ListViewHandle
-    );
-
 PHAPPAPI
 PPH_STRING
 NTAPI
@@ -268,8 +210,15 @@ NTAPI
 PhGetPhVersionNumbers(
     _Out_opt_ PULONG MajorVersion,
     _Out_opt_ PULONG MinorVersion,
-    _Reserved_ PULONG Reserved,
+    _Out_opt_ PULONG BuildNumber,
     _Out_opt_ PULONG RevisionNumber
+    );
+
+PHAPPAPI
+PPH_STRING
+NTAPI
+PhGetPhVersionHash(
+    VOID
     );
 
 PHAPPAPI
@@ -427,7 +376,6 @@ NTAPI
 PhApplyTreeNewFilters(
     _In_ PPH_TN_FILTER_SUPPORT Support
     );
-// end_phapppub
 
 typedef struct _PH_COPY_CELL_CONTEXT
 {
@@ -436,16 +384,48 @@ typedef struct _PH_COPY_CELL_CONTEXT
     PPH_STRING MenuItemText;
 } PH_COPY_CELL_CONTEXT, *PPH_COPY_CELL_CONTEXT;
 
-BOOLEAN PhInsertCopyCellEMenuItem(
+PHAPPAPI
+BOOLEAN
+NTAPI
+PhInsertCopyCellEMenuItem(
     _In_ struct _PH_EMENU_ITEM *Menu,
     _In_ ULONG InsertAfterId,
     _In_ HWND TreeNewHandle,
     _In_ PPH_TREENEW_COLUMN Column
     );
 
-BOOLEAN PhHandleCopyCellEMenuItem(
+PHAPPAPI
+BOOLEAN
+NTAPI
+PhHandleCopyCellEMenuItem(
     _In_ struct _PH_EMENU_ITEM *SelectedItem
     );
+
+typedef struct _PH_COPY_ITEM_CONTEXT
+{
+    HWND ListViewHandle;
+    ULONG Id;
+    ULONG SubId;
+    PPH_STRING MenuItemText;
+} PH_COPY_ITEM_CONTEXT, *PPH_COPY_ITEM_CONTEXT;
+
+PHAPPAPI
+BOOLEAN
+NTAPI
+PhInsertCopyListViewEMenuItem(
+    _In_ struct _PH_EMENU_ITEM *Menu,
+    _In_ ULONG InsertAfterId,
+    _In_ HWND ListViewHandle
+    );
+
+PHAPPAPI
+BOOLEAN
+NTAPI
+PhHandleCopyListViewEMenuItem(
+    _In_ struct _PH_EMENU_ITEM *SelectedItem
+    );
+
+// end_phapppub
 
 BOOLEAN PhShellOpenKey2(
     _In_ HWND hWnd,
@@ -456,15 +436,19 @@ PPH_STRING PhPcre2GetErrorMessage(
     _In_ INT ErrorCode
     );
 
-#define PH_LOAD_SHARED_ICON_SMALL(Name) PhLoadIcon(PhInstanceHandle, (Name), PH_LOAD_ICON_SHARED | PH_LOAD_ICON_SIZE_SMALL, 0, 0)
-#define PH_LOAD_SHARED_ICON_LARGE(Name) PhLoadIcon(PhInstanceHandle, (Name), PH_LOAD_ICON_SHARED | PH_LOAD_ICON_SIZE_LARGE, 0, 0)
+HBITMAP PhGetShieldBitmap(
+    VOID
+    );
+
+#define PH_LOAD_SHARED_ICON_SMALL(BaseAddress, Name) PhLoadIcon(BaseAddress, (Name), PH_LOAD_ICON_SHARED | PH_LOAD_ICON_SIZE_SMALL, 0, 0) // phapppub
+#define PH_LOAD_SHARED_ICON_LARGE(BaseAddress, Name) PhLoadIcon(BaseAddress, (Name), PH_LOAD_ICON_SHARED | PH_LOAD_ICON_SIZE_LARGE, 0, 0) // phapppub
 
 FORCEINLINE PVOID PhpGenericPropertyPageHeader(
     _In_ HWND hwndDlg,
     _In_ UINT uMsg,
     _In_ WPARAM wParam,
     _In_ LPARAM lParam,
-    _In_ PWSTR ContextName
+    _In_ ULONG ContextHash
     )
 {
     PVOID context;
@@ -476,18 +460,18 @@ FORCEINLINE PVOID PhpGenericPropertyPageHeader(
             LPPROPSHEETPAGE propSheetPage = (LPPROPSHEETPAGE)lParam;
 
             context = (PVOID)propSheetPage->lParam;
-            SetProp(hwndDlg, ContextName, (HANDLE)context);
+            PhSetWindowContext(hwndDlg, ContextHash, context);
         }
         break;
     case WM_DESTROY:
         {
-            context = (PVOID)GetProp(hwndDlg, ContextName);
-            RemoveProp(hwndDlg, ContextName);
+            context = PhGetWindowContext(hwndDlg, ContextHash);
+            PhRemoveWindowContext(hwndDlg, ContextHash);
         }
         break;
     default:
         {
-            context = (PVOID)GetProp(hwndDlg, ContextName);
+            context = PhGetWindowContext(hwndDlg, ContextHash);
         }
         break;
     }

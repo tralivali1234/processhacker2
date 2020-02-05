@@ -37,7 +37,7 @@ typedef struct _SERVICE_OTHER_CONTEXT
     };
     HWND PrivilegesLv;
     PPH_LIST PrivilegeList;
-
+    PH_LAYOUT_MANAGER LayoutManager;
     ULONG OriginalLaunchProtected;
 } SERVICE_OTHER_CONTEXT, *PSERVICE_OTHER_CONTEXT;
 
@@ -92,7 +92,7 @@ ULONG EspGetServiceSidTypeInteger(
         ))
         return integer;
     else
-        return -1;
+        return ULONG_MAX;
 }
 
 PWSTR EspGetServiceLaunchProtectedString(
@@ -126,7 +126,7 @@ ULONG EspGetServiceLaunchProtectedInteger(
         ))
         return integer;
     else
-        return -1;
+        return ULONG_MAX;
 }
 
 NTSTATUS EspLoadOtherInfo(
@@ -154,7 +154,7 @@ NTSTATUS EspLoadOtherInfo(
         &returnLength
         ))
     {
-        SetDlgItemInt(hwndDlg, IDC_PRESHUTDOWNTIMEOUT, preshutdownInfo.dwPreshutdownTimeout, FALSE);
+        PhSetDialogItemValue(hwndDlg, IDC_PRESHUTDOWNTIMEOUT, preshutdownInfo.dwPreshutdownTimeout, FALSE);
         Context->PreshutdownTimeoutValid = TRUE;
     }
 
@@ -319,14 +319,14 @@ INT_PTR CALLBACK EspServiceOtherDlgProc(
         context = PhAllocate(sizeof(SERVICE_OTHER_CONTEXT));
         memset(context, 0, sizeof(SERVICE_OTHER_CONTEXT));
 
-        SetProp(hwndDlg, L"Context", (HANDLE)context);
+        PhSetWindowContext(hwndDlg, PH_WINDOW_CONTEXT_DEFAULT, context);
     }
     else
     {
-        context = (PSERVICE_OTHER_CONTEXT)GetProp(hwndDlg, L"Context");
+        context = PhGetWindowContext(hwndDlg, PH_WINDOW_CONTEXT_DEFAULT);
 
         if (uMsg == WM_DESTROY)
-            RemoveProp(hwndDlg, L"Context");
+            PhRemoveWindowContext(hwndDlg, PH_WINDOW_CONTEXT_DEFAULT);
     }
 
     if (!context)
@@ -368,22 +368,38 @@ INT_PTR CALLBACK EspServiceOtherDlgProc(
             if (WindowsVersion < WINDOWS_8_1)
                 EnableWindow(GetDlgItem(hwndDlg, IDC_PROTECTION), FALSE);
 
-            SetDlgItemText(hwndDlg, IDC_SERVICESID,
+            PhSetDialogItemText(hwndDlg, IDC_SERVICESID,
                 PhGetStringOrDefault(PH_AUTO(EspGetServiceSidString(&serviceItem->Name->sr)), L"N/A"));
 
             status = EspLoadOtherInfo(hwndDlg, context);
 
             if (!NT_SUCCESS(status))
             {
-                PhShowWarning(hwndDlg, L"Unable to query service information: %s",
-                    ((PPH_STRING)PH_AUTO(PhGetNtMessage(status)))->Buffer);
+                PPH_STRING errorMessage = PhGetNtMessage(status);
+
+                PhShowWarning(
+                    hwndDlg,
+                    L"Unable to query service information: %s",
+                    PhGetStringOrDefault(errorMessage, L"Unknown error.")
+                    );
+
+                PhClearReference(&errorMessage);
             }
 
             context->Ready = TRUE;
+
+            PhInitializeLayoutManager(&context->LayoutManager, hwndDlg);
+            PhAddLayoutItem(&context->LayoutManager, GetDlgItem(hwndDlg, IDC_PRIVILEGES), NULL, PH_ANCHOR_ALL);
+            PhAddLayoutItem(&context->LayoutManager, GetDlgItem(hwndDlg, IDC_ADD), NULL, PH_ANCHOR_BOTTOM | PH_ANCHOR_RIGHT);
+            PhAddLayoutItem(&context->LayoutManager, GetDlgItem(hwndDlg, IDC_REMOVE), NULL, PH_ANCHOR_BOTTOM | PH_ANCHOR_RIGHT);
+
+            PhInitializeWindowTheme(hwndDlg, !!PhGetIntegerSetting(L"EnableThemeSupport"));
         }
         break;
     case WM_DESTROY:
         {
+            PhDeleteLayoutManager(&context->LayoutManager);
+
             if (context->PrivilegeList)
             {
                 PhDereferenceObjects(context->PrivilegeList->Items, context->PrivilegeList->Count);
@@ -395,7 +411,7 @@ INT_PTR CALLBACK EspServiceOtherDlgProc(
         break;
     case WM_COMMAND:
         {
-            switch (LOWORD(wParam))
+            switch (GET_WM_COMMAND_ID(wParam, lParam))
             {
             case IDC_ADD:
                 {
@@ -521,7 +537,7 @@ INT_PTR CALLBACK EspServiceOtherDlgProc(
                     {
                         index = PhFindItemList(context->PrivilegeList, privilegeString);
 
-                        if (index != -1)
+                        if (index != ULONG_MAX)
                         {
                             PhDereferenceObject(privilegeString);
                             PhRemoveItemList(context->PrivilegeList, index);
@@ -535,7 +551,7 @@ INT_PTR CALLBACK EspServiceOtherDlgProc(
                 break;
             }
 
-            switch (HIWORD(wParam))
+            switch (GET_WM_COMMAND_CMD(wParam, lParam))
             {
             case EN_CHANGE:
             case CBN_SELCHANGE:
@@ -544,7 +560,7 @@ INT_PTR CALLBACK EspServiceOtherDlgProc(
                     {
                         context->Dirty = TRUE;
 
-                        switch (LOWORD(wParam))
+                        switch (GET_WM_COMMAND_ID(wParam, lParam))
                         {
                         case IDC_PRESHUTDOWNTIMEOUT:
                             context->PreshutdownTimeoutValid = TRUE;
@@ -576,7 +592,7 @@ INT_PTR CALLBACK EspServiceOtherDlgProc(
             case PSN_APPLY:
                 {
                     SC_HANDLE serviceHandle = NULL;
-                    ULONG win32Result = 0;
+                    ULONG win32Result = ERROR_SUCCESS;
                     BOOLEAN connectedToPhSvc = FALSE;
                     PPH_STRING launchProtectedString;
                     ULONG launchProtected;
@@ -615,7 +631,7 @@ INT_PTR CALLBACK EspServiceOtherDlgProc(
                                 // Elevate using phsvc.
                                 if (PhUiConnectToPhSvc(hwndDlg, FALSE))
                                 {
-                                    win32Result = 0;
+                                    win32Result = ERROR_SUCCESS;
                                     connectedToPhSvc = TRUE;
                                 }
                                 else
@@ -633,7 +649,7 @@ INT_PTR CALLBACK EspServiceOtherDlgProc(
 
                         if (context->PreshutdownTimeoutValid)
                         {
-                            preshutdownInfo.dwPreshutdownTimeout = GetDlgItemInt(hwndDlg, IDC_PRESHUTDOWNTIMEOUT, NULL, FALSE);
+                            preshutdownInfo.dwPreshutdownTimeout = PhGetDialogItemValue(hwndDlg, IDC_PRESHUTDOWNTIMEOUT);
 
                             if (!EspChangeServiceConfig2(context->ServiceItem->Name->Buffer, serviceHandle,
                                 SERVICE_CONFIG_PRESHUTDOWN_INFO, &preshutdownInfo))
@@ -657,7 +673,7 @@ INT_PTR CALLBACK EspServiceOtherDlgProc(
 
                             requiredPrivilegesInfo.pmszRequiredPrivileges = sb.String->Buffer;
 
-                            if (win32Result == 0 && !EspChangeServiceConfig2(context->ServiceItem->Name->Buffer, serviceHandle,
+                            if (win32Result == ERROR_SUCCESS && !EspChangeServiceConfig2(context->ServiceItem->Name->Buffer, serviceHandle,
                                 SERVICE_CONFIG_REQUIRED_PRIVILEGES_INFO, &requiredPrivilegesInfo))
                             {
                                 win32Result = GetLastError();
@@ -673,7 +689,7 @@ INT_PTR CALLBACK EspServiceOtherDlgProc(
                             sidTypeString = PH_AUTO(PhGetWindowText(GetDlgItem(hwndDlg, IDC_SIDTYPE)));
                             sidInfo.dwServiceSidType = EspGetServiceSidTypeInteger(sidTypeString->Buffer);
 
-                            if (win32Result == 0 && !EspChangeServiceConfig2(context->ServiceItem->Name->Buffer, serviceHandle,
+                            if (win32Result == ERROR_SUCCESS && !EspChangeServiceConfig2(context->ServiceItem->Name->Buffer, serviceHandle,
                                 SERVICE_CONFIG_SERVICE_SID_INFO, &sidInfo))
                             {
                                 win32Result = GetLastError();
@@ -698,17 +714,21 @@ Done:
                         if (serviceHandle)
                             CloseServiceHandle(serviceHandle);
 
-                        if (win32Result != 0)
+                        if (win32Result != ERROR_SUCCESS)
                         {
+                            PPH_STRING errorMessage = PhGetWin32Message(win32Result);
+
                             if (win32Result == ERROR_CANCELLED || PhShowMessage(
                                 hwndDlg,
                                 MB_ICONERROR | MB_RETRYCANCEL,
                                 L"Unable to change service information: %s",
-                                ((PPH_STRING)PH_AUTO(PhGetWin32Message(win32Result)))->Buffer
+                                PhGetStringOrDefault(errorMessage, L"Unknown error.")
                                 ) == IDRETRY)
                             {
                                 SetWindowLongPtr(hwndDlg, DWLP_MSGRESULT, PSNRET_INVALID);
                             }
+
+                            PhClearReference(&errorMessage);
                         }
                     }
 
@@ -724,6 +744,11 @@ Done:
                 }
                 break;
             }
+        }
+        break;
+    case WM_SIZE:
+        {
+            PhLayoutManagerLayout(&context->LayoutManager);
         }
         break;
     }

@@ -23,29 +23,26 @@ HPROPSHEETPAGE
 NTAPI
 PhCreateSecurityPage(
     _In_ PWSTR ObjectName,
-    _In_ PPH_GET_OBJECT_SECURITY GetObjectSecurity,
-    _In_ PPH_SET_OBJECT_SECURITY SetObjectSecurity,
-    _In_opt_ PVOID Context,
-    _In_ PPH_ACCESS_ENTRY AccessEntries,
-    _In_ ULONG NumberOfAccessEntries
+    _In_ PWSTR ObjectType,
+    _In_ PPH_OPEN_OBJECT OpenObject,
+    _In_opt_ PPH_CLOSE_OBJECT CloseObject,
+    _In_opt_ PVOID Context
     );
 
 PHLIBAPI
 VOID
 NTAPI
 PhEditSecurity(
-    _In_ HWND hWnd,
+    _In_opt_ HWND WindowHandle,
     _In_ PWSTR ObjectName,
-    _In_ PPH_GET_OBJECT_SECURITY GetObjectSecurity,
-    _In_ PPH_SET_OBJECT_SECURITY SetObjectSecurity,
-    _In_opt_ PVOID Context,
-    _In_ PPH_ACCESS_ENTRY AccessEntries,
-    _In_ ULONG NumberOfAccessEntries
+    _In_ PWSTR ObjectType,
+    _In_ PPH_OPEN_OBJECT OpenCallback,
+    _In_opt_ PPH_CLOSE_OBJECT CloseCallback,
+    _In_opt_ PVOID Context
     );
 
 typedef struct _PH_STD_OBJECT_SECURITY
 {
-    PPH_OPEN_OBJECT OpenObject;
     PWSTR ObjectType;
     PVOID Context;
 } PH_STD_OBJECT_SECURITY, *PPH_STD_OBJECT_SECURITY;
@@ -59,7 +56,10 @@ FORCEINLINE ACCESS_MASK PhGetAccessForGetSecurity(
     if (
         (SecurityInformation & OWNER_SECURITY_INFORMATION) ||
         (SecurityInformation & GROUP_SECURITY_INFORMATION) ||
-        (SecurityInformation & DACL_SECURITY_INFORMATION)
+        (SecurityInformation & DACL_SECURITY_INFORMATION) ||
+        (SecurityInformation & LABEL_SECURITY_INFORMATION) ||
+        (SecurityInformation & ATTRIBUTE_SECURITY_INFORMATION) ||
+        (SecurityInformation & SCOPE_SECURITY_INFORMATION)
         )
     {
         access |= READ_CONTROL;
@@ -68,6 +68,11 @@ FORCEINLINE ACCESS_MASK PhGetAccessForGetSecurity(
     if (SecurityInformation & SACL_SECURITY_INFORMATION)
     {
         access |= ACCESS_SYSTEM_SECURITY;
+    }
+
+    if (SecurityInformation & BACKUP_SECURITY_INFORMATION)
+    {
+        access |= READ_CONTROL | ACCESS_SYSTEM_SECURITY;
     }
 
     return access;
@@ -81,20 +86,36 @@ FORCEINLINE ACCESS_MASK PhGetAccessForSetSecurity(
 
     if (
         (SecurityInformation & OWNER_SECURITY_INFORMATION) ||
-        (SecurityInformation & GROUP_SECURITY_INFORMATION)
+        (SecurityInformation & GROUP_SECURITY_INFORMATION) ||
+        (SecurityInformation & LABEL_SECURITY_INFORMATION)
         )
     {
         access |= WRITE_OWNER;
     }
 
-    if (SecurityInformation & DACL_SECURITY_INFORMATION)
+    if (
+        (SecurityInformation & DACL_SECURITY_INFORMATION) ||
+        (SecurityInformation & ATTRIBUTE_SECURITY_INFORMATION) ||
+        (SecurityInformation & PROTECTED_DACL_SECURITY_INFORMATION) ||
+        (SecurityInformation & UNPROTECTED_DACL_SECURITY_INFORMATION)
+        )
     {
         access |= WRITE_DAC;
     }
 
-    if (SecurityInformation & SACL_SECURITY_INFORMATION)
+    if (
+        (SecurityInformation & SACL_SECURITY_INFORMATION) ||
+        (SecurityInformation & SCOPE_SECURITY_INFORMATION) ||
+        (SecurityInformation & PROTECTED_SACL_SECURITY_INFORMATION) ||
+        (SecurityInformation & UNPROTECTED_SACL_SECURITY_INFORMATION)
+        )
     {
         access |= ACCESS_SYSTEM_SECURITY;
+    }
+
+    if (SecurityInformation & BACKUP_SECURITY_INFORMATION)
+    {
+        access |= WRITE_DAC | WRITE_OWNER | ACCESS_SYSTEM_SECURITY;
     }
 
     return access;

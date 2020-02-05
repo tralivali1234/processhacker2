@@ -12,30 +12,29 @@ typedef struct _PH_THREAD_ITEM
     LARGE_INTEGER CreateTime;
     LARGE_INTEGER KernelTime;
     LARGE_INTEGER UserTime;
-
-    FLOAT CpuUsage;
     PH_UINT64_DELTA CpuKernelDelta;
     PH_UINT64_DELTA CpuUserDelta;
-
     PH_UINT32_DELTA ContextSwitchesDelta;
     PH_UINT64_DELTA CyclesDelta;
+
+    FLOAT CpuUsage;
     LONG Priority;
     LONG BasePriority;
+    KTHREAD_STATE State;
+    KWAIT_REASON WaitReason;
+    LONG BasePriorityIncrement;
+
+    HANDLE ThreadHandle;
+
+    PPH_STRING ServiceName;
+
     ULONG64 StartAddress;
     PPH_STRING StartAddressString;
     PPH_STRING StartAddressFileName;
     enum _PH_SYMBOL_RESOLVE_LEVEL StartAddressResolveLevel;
-    KTHREAD_STATE State;
-    KWAIT_REASON WaitReason;
-    LONG BasePriorityIncrement;
-    PPH_STRING ServiceName;
-
-    HANDLE ThreadHandle;
 
     BOOLEAN IsGuiThread;
     BOOLEAN JustResolved;
-
-    WCHAR ThreadIdString[PH_INT32_STR_LEN_1];
 } PH_THREAD_ITEM, *PPH_THREAD_ITEM;
 
 typedef enum _PH_KNOWN_PROCESS_TYPE PH_KNOWN_PROCESS_TYPE;
@@ -64,10 +63,6 @@ typedef struct _PH_THREAD_PROVIDER
     ULONG64 SymbolsLoadedRunId;
 } PH_THREAD_PROVIDER, *PPH_THREAD_PROVIDER;
 // end_phapppub
-
-BOOLEAN PhThreadProviderInitialization(
-    VOID
-    );
 
 PPH_THREAD_PROVIDER PhCreateThreadProvider(
     _In_ HANDLE ProcessId

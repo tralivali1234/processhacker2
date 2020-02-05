@@ -3,6 +3,7 @@
  *   thread list extensions
  *
  * Copyright (C) 2015 wj32
+ * Copyright (C) 2018 dmex
  *
  * This file is part of Process Hacker.
  *
@@ -22,6 +23,7 @@
 
 #include "dn.h"
 #include "clrsup.h"
+#include "svcext.h"
 
 VOID NTAPI ThreadsContextCreateCallback(
     _In_ PVOID Object,
@@ -43,6 +45,7 @@ LONG ThreadTreeNewSortFunction(
     _In_ PVOID Node1,
     _In_ PVOID Node2,
     _In_ ULONG SubId,
+    _In_ PH_SORT_ORDER SortOrder,
     _In_ PVOID Context
     );
 
@@ -52,7 +55,12 @@ typedef struct _THREAD_TREE_CONTEXT
 {
     ULONG Type;
     HANDLE ProcessId;
+#if _WIN64
+    BOOLEAN IsWow64;
+    BOOLEAN ConnectedToPhSvc;
+#endif
     PH_CALLBACK_REGISTRATION AddedCallbackRegistration;
+    PH_CALLBACK_REGISTRATION RemovedCallbackRegistration;
     PCLR_PROCESS_SUPPORT Support;
 } THREAD_TREE_CONTEXT, *PTHREAD_TREE_CONTEXT;
 
@@ -128,11 +136,33 @@ static VOID ThreadAddedHandler(
 {
     PPH_THREAD_ITEM threadItem = Parameter;
     PDN_THREAD_ITEM dnThread;
-    PTHREAD_TREE_CONTEXT context = Context;
+
+    if (!threadItem)
+        return;
 
     dnThread = PhPluginGetObjectExtension(PluginInstance, threadItem, EmThreadItemType);
     memset(dnThread, 0, sizeof(DN_THREAD_ITEM));
     dnThread->ThreadItem = threadItem;
+}
+
+static VOID ThreadRemovedHandler(
+    _In_opt_ PVOID Parameter,
+    _In_opt_ PVOID Context
+    )
+{
+    PPH_THREAD_ITEM threadItem = Parameter;
+    PDN_THREAD_ITEM dnThread;
+    PTHREAD_TREE_CONTEXT context = Context;
+
+    if (!threadItem)
+        return;
+
+    dnThread = PhPluginGetObjectExtension(PluginInstance, threadItem, EmThreadItemType);
+
+    if (dnThread)
+    {
+        PhClearReference(&dnThread->AppDomainText);
+    }
 }
 
 VOID NTAPI ThreadsContextCreateCallback(
@@ -154,6 +184,13 @@ VOID NTAPI ThreadsContextCreateCallback(
         context,
         &context->AddedCallbackRegistration
         );
+
+    PhRegisterCallback(
+        &threadsContext->Provider->ThreadRemovedEvent,
+        ThreadRemovedHandler,
+        context,
+        &context->RemovedCallbackRegistration
+        );
 }
 
 VOID NTAPI ThreadsContextDeleteCallback(
@@ -170,8 +207,21 @@ VOID NTAPI ThreadsContextDeleteCallback(
         &context->AddedCallbackRegistration
         );
 
+    PhUnregisterCallback(
+        &threadsContext->Provider->ThreadRemovedEvent,
+        &context->RemovedCallbackRegistration
+        );
+
     if (context->Support)
         FreeClrProcessSupport(context->Support);
+
+#if _WIN64
+    if (context->ConnectedToPhSvc)
+    {
+        PhUiDisconnectFromPhSvc();
+        context->ConnectedToPhSvc = FALSE;
+    }
+#endif
 }
 
 VOID ThreadTreeNewInitializing(
@@ -188,14 +238,31 @@ VOID ThreadTreeNewInitializing(
 
     if (NT_SUCCESS(PhGetProcessIsDotNet(threadsContext->Provider->ProcessId, &isDotNet)) && isDotNet)
     {
-        PCLR_PROCESS_SUPPORT support;
+#if _WIN64
+        HANDLE processHandle;
 
-        support = CreateClrProcessSupport(threadsContext->Provider->ProcessId);
+        if (NT_SUCCESS(PhOpenProcess(&processHandle, PROCESS_QUERY_LIMITED_INFORMATION, threadsContext->Provider->ProcessId)))
+        {
+            PhGetProcessIsWow64(processHandle, &context->IsWow64);
+            NtClose(processHandle);
+        }
 
-        if (!support)
-            return;
+        if (context->IsWow64)
+        {
+            context->ConnectedToPhSvc = PhUiConnectToPhSvcEx(NULL, Wow64PhSvcMode, FALSE);
+        }
+        else
+#endif
+        {
+            PCLR_PROCESS_SUPPORT support;
 
-        context->Support = support;
+            support = CreateClrProcessSupport(threadsContext->Provider->ProcessId);
+
+            if (!support)
+                return;
+
+            context->Support = support;
+        }
 
         AddTreeNewColumn(info, context, DNTHTNC_APPDOMAIN, TRUE, L"AppDomain", 120, PH_ALIGN_LEFT, 0, FALSE, ThreadTreeNewSortFunction);
     }
@@ -215,24 +282,38 @@ VOID UpdateThreadClrData(
 {
     if (!DnThread->ClrDataValid)
     {
-        IXCLRDataProcess *process;
-        IXCLRDataTask *task;
-        IXCLRDataAppDomain *appDomain;
+        PhClearReference(&DnThread->AppDomainText);
 
-        if (Context->Support)
-            process = Context->Support->DataProcess;
-        else
-            return;
-
-        if (SUCCEEDED(IXCLRDataProcess_GetTaskByOSThreadID(process, HandleToUlong(DnThread->ThreadItem->ThreadId), &task)))
+#if _WIN64
+        if (Context->IsWow64)
         {
-            if (SUCCEEDED(IXCLRDataTask_GetCurrentAppDomain(task, &appDomain)))
+            if (Context->ConnectedToPhSvc)
             {
-                DnThread->AppDomainText = GetNameXClrDataAppDomain(appDomain);
-                IXCLRDataAppDomain_Release(appDomain);
+                DnThread->AppDomainText = CallGetClrThreadAppDomain(Context->ProcessId, DnThread->ThreadItem->ThreadId);
             }
+        }
+        else
+#endif
+        {
+            if (Context->Support)
+            {
+                IXCLRDataProcess *process;
+                IXCLRDataTask *task;
+                IXCLRDataAppDomain *appDomain;
 
-            IXCLRDataTask_Release(task);
+                process = Context->Support->DataProcess;
+
+                if (SUCCEEDED(IXCLRDataProcess_GetTaskByOSThreadID(process, HandleToUlong(DnThread->ThreadItem->ThreadId), &task)))
+                {
+                    if (SUCCEEDED(IXCLRDataTask_GetCurrentAppDomain(task, &appDomain)))
+                    {
+                        DnThread->AppDomainText = GetNameXClrDataAppDomain(appDomain);
+                        IXCLRDataAppDomain_Release(appDomain);
+                    }
+
+                    IXCLRDataTask_Release(task);
+                }
+            }
         }
 
         DnThread->ClrDataValid = TRUE;
@@ -268,6 +349,7 @@ LONG ThreadTreeNewSortFunction(
     _In_ PVOID Node1,
     _In_ PVOID Node2,
     _In_ ULONG SubId,
+    _In_ PH_SORT_ORDER SortOrder,
     _In_ PVOID Context
     )
 {
@@ -288,7 +370,7 @@ LONG ThreadTreeNewSortFunction(
     case DNTHTNC_APPDOMAIN:
         UpdateThreadClrData(context, dnThread1);
         UpdateThreadClrData(context, dnThread2);
-        result = PhCompareStringWithNull(dnThread1->AppDomainText, dnThread2->AppDomainText, TRUE);
+        result = PhCompareStringWithNullSortOrder(dnThread1->AppDomainText, dnThread2->AppDomainText, SortOrder, TRUE);
         break;
     }
 

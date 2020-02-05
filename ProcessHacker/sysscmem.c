@@ -27,9 +27,10 @@
 #include <kphuser.h>
 #include <symprv.h>
 #include <workqueue.h>
+#include <settings.h>
 
 #include <procprv.h>
-#include <settings.h>
+#include <phsettings.h>
 
 static PPH_SYSINFO_SECTION MemorySection;
 static HWND MemoryDialog;
@@ -49,6 +50,8 @@ static PH_UINT32_DELTA PageFaultsDelta;
 static PH_UINT32_DELTA PageReadsDelta;
 static PH_UINT32_DELTA PagefileWritesDelta;
 static PH_UINT32_DELTA MappedWritesDelta;
+static PH_UINT64_DELTA MappedIoReadDelta;
+static PH_UINT64_DELTA MappedIoWritesDelta;
 static BOOLEAN MmAddressesInitialized;
 static PSIZE_T MmSizeOfPagedPoolInBytes;
 static PSIZE_T MmMaximumNonPagedPoolInBytes;
@@ -89,6 +92,9 @@ BOOLEAN PhSipMemorySectionCallback(
         {
             PPH_SYSINFO_CREATE_DIALOG createDialog = Parameter1;
 
+            if (!createDialog)
+                break;
+
             createDialog->Instance = PhInstanceHandle;
             createDialog->Template = MAKEINTRESOURCE(IDD_SYSINFO_MEM);
             createDialog->DialogProc = PhSipMemoryDialogProc;
@@ -98,6 +104,9 @@ BOOLEAN PhSipMemorySectionCallback(
         {
             PPH_GRAPH_DRAW_INFO drawInfo = Parameter1;
             ULONG i;
+
+            if (!drawInfo)
+                break;
 
             if (PhGetIntegerSetting(L"ShowCommitInSummary"))
             {
@@ -158,13 +167,16 @@ BOOLEAN PhSipMemorySectionCallback(
             PPH_SYSINFO_GRAPH_GET_TOOLTIP_TEXT getTooltipText = Parameter1;
             ULONG usedPages;
 
+            if (!getTooltipText)
+                break;
+
             if (PhGetIntegerSetting(L"ShowCommitInSummary"))
             {
                 usedPages = PhGetItemCircularBuffer_ULONG(&PhCommitHistory, getTooltipText->Index);
 
                 PhMoveReference(&Section->GraphState.TooltipText, PhFormatString(
                     L"Commit charge: %s\n%s",
-                    PhaFormatSize(UInt32x32To64(usedPages, PAGE_SIZE), -1)->Buffer,
+                    PhaFormatSize(UInt32x32To64(usedPages, PAGE_SIZE), ULONG_MAX)->Buffer,
                     PH_AUTO_T(PH_STRING, PhGetStatisticsTimeString(NULL, getTooltipText->Index))->Buffer
                     ));
                 getTooltipText->Text = Section->GraphState.TooltipText->sr;
@@ -175,7 +187,7 @@ BOOLEAN PhSipMemorySectionCallback(
 
                 PhMoveReference(&Section->GraphState.TooltipText, PhFormatString(
                     L"Physical memory: %s\n%s",
-                    PhaFormatSize(UInt32x32To64(usedPages, PAGE_SIZE), -1)->Buffer,
+                    PhaFormatSize(UInt32x32To64(usedPages, PAGE_SIZE), ULONG_MAX)->Buffer,
                     PH_AUTO_T(PH_STRING, PhGetStatisticsTimeString(NULL, getTooltipText->Index))->Buffer
                     ));
                 getTooltipText->Text = Section->GraphState.TooltipText->sr;
@@ -187,6 +199,9 @@ BOOLEAN PhSipMemorySectionCallback(
             PPH_SYSINFO_DRAW_PANEL drawPanel = Parameter1;
             ULONG totalPages;
             ULONG usedPages;
+
+            if (!drawPanel)
+                break;
 
             if (PhGetIntegerSetting(L"ShowCommitInSummary"))
             {
@@ -230,6 +245,8 @@ VOID PhSipInitializeMemoryDialog(
     PhInitializeDelta(&PageReadsDelta);
     PhInitializeDelta(&PagefileWritesDelta);
     PhInitializeDelta(&MappedWritesDelta);
+    PhInitializeDelta(&MappedIoReadDelta);
+    PhInitializeDelta(&MappedIoWritesDelta);
 
     PhInitializeGraphState(&CommitGraphState);
     PhInitializeGraphState(&PhysicalGraphState);
@@ -263,11 +280,11 @@ VOID PhSipTickMemoryDialog(
     PhUpdateDelta(&PageReadsDelta, PhPerfInformation.PageReadCount);
     PhUpdateDelta(&PagefileWritesDelta, PhPerfInformation.DirtyPagesWriteCount);
     PhUpdateDelta(&MappedWritesDelta, PhPerfInformation.MappedPagesWriteCount);
+    PhUpdateDelta(&MappedIoReadDelta, UInt32x32To64(PhPerfInformation.PageReadCount, PAGE_SIZE));
+    PhUpdateDelta(&MappedIoWritesDelta, ((ULONG64)PhPerfInformation.MappedPagesWriteCount + PhPerfInformation.DirtyPagesWriteCount + PhPerfInformation.CcLazyWritePages) * PAGE_SIZE);
 
-    MemoryTicked++;
-
-    if (MemoryTicked > 2)
-        MemoryTicked = 2;
+    if (MemoryTicked < 2)
+        MemoryTicked++;
 
     PhSipUpdateMemoryGraphs();
     PhSipUpdateMemoryPanel();
@@ -295,31 +312,31 @@ INT_PTR CALLBACK PhSipMemoryDialogProc(
             PhInitializeLayoutManager(&MemoryLayoutManager, hwndDlg);
             PhAddLayoutItem(&MemoryLayoutManager, GetDlgItem(hwndDlg, IDC_TOTALPHYSICAL), NULL, PH_ANCHOR_LEFT | PH_ANCHOR_TOP | PH_ANCHOR_RIGHT | PH_LAYOUT_FORCE_INVALIDATE);
             graphItem = PhAddLayoutItem(&MemoryLayoutManager, GetDlgItem(hwndDlg, IDC_GRAPH_LAYOUT), NULL, PH_ANCHOR_ALL);
-            MemoryGraphMargin = graphItem->Margin;
             panelItem = PhAddLayoutItem(&MemoryLayoutManager, GetDlgItem(hwndDlg, IDC_LAYOUT), NULL, PH_ANCHOR_LEFT | PH_ANCHOR_RIGHT | PH_ANCHOR_BOTTOM);
+            MemoryGraphMargin = graphItem->Margin;
 
-            SendMessage(GetDlgItem(hwndDlg, IDC_TITLE), WM_SETFONT, (WPARAM)MemorySection->Parameters->LargeFont, FALSE);
-            SendMessage(GetDlgItem(hwndDlg, IDC_TOTALPHYSICAL), WM_SETFONT, (WPARAM)MemorySection->Parameters->MediumFont, FALSE);
+            SetWindowFont(GetDlgItem(hwndDlg, IDC_TITLE), MemorySection->Parameters->LargeFont, FALSE);
+            SetWindowFont(GetDlgItem(hwndDlg, IDC_TOTALPHYSICAL), MemorySection->Parameters->MediumFont, FALSE);
 
             if (!getPhysicallyInstalledSystemMemory)
-                getPhysicallyInstalledSystemMemory = PhGetModuleProcAddress(L"kernel32.dll", "GetPhysicallyInstalledSystemMemory");
+                getPhysicallyInstalledSystemMemory = PhGetDllProcedureAddress(L"kernel32.dll", "GetPhysicallyInstalledSystemMemory", 0);
 
             InstalledMemory = 0;
 
             if (getPhysicallyInstalledSystemMemory && getPhysicallyInstalledSystemMemory(&InstalledMemory))
             {
-                SetDlgItemText(hwndDlg, IDC_TOTALPHYSICAL,
-                    PhaConcatStrings2(PhaFormatSize(InstalledMemory * 1024, -1)->Buffer, L" installed")->Buffer);
+                PhSetDialogItemText(hwndDlg, IDC_TOTALPHYSICAL,
+                    PhaConcatStrings2(PhaFormatSize(InstalledMemory * 1024, ULONG_MAX)->Buffer, L" installed")->Buffer);
             }
             else
             {
-                SetDlgItemText(hwndDlg, IDC_TOTALPHYSICAL,
-                    PhaConcatStrings2(PhaFormatSize(UInt32x32To64(PhSystemBasicInformation.NumberOfPhysicalPages, PAGE_SIZE), -1)->Buffer, L" total")->Buffer);
+                PhSetDialogItemText(hwndDlg, IDC_TOTALPHYSICAL,
+                    PhaConcatStrings2(PhaFormatSize(UInt32x32To64(PhSystemBasicInformation.NumberOfPhysicalPages, PAGE_SIZE), ULONG_MAX)->Buffer, L" total")->Buffer);
             }
 
             MemoryPanel = CreateDialog(
                 PhInstanceHandle,
-                WindowsVersion >= WINDOWS_VISTA ? MAKEINTRESOURCE(IDD_SYSINFO_MEMPANEL) : MAKEINTRESOURCE(IDD_SYSINFO_MEMPANELXP),
+                MAKEINTRESOURCE(IDD_SYSINFO_MEMPANEL),
                 hwndDlg,
                 PhSipMemoryPanelDialogProc
                 );
@@ -335,7 +352,7 @@ INT_PTR CALLBACK PhSipMemoryDialogProc(
                 3,
                 3,
                 MemoryDialog,
-                (HMENU)IDC_COMMIT,
+                NULL,
                 PhInstanceHandle,
                 NULL
                 );
@@ -350,7 +367,7 @@ INT_PTR CALLBACK PhSipMemoryDialogProc(
                 3,
                 3,
                 MemoryDialog,
-                (HMENU)IDC_PHYSICAL,
+                NULL,
                 PhInstanceHandle,
                 NULL
                 );
@@ -546,7 +563,7 @@ VOID PhSipNotifyCommitGraph(
 
                     PhMoveReference(&CommitGraphState.TooltipText, PhFormatString(
                         L"Commit charge: %s\n%s",
-                        PhaFormatSize(UInt32x32To64(usedPages, PAGE_SIZE), -1)->Buffer,
+                        PhaFormatSize(UInt32x32To64(usedPages, PAGE_SIZE), ULONG_MAX)->Buffer,
                         PH_AUTO_T(PH_STRING, PhGetStatisticsTimeString(NULL, getTooltipText->Index))->Buffer
                         ));
                 }
@@ -614,7 +631,7 @@ VOID PhSipNotifyPhysicalGraph(
 
                     PhMoveReference(&PhysicalGraphState.TooltipText, PhFormatString(
                         L"Physical memory: %s\n%s",
-                        PhaFormatSize(UInt32x32To64(usedPages, PAGE_SIZE), -1)->Buffer,
+                        PhaFormatSize(UInt32x32To64(usedPages, PAGE_SIZE), ULONG_MAX)->Buffer,
                         PH_AUTO_T(PH_STRING, PhGetStatisticsTimeString(NULL, getTooltipText->Index))->Buffer
                         ));
                 }
@@ -631,14 +648,14 @@ VOID PhSipUpdateMemoryGraphs(
     )
 {
     CommitGraphState.Valid = FALSE;
-    CommitGraphState.TooltipIndex = -1;
+    CommitGraphState.TooltipIndex = ULONG_MAX;
     Graph_MoveGrid(CommitGraphHandle, 1);
     Graph_Draw(CommitGraphHandle);
     Graph_UpdateTooltip(CommitGraphHandle);
     InvalidateRect(CommitGraphHandle, NULL, FALSE);
 
     PhysicalGraphState.Valid = FALSE;
-    PhysicalGraphState.TooltipIndex = -1;
+    PhysicalGraphState.TooltipIndex = ULONG_MAX;
     Graph_MoveGrid(PhysicalGraphHandle, 1);
     Graph_Draw(PhysicalGraphHandle);
     Graph_UpdateTooltip(PhysicalGraphHandle);
@@ -655,68 +672,68 @@ VOID PhSipUpdateMemoryPanel(
 
     // Commit charge
 
-    SetDlgItemText(MemoryPanel, IDC_ZCOMMITCURRENT_V,
-        PhaFormatSize(UInt32x32To64(PhPerfInformation.CommittedPages, PAGE_SIZE), -1)->Buffer);
-    SetDlgItemText(MemoryPanel, IDC_ZCOMMITPEAK_V,
-        PhaFormatSize(UInt32x32To64(PhPerfInformation.PeakCommitment, PAGE_SIZE), -1)->Buffer);
-    SetDlgItemText(MemoryPanel, IDC_ZCOMMITLIMIT_V,
-        PhaFormatSize(UInt32x32To64(PhPerfInformation.CommitLimit, PAGE_SIZE), -1)->Buffer);
+    PhSetDialogItemText(MemoryPanel, IDC_ZCOMMITCURRENT_V,
+        PhaFormatSize(UInt32x32To64(PhPerfInformation.CommittedPages, PAGE_SIZE), ULONG_MAX)->Buffer);
+    PhSetDialogItemText(MemoryPanel, IDC_ZCOMMITPEAK_V,
+        PhaFormatSize(UInt32x32To64(PhPerfInformation.PeakCommitment, PAGE_SIZE), ULONG_MAX)->Buffer);
+    PhSetDialogItemText(MemoryPanel, IDC_ZCOMMITLIMIT_V,
+        PhaFormatSize(UInt32x32To64(PhPerfInformation.CommitLimit, PAGE_SIZE), ULONG_MAX)->Buffer);
 
     // Physical memory
 
-    SetDlgItemText(MemoryPanel, IDC_ZPHYSICALCURRENT_V,
-        PhaFormatSize(UInt32x32To64(PhSystemBasicInformation.NumberOfPhysicalPages - PhPerfInformation.AvailablePages, PAGE_SIZE), -1)->Buffer);
-    SetDlgItemText(MemoryPanel, IDC_ZPHYSICALTOTAL_V,
-        PhaFormatSize(UInt32x32To64(PhSystemBasicInformation.NumberOfPhysicalPages, PAGE_SIZE), -1)->Buffer);
+    PhSetDialogItemText(MemoryPanel, IDC_ZPHYSICALCURRENT_V,
+        PhaFormatSize(UInt32x32To64(PhSystemBasicInformation.NumberOfPhysicalPages - PhPerfInformation.AvailablePages, PAGE_SIZE), ULONG_MAX)->Buffer);
+    PhSetDialogItemText(MemoryPanel, IDC_ZPHYSICALTOTAL_V,
+        PhaFormatSize(UInt32x32To64(PhSystemBasicInformation.NumberOfPhysicalPages, PAGE_SIZE), ULONG_MAX)->Buffer);
 
     if (InstalledMemory != 0)
     {
-        SetDlgItemText(MemoryPanel, IDC_ZPHYSICALRESERVED_V,
-            PhaFormatSize(InstalledMemory * 1024 - UInt32x32To64(PhSystemBasicInformation.NumberOfPhysicalPages, PAGE_SIZE), -1)->Buffer);
+        PhSetDialogItemText(MemoryPanel, IDC_ZPHYSICALRESERVED_V,
+            PhaFormatSize(InstalledMemory * 1024 - UInt32x32To64(PhSystemBasicInformation.NumberOfPhysicalPages, PAGE_SIZE), ULONG_MAX)->Buffer);
     }
     else
     {
-        SetDlgItemText(MemoryPanel, IDC_ZPHYSICALRESERVED_V, L"-");
+        PhSetDialogItemText(MemoryPanel, IDC_ZPHYSICALRESERVED_V, L"-");
     }
 
-    SetDlgItemText(MemoryPanel, IDC_ZPHYSICALCACHEWS_V,
-        PhaFormatSize(UInt32x32To64(PhPerfInformation.ResidentSystemCachePage, PAGE_SIZE), -1)->Buffer);
-    SetDlgItemText(MemoryPanel, IDC_ZPHYSICALKERNELWS_V,
-        PhaFormatSize(UInt32x32To64(PhPerfInformation.ResidentSystemCodePage, PAGE_SIZE), -1)->Buffer);
-    SetDlgItemText(MemoryPanel, IDC_ZPHYSICALDRIVERWS_V,
-        PhaFormatSize(UInt32x32To64(PhPerfInformation.ResidentSystemDriverPage, PAGE_SIZE), -1)->Buffer);
+    PhSetDialogItemText(MemoryPanel, IDC_ZPHYSICALCACHEWS_V,
+        PhaFormatSize(UInt32x32To64(PhPerfInformation.ResidentSystemCachePage, PAGE_SIZE), ULONG_MAX)->Buffer);
+    PhSetDialogItemText(MemoryPanel, IDC_ZPHYSICALKERNELWS_V,
+        PhaFormatSize(UInt32x32To64(PhPerfInformation.ResidentSystemCodePage, PAGE_SIZE), ULONG_MAX)->Buffer);
+    PhSetDialogItemText(MemoryPanel, IDC_ZPHYSICALDRIVERWS_V,
+        PhaFormatSize(UInt32x32To64(PhPerfInformation.ResidentSystemDriverPage, PAGE_SIZE), ULONG_MAX)->Buffer);
 
     // Paged pool
 
-    SetDlgItemText(MemoryPanel, IDC_ZPAGEDWORKINGSET_V,
-        PhaFormatSize(UInt32x32To64(PhPerfInformation.ResidentPagedPoolPage, PAGE_SIZE), -1)->Buffer);
-    SetDlgItemText(MemoryPanel, IDC_ZPAGEDVIRTUALSIZE_V,
-        PhaFormatSize(UInt32x32To64(PhPerfInformation.PagedPoolPages, PAGE_SIZE), -1)->Buffer);
+    PhSetDialogItemText(MemoryPanel, IDC_ZPAGEDWORKINGSET_V,
+        PhaFormatSize(UInt32x32To64(PhPerfInformation.ResidentPagedPoolPage, PAGE_SIZE), ULONG_MAX)->Buffer);
+    PhSetDialogItemText(MemoryPanel, IDC_ZPAGEDVIRTUALSIZE_V,
+        PhaFormatSize(UInt32x32To64(PhPerfInformation.PagedPoolPages, PAGE_SIZE), ULONG_MAX)->Buffer);
 
     if (MemoryTicked > 1)
-        SetDlgItemText(MemoryPanel, IDC_ZPAGEDALLOCSDELTA_V, PhaFormatUInt64(PagedAllocsDelta.Delta, TRUE)->Buffer);
+        PhSetDialogItemText(MemoryPanel, IDC_ZPAGEDALLOCSDELTA_V, PhaFormatUInt64(PagedAllocsDelta.Delta, TRUE)->Buffer);
     else
-        SetDlgItemText(MemoryPanel, IDC_ZPAGEDALLOCSDELTA_V, L"-");
+        PhSetDialogItemText(MemoryPanel, IDC_ZPAGEDALLOCSDELTA_V, L"-");
 
     if (MemoryTicked > 1)
-        SetDlgItemText(MemoryPanel, IDC_ZPAGEDFREESDELTA_V, PhaFormatUInt64(PagedFreesDelta.Delta, TRUE)->Buffer);
+        PhSetDialogItemText(MemoryPanel, IDC_ZPAGEDFREESDELTA_V, PhaFormatUInt64(PagedFreesDelta.Delta, TRUE)->Buffer);
     else
-        SetDlgItemText(MemoryPanel, IDC_ZPAGEDFREESDELTA_V, L"-");
+        PhSetDialogItemText(MemoryPanel, IDC_ZPAGEDFREESDELTA_V, L"-");
 
     // Non-paged pool
 
-    SetDlgItemText(MemoryPanel, IDC_ZNONPAGEDUSAGE_V,
-        PhaFormatSize(UInt32x32To64(PhPerfInformation.NonPagedPoolPages, PAGE_SIZE), -1)->Buffer);
+    PhSetDialogItemText(MemoryPanel, IDC_ZNONPAGEDUSAGE_V,
+        PhaFormatSize(UInt32x32To64(PhPerfInformation.NonPagedPoolPages, PAGE_SIZE), ULONG_MAX)->Buffer);
 
     if (MemoryTicked > 1)
-        SetDlgItemText(MemoryPanel, IDC_ZNONPAGEDALLOCSDELTA_V, PhaFormatUInt64(PagedAllocsDelta.Delta, TRUE)->Buffer);
+        PhSetDialogItemText(MemoryPanel, IDC_ZNONPAGEDALLOCSDELTA_V, PhaFormatUInt64(PagedAllocsDelta.Delta, TRUE)->Buffer);
     else
-        SetDlgItemText(MemoryPanel, IDC_ZNONPAGEDALLOCSDELTA_V, L"-");
+        PhSetDialogItemText(MemoryPanel, IDC_ZNONPAGEDALLOCSDELTA_V, L"-");
 
     if (MemoryTicked > 1)
-        SetDlgItemText(MemoryPanel, IDC_ZNONPAGEDFREESDELTA_V, PhaFormatUInt64(NonPagedFreesDelta.Delta, TRUE)->Buffer);
+        PhSetDialogItemText(MemoryPanel, IDC_ZNONPAGEDFREESDELTA_V, PhaFormatUInt64(NonPagedFreesDelta.Delta, TRUE)->Buffer);
     else
-        SetDlgItemText(MemoryPanel, IDC_ZNONPAGEDFREESDELTA_V, L"-");
+        PhSetDialogItemText(MemoryPanel, IDC_ZNONPAGEDFREESDELTA_V, L"-");
 
     // Pools (KPH)
 
@@ -728,12 +745,12 @@ VOID PhSipUpdateMemoryPanel(
         PhSipGetPoolLimits(&paged, &nonPaged);
 
         if (paged != -1)
-            pagedLimit = PhaFormatSize(paged, -1)->Buffer;
+            pagedLimit = PhaFormatSize(paged, ULONG_MAX)->Buffer;
         else
             pagedLimit = L"N/A";
 
         if (nonPaged != -1)
-            nonPagedLimit = PhaFormatSize(nonPaged, -1)->Buffer;
+            nonPagedLimit = PhaFormatSize(nonPaged, ULONG_MAX)->Buffer;
         else
             nonPagedLimit = L"N/A";
     }
@@ -749,91 +766,100 @@ VOID PhSipUpdateMemoryPanel(
         }
     }
 
-    SetDlgItemText(MemoryPanel, IDC_ZPAGEDLIMIT_V, pagedLimit);
-    SetDlgItemText(MemoryPanel, IDC_ZNONPAGEDLIMIT_V, nonPagedLimit);
+    PhSetDialogItemText(MemoryPanel, IDC_ZPAGEDLIMIT_V, pagedLimit);
+    PhSetDialogItemText(MemoryPanel, IDC_ZNONPAGEDLIMIT_V, nonPagedLimit);
 
     // Paging
 
     if (MemoryTicked > 1)
-        SetDlgItemText(MemoryPanel, IDC_ZPAGINGPAGEFAULTSDELTA_V, PhaFormatUInt64(PageFaultsDelta.Delta, TRUE)->Buffer);
+        PhSetDialogItemText(MemoryPanel, IDC_ZPAGINGPAGEFAULTSDELTA_V, PhaFormatUInt64(PageFaultsDelta.Delta, TRUE)->Buffer);
     else
-        SetDlgItemText(MemoryPanel, IDC_ZPAGINGPAGEFAULTSDELTA_V, L"-");
+        PhSetDialogItemText(MemoryPanel, IDC_ZPAGINGPAGEFAULTSDELTA_V, L"-");
 
     if (MemoryTicked > 1)
-        SetDlgItemText(MemoryPanel, IDC_ZPAGINGPAGEREADSDELTA_V, PhaFormatUInt64(PageReadsDelta.Delta, TRUE)->Buffer);
+        PhSetDialogItemText(MemoryPanel, IDC_ZPAGINGPAGEREADSDELTA_V, PhaFormatUInt64(PageReadsDelta.Delta, TRUE)->Buffer);
     else
-        SetDlgItemText(MemoryPanel, IDC_ZPAGINGPAGEREADSDELTA_V, L"-");
+        PhSetDialogItemText(MemoryPanel, IDC_ZPAGINGPAGEREADSDELTA_V, L"-");
 
     if (MemoryTicked > 1)
-        SetDlgItemText(MemoryPanel, IDC_ZPAGINGPAGEFILEWRITESDELTA_V, PhaFormatUInt64(PagefileWritesDelta.Delta, TRUE)->Buffer);
+        PhSetDialogItemText(MemoryPanel, IDC_ZPAGINGPAGEFILEWRITESDELTA_V, PhaFormatUInt64(PagefileWritesDelta.Delta, TRUE)->Buffer);
     else
-        SetDlgItemText(MemoryPanel, IDC_ZPAGINGPAGEFILEWRITESDELTA_V, L"-");
+        PhSetDialogItemText(MemoryPanel, IDC_ZPAGINGPAGEFILEWRITESDELTA_V, L"-");
 
     if (MemoryTicked > 1)
-        SetDlgItemText(MemoryPanel, IDC_ZPAGINGMAPPEDWRITESDELTA_V, PhaFormatUInt64(MappedWritesDelta.Delta, TRUE)->Buffer);
+        PhSetDialogItemText(MemoryPanel, IDC_ZPAGINGMAPPEDWRITESDELTA_V, PhaFormatUInt64(MappedWritesDelta.Delta, TRUE)->Buffer);
     else
-        SetDlgItemText(MemoryPanel, IDC_ZPAGINGMAPPEDWRITESDELTA_V, L"-");
+        PhSetDialogItemText(MemoryPanel, IDC_ZPAGINGMAPPEDWRITESDELTA_V, L"-");
+
+    // Mapped
+
+    if (MemoryTicked > 1)
+        PhSetDialogItemText(MemoryPanel, IDC_ZMAPPEDREADIO, PhaFormatSize(MappedIoReadDelta.Delta, ULONG_MAX)->Buffer);
+    else
+        PhSetDialogItemText(MemoryPanel, IDC_ZMAPPEDREADIO, L"-");
+
+    if (MemoryTicked > 1)
+        PhSetDialogItemText(MemoryPanel, IDC_ZMAPPEDWRITEIO, PhaFormatSize(MappedIoWritesDelta.Delta, ULONG_MAX)->Buffer);
+    else
+        PhSetDialogItemText(MemoryPanel, IDC_ZMAPPEDWRITEIO, L"-");
 
     // Memory lists
 
-    if (WindowsVersion >= WINDOWS_VISTA)
+    if (NT_SUCCESS(NtQuerySystemInformation(
+        SystemMemoryListInformation,
+        &memoryListInfo,
+        sizeof(SYSTEM_MEMORY_LIST_INFORMATION),
+        NULL
+        )))
     {
-        if (NT_SUCCESS(NtQuerySystemInformation(
-            SystemMemoryListInformation,
-            &memoryListInfo,
-            sizeof(SYSTEM_MEMORY_LIST_INFORMATION),
-            NULL
-            )))
+        ULONG_PTR standbyPageCount;
+        ULONG_PTR repurposedPageCount;
+        ULONG i;
+
+        standbyPageCount = 0;
+        repurposedPageCount = 0;
+
+        for (i = 0; i < 8; i++)
         {
-            ULONG_PTR standbyPageCount;
-            ULONG_PTR repurposedPageCount;
-            ULONG i;
-
-            standbyPageCount = 0;
-            repurposedPageCount = 0;
-
-            for (i = 0; i < 8; i++)
-            {
-                standbyPageCount += memoryListInfo.PageCountByPriority[i];
-                repurposedPageCount += memoryListInfo.RepurposedPagesByPriority[i];
-            }
-
-            SetDlgItemText(MemoryPanel, IDC_ZLISTZEROED_V, PhaFormatSize((ULONG64)memoryListInfo.ZeroPageCount * PAGE_SIZE, -1)->Buffer);
-            SetDlgItemText(MemoryPanel, IDC_ZLISTFREE_V, PhaFormatSize((ULONG64)memoryListInfo.FreePageCount * PAGE_SIZE, -1)->Buffer);
-            SetDlgItemText(MemoryPanel, IDC_ZLISTMODIFIED_V, PhaFormatSize((ULONG64)memoryListInfo.ModifiedPageCount * PAGE_SIZE, -1)->Buffer);
-            SetDlgItemText(MemoryPanel, IDC_ZLISTMODIFIEDNOWRITE_V, PhaFormatSize((ULONG64)memoryListInfo.ModifiedNoWritePageCount * PAGE_SIZE, -1)->Buffer);
-            SetDlgItemText(MemoryPanel, IDC_ZLISTSTANDBY_V, PhaFormatSize((ULONG64)standbyPageCount * PAGE_SIZE, -1)->Buffer);
-            SetDlgItemText(MemoryPanel, IDC_ZLISTSTANDBY0_V, PhaFormatSize((ULONG64)memoryListInfo.PageCountByPriority[0] * PAGE_SIZE, -1)->Buffer);
-            SetDlgItemText(MemoryPanel, IDC_ZLISTSTANDBY1_V, PhaFormatSize((ULONG64)memoryListInfo.PageCountByPriority[1] * PAGE_SIZE, -1)->Buffer);
-            SetDlgItemText(MemoryPanel, IDC_ZLISTSTANDBY2_V, PhaFormatSize((ULONG64)memoryListInfo.PageCountByPriority[2] * PAGE_SIZE, -1)->Buffer);
-            SetDlgItemText(MemoryPanel, IDC_ZLISTSTANDBY3_V, PhaFormatSize((ULONG64)memoryListInfo.PageCountByPriority[3] * PAGE_SIZE, -1)->Buffer);
-            SetDlgItemText(MemoryPanel, IDC_ZLISTSTANDBY4_V, PhaFormatSize((ULONG64)memoryListInfo.PageCountByPriority[4] * PAGE_SIZE, -1)->Buffer);
-            SetDlgItemText(MemoryPanel, IDC_ZLISTSTANDBY5_V, PhaFormatSize((ULONG64)memoryListInfo.PageCountByPriority[5] * PAGE_SIZE, -1)->Buffer);
-            SetDlgItemText(MemoryPanel, IDC_ZLISTSTANDBY6_V, PhaFormatSize((ULONG64)memoryListInfo.PageCountByPriority[6] * PAGE_SIZE, -1)->Buffer);
-            SetDlgItemText(MemoryPanel, IDC_ZLISTSTANDBY7_V, PhaFormatSize((ULONG64)memoryListInfo.PageCountByPriority[7] * PAGE_SIZE, -1)->Buffer);
-
-            if (WindowsVersion >= WINDOWS_8)
-                SetDlgItemText(MemoryPanel, IDC_ZLISTMODIFIEDPAGEFILE_V, PhaFormatSize((ULONG64)memoryListInfo.ModifiedPageCountPageFile * PAGE_SIZE, -1)->Buffer);
-            else
-                SetDlgItemText(MemoryPanel, IDC_ZLISTMODIFIEDPAGEFILE_V, L"N/A");
+            standbyPageCount += memoryListInfo.PageCountByPriority[i];
+            repurposedPageCount += memoryListInfo.RepurposedPagesByPriority[i];
         }
+
+        PhSetDialogItemText(MemoryPanel, IDC_ZLISTZEROED_V, PhaFormatSize((ULONG64)memoryListInfo.ZeroPageCount * PAGE_SIZE, ULONG_MAX)->Buffer);
+        PhSetDialogItemText(MemoryPanel, IDC_ZLISTFREE_V, PhaFormatSize((ULONG64)memoryListInfo.FreePageCount * PAGE_SIZE, ULONG_MAX)->Buffer);
+        PhSetDialogItemText(MemoryPanel, IDC_ZLISTMODIFIED_V, PhaFormatSize((ULONG64)memoryListInfo.ModifiedPageCount * PAGE_SIZE, ULONG_MAX)->Buffer);
+        PhSetDialogItemText(MemoryPanel, IDC_ZLISTMODIFIEDNOWRITE_V, PhaFormatSize((ULONG64)memoryListInfo.ModifiedNoWritePageCount * PAGE_SIZE, ULONG_MAX)->Buffer);
+        PhSetDialogItemText(MemoryPanel, IDC_ZLISTSTANDBY_V, PhaFormatSize((ULONG64)standbyPageCount * PAGE_SIZE, ULONG_MAX)->Buffer);
+        PhSetDialogItemText(MemoryPanel, IDC_ZLISTSTANDBY0_V, PhaFormatSize((ULONG64)memoryListInfo.PageCountByPriority[0] * PAGE_SIZE, ULONG_MAX)->Buffer);
+        PhSetDialogItemText(MemoryPanel, IDC_ZLISTSTANDBY1_V, PhaFormatSize((ULONG64)memoryListInfo.PageCountByPriority[1] * PAGE_SIZE, ULONG_MAX)->Buffer);
+        PhSetDialogItemText(MemoryPanel, IDC_ZLISTSTANDBY2_V, PhaFormatSize((ULONG64)memoryListInfo.PageCountByPriority[2] * PAGE_SIZE, ULONG_MAX)->Buffer);
+        PhSetDialogItemText(MemoryPanel, IDC_ZLISTSTANDBY3_V, PhaFormatSize((ULONG64)memoryListInfo.PageCountByPriority[3] * PAGE_SIZE, ULONG_MAX)->Buffer);
+        PhSetDialogItemText(MemoryPanel, IDC_ZLISTSTANDBY4_V, PhaFormatSize((ULONG64)memoryListInfo.PageCountByPriority[4] * PAGE_SIZE, ULONG_MAX)->Buffer);
+        PhSetDialogItemText(MemoryPanel, IDC_ZLISTSTANDBY5_V, PhaFormatSize((ULONG64)memoryListInfo.PageCountByPriority[5] * PAGE_SIZE, ULONG_MAX)->Buffer);
+        PhSetDialogItemText(MemoryPanel, IDC_ZLISTSTANDBY6_V, PhaFormatSize((ULONG64)memoryListInfo.PageCountByPriority[6] * PAGE_SIZE, ULONG_MAX)->Buffer);
+        PhSetDialogItemText(MemoryPanel, IDC_ZLISTSTANDBY7_V, PhaFormatSize((ULONG64)memoryListInfo.PageCountByPriority[7] * PAGE_SIZE, ULONG_MAX)->Buffer);
+
+        if (WindowsVersion >= WINDOWS_8)
+            PhSetDialogItemText(MemoryPanel, IDC_ZLISTMODIFIEDPAGEFILE_V, PhaFormatSize((ULONG64)memoryListInfo.ModifiedPageCountPageFile * PAGE_SIZE, ULONG_MAX)->Buffer);
         else
-        {
-            SetDlgItemText(MemoryPanel, IDC_ZLISTZEROED_V, L"N/A");
-            SetDlgItemText(MemoryPanel, IDC_ZLISTFREE_V, L"N/A");
-            SetDlgItemText(MemoryPanel, IDC_ZLISTMODIFIED_V, L"N/A");
-            SetDlgItemText(MemoryPanel, IDC_ZLISTMODIFIEDNOWRITE_V, L"N/A");
-            SetDlgItemText(MemoryPanel, IDC_ZLISTMODIFIEDPAGEFILE_V, L"N/A");
-            SetDlgItemText(MemoryPanel, IDC_ZLISTSTANDBY_V, L"N/A");
-            SetDlgItemText(MemoryPanel, IDC_ZLISTSTANDBY0_V, L"N/A");
-            SetDlgItemText(MemoryPanel, IDC_ZLISTSTANDBY1_V, L"N/A");
-            SetDlgItemText(MemoryPanel, IDC_ZLISTSTANDBY2_V, L"N/A");
-            SetDlgItemText(MemoryPanel, IDC_ZLISTSTANDBY3_V, L"N/A");
-            SetDlgItemText(MemoryPanel, IDC_ZLISTSTANDBY4_V, L"N/A");
-            SetDlgItemText(MemoryPanel, IDC_ZLISTSTANDBY5_V, L"N/A");
-            SetDlgItemText(MemoryPanel, IDC_ZLISTSTANDBY6_V, L"N/A");
-            SetDlgItemText(MemoryPanel, IDC_ZLISTSTANDBY7_V, L"N/A");
-        }
+            PhSetDialogItemText(MemoryPanel, IDC_ZLISTMODIFIEDPAGEFILE_V, L"N/A");
+    }
+    else
+    {
+        PhSetDialogItemText(MemoryPanel, IDC_ZLISTZEROED_V, L"N/A");
+        PhSetDialogItemText(MemoryPanel, IDC_ZLISTFREE_V, L"N/A");
+        PhSetDialogItemText(MemoryPanel, IDC_ZLISTMODIFIED_V, L"N/A");
+        PhSetDialogItemText(MemoryPanel, IDC_ZLISTMODIFIEDNOWRITE_V, L"N/A");
+        PhSetDialogItemText(MemoryPanel, IDC_ZLISTMODIFIEDPAGEFILE_V, L"N/A");
+        PhSetDialogItemText(MemoryPanel, IDC_ZLISTSTANDBY_V, L"N/A");
+        PhSetDialogItemText(MemoryPanel, IDC_ZLISTSTANDBY0_V, L"N/A");
+        PhSetDialogItemText(MemoryPanel, IDC_ZLISTSTANDBY1_V, L"N/A");
+        PhSetDialogItemText(MemoryPanel, IDC_ZLISTSTANDBY2_V, L"N/A");
+        PhSetDialogItemText(MemoryPanel, IDC_ZLISTSTANDBY3_V, L"N/A");
+        PhSetDialogItemText(MemoryPanel, IDC_ZLISTSTANDBY4_V, L"N/A");
+        PhSetDialogItemText(MemoryPanel, IDC_ZLISTSTANDBY5_V, L"N/A");
+        PhSetDialogItemText(MemoryPanel, IDC_ZLISTSTANDBY6_V, L"N/A");
+        PhSetDialogItemText(MemoryPanel, IDC_ZLISTSTANDBY7_V, L"N/A");
     }
 }
 

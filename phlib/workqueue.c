@@ -24,6 +24,7 @@
 #include <workqueue.h>
 
 #include <phintrnl.h>
+#include <phnativeinl.h>
 
 #include <workqueuep.h>
 
@@ -103,7 +104,7 @@ VOID PhDeleteWorkQueue(
 
 #ifdef DEBUG
     PhAcquireQueuedLockExclusive(&PhDbgWorkQueueListLock);
-    if ((index = PhFindItemList(PhDbgWorkQueueList, WorkQueue)) != -1)
+    if ((index = PhFindItemList(PhDbgWorkQueueList, WorkQueue)) != ULONG_MAX)
         PhRemoveItemList(PhDbgWorkQueueList, index);
     PhReleaseQueuedLockExclusive(&PhDbgWorkQueueListLock);
 #endif
@@ -243,7 +244,7 @@ VOID PhpGetDefaultWorkQueueEnvironment(
     )
 {
     memset(Environment, 0, sizeof(PH_WORK_QUEUE_ENVIRONMENT));
-    Environment->BasePriority = 0;
+    Environment->BasePriority = THREAD_PRIORITY_NORMAL;
     Environment->IoPriority = IoPriorityNormal;
     Environment->PagePriority = MEMORY_PRIORITY_NORMAL;
     Environment->ForceUpdate = FALSE;
@@ -260,39 +261,33 @@ VOID PhpUpdateWorkQueueEnvironment(
 
         increment = NewEnvironment->BasePriority;
 
-        if (NT_SUCCESS(NtSetInformationThread(NtCurrentThread(), ThreadBasePriority,
-            &increment, sizeof(LONG))))
+        if (NT_SUCCESS(PhSetThreadBasePriority(NtCurrentThread(), increment)))
         {
             CurrentEnvironment->BasePriority = NewEnvironment->BasePriority;
         }
     }
 
-    if (WindowsVersion >= WINDOWS_VISTA)
+    if (CurrentEnvironment->IoPriority != NewEnvironment->IoPriority || NewEnvironment->ForceUpdate)
     {
-        if (CurrentEnvironment->IoPriority != NewEnvironment->IoPriority || NewEnvironment->ForceUpdate)
+        IO_PRIORITY_HINT ioPriority;
+
+        ioPriority = NewEnvironment->IoPriority;
+
+        if (NT_SUCCESS(PhSetThreadIoPriority(NtCurrentThread(), ioPriority)))
         {
-            IO_PRIORITY_HINT ioPriority;
-
-            ioPriority = NewEnvironment->IoPriority;
-
-            if (NT_SUCCESS(NtSetInformationThread(NtCurrentThread(), ThreadIoPriority,
-                &ioPriority, sizeof(IO_PRIORITY_HINT))))
-            {
-                CurrentEnvironment->IoPriority = NewEnvironment->IoPriority;
-            }
+            CurrentEnvironment->IoPriority = NewEnvironment->IoPriority;
         }
+    }
 
-        if (CurrentEnvironment->PagePriority != NewEnvironment->PagePriority || NewEnvironment->ForceUpdate)
+    if (CurrentEnvironment->PagePriority != NewEnvironment->PagePriority || NewEnvironment->ForceUpdate)
+    {
+        ULONG pagePriority;
+
+        pagePriority = NewEnvironment->PagePriority;
+
+        if (NT_SUCCESS(PhSetThreadPagePriority(NtCurrentThread(), pagePriority)))
         {
-            ULONG pagePriority;
-
-            pagePriority = NewEnvironment->PagePriority;
-
-            if (NT_SUCCESS(NtSetInformationThread(NtCurrentThread(), ThreadPagePriority,
-                &pagePriority, sizeof(ULONG))))
-            {
-                CurrentEnvironment->PagePriority = NewEnvironment->PagePriority;
-            }
+            CurrentEnvironment->PagePriority = NewEnvironment->PagePriority;
         }
     }
 }
@@ -374,14 +369,16 @@ BOOLEAN PhpCreateWorkQueueThread(
     if (!PhAcquireRundownProtection(&WorkQueue->RundownProtect))
         return FALSE;
 
-    threadHandle = PhCreateThread(0, PhpWorkQueueThreadStart, WorkQueue);
-
-    if (threadHandle)
+    if (NT_SUCCESS(PhCreateThreadEx(
+        &threadHandle,
+        PhpWorkQueueThreadStart,
+        WorkQueue
+        )))
     {
         PHLIB_INC_STATISTIC(WqWorkQueueThreadsCreated);
         WorkQueue->CurrentThreads++;
-        NtClose(threadHandle);
 
+        NtClose(threadHandle);
         return TRUE;
     }
     else

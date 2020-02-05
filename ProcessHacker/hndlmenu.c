@@ -44,29 +44,32 @@ VOID PhInsertHandleObjectPropertiesEMenuItems(
     if (!PhFindEMenuItemEx(Menu, 0, NULL, InsertBeforeId, &parentItem, &indexInParent))
         return;
 
+    if (PhIsNullOrEmptyString(Info->TypeName))
+        return;
+
     if (PhEqualString2(Info->TypeName, L"File", TRUE) || PhEqualString2(Info->TypeName, L"DLL", TRUE) ||
         PhEqualString2(Info->TypeName, L"Mapped file", TRUE) || PhEqualString2(Info->TypeName, L"Mapped image", TRUE))
     {
         if (PhEqualString2(Info->TypeName, L"File", TRUE))
-            PhInsertEMenuItem(parentItem, PhCreateEMenuItem(0, ID_HANDLE_OBJECTPROPERTIES2, L"File properties", NULL, NULL), indexInParent);
+            PhInsertEMenuItem(parentItem, PhCreateEMenuItem(0, ID_HANDLE_OBJECTPROPERTIES2, L"File propert&ies", NULL, NULL), indexInParent);
 
         PhInsertEMenuItem(parentItem, PhCreateEMenuItem(0, ID_HANDLE_OBJECTPROPERTIES1, PhaAppendCtrlEnter(L"Open &file location", EnableShortcut), NULL, NULL), indexInParent);
     }
     else if (PhEqualString2(Info->TypeName, L"Key", TRUE))
     {
-        PhInsertEMenuItem(parentItem, PhCreateEMenuItem(0, ID_HANDLE_OBJECTPROPERTIES1, PhaAppendCtrlEnter(L"Open key", EnableShortcut), NULL, NULL), indexInParent);
+        PhInsertEMenuItem(parentItem, PhCreateEMenuItem(0, ID_HANDLE_OBJECTPROPERTIES1, PhaAppendCtrlEnter(L"Open &key", EnableShortcut), NULL, NULL), indexInParent);
     }
     else if (PhEqualString2(Info->TypeName, L"Process", TRUE))
     {
-        PhInsertEMenuItem(parentItem, PhCreateEMenuItem(0, ID_HANDLE_OBJECTPROPERTIES1, PhaAppendCtrlEnter(L"Process properties", EnableShortcut), NULL, NULL), indexInParent);
+        PhInsertEMenuItem(parentItem, PhCreateEMenuItem(0, ID_HANDLE_OBJECTPROPERTIES1, PhaAppendCtrlEnter(L"Process propert&ies", EnableShortcut), NULL, NULL), indexInParent);
     }
     else if (PhEqualString2(Info->TypeName, L"Section", TRUE))
     {
-        PhInsertEMenuItem(parentItem, PhCreateEMenuItem(0, ID_HANDLE_OBJECTPROPERTIES1, PhaAppendCtrlEnter(L"Read/Write memory", EnableShortcut), NULL, NULL), indexInParent);
+        PhInsertEMenuItem(parentItem, PhCreateEMenuItem(0, ID_HANDLE_OBJECTPROPERTIES1, PhaAppendCtrlEnter(L"Read/Write &memory", EnableShortcut), NULL, NULL), indexInParent);
     }
     else if (PhEqualString2(Info->TypeName, L"Thread", TRUE))
     {
-        PhInsertEMenuItem(parentItem, PhCreateEMenuItem(0, ID_HANDLE_OBJECTPROPERTIES1, PhaAppendCtrlEnter(L"Go to thread", EnableShortcut), NULL, NULL), indexInParent);
+        PhInsertEMenuItem(parentItem, PhCreateEMenuItem(0, ID_HANDLE_OBJECTPROPERTIES1, PhaAppendCtrlEnter(L"Go to t&hread", EnableShortcut), NULL, NULL), indexInParent);
     }
 }
 
@@ -114,11 +117,22 @@ VOID PhShowHandleObjectProperties1(
     _In_ PPH_HANDLE_ITEM_INFO Info
     )
 {
+    if (PhIsNullOrEmptyString(Info->TypeName))
+        return;
+
     if (PhEqualString2(Info->TypeName, L"File", TRUE) || PhEqualString2(Info->TypeName, L"DLL", TRUE) ||
         PhEqualString2(Info->TypeName, L"Mapped file", TRUE) || PhEqualString2(Info->TypeName, L"Mapped image", TRUE))
     {
         if (Info->BestObjectName)
-            PhShellExploreFile(hWnd, Info->BestObjectName->Buffer);
+        {
+            PhShellExecuteUserString(
+                hWnd,
+                L"FileBrowseExecutable",
+                Info->BestObjectName->Buffer,
+                FALSE,
+                L"Make sure the Explorer executable file is present."
+                );
+        }
         else
             PhShowError(hWnd, L"Unable to open file location because the object is unnamed.");
     }
@@ -141,7 +155,7 @@ VOID PhShowHandleObjectProperties1(
         {
             if (NT_SUCCESS(PhOpenProcess(
                 &processHandle,
-                ProcessQueryAccess,
+                PROCESS_QUERY_LIMITED_INFORMATION,
                 Info->ProcessId
                 )))
             {
@@ -169,7 +183,7 @@ VOID PhShowHandleObjectProperties1(
 
             if (NT_SUCCESS(PhpDuplicateHandleFromProcessItem(
                 &handle,
-                ProcessQueryAccess,
+                PROCESS_QUERY_LIMITED_INFORMATION,
                 Info->ProcessId,
                 Info->Handle
                 )))
@@ -198,17 +212,18 @@ VOID PhShowHandleObjectProperties1(
     }
     else if (PhEqualString2(Info->TypeName, L"Section", TRUE))
     {
+        NTSTATUS status;
         HANDLE handle = NULL;
         BOOLEAN readOnly = FALSE;
 
-        if (!NT_SUCCESS(PhpDuplicateHandleFromProcessItem(
+        if (!NT_SUCCESS(status = PhpDuplicateHandleFromProcessItem(
             &handle,
             SECTION_QUERY | SECTION_MAP_READ | SECTION_MAP_WRITE,
             Info->ProcessId,
             Info->Handle
             )))
         {
-            PhpDuplicateHandleFromProcessItem(
+            status = PhpDuplicateHandleFromProcessItem(
                 &handle,
                 SECTION_QUERY | SECTION_MAP_READ,
                 Info->ProcessId,
@@ -219,16 +234,15 @@ VOID PhShowHandleObjectProperties1(
 
         if (handle)
         {
-            NTSTATUS status;
             PPH_STRING sectionName = NULL;
             SECTION_BASIC_INFORMATION basicInfo;
             SIZE_T viewSize = PH_MAX_SECTION_EDIT_SIZE;
             PVOID viewBase = NULL;
             BOOLEAN tooBig = FALSE;
 
-            PhGetHandleInformation(NtCurrentProcess(), handle, -1, NULL, NULL, NULL, &sectionName);
+            PhGetHandleInformation(NtCurrentProcess(), handle, ULONG_MAX, NULL, NULL, NULL, &sectionName);
 
-            if (NT_SUCCESS(PhGetSectionBasicInformation(handle, &basicInfo)))
+            if (NT_SUCCESS(status = PhGetSectionBasicInformation(handle, &basicInfo)))
             {
                 if (basicInfo.MaximumSize.QuadPart <= PH_MAX_SECTION_EDIT_SIZE)
                     viewSize = (SIZE_T)basicInfo.MaximumSize.QuadPart;
@@ -275,7 +289,7 @@ VOID PhShowHandleObjectProperties1(
                     showMemoryEditor->ProcessId = NtCurrentProcessId();
                     showMemoryEditor->BaseAddress = viewBase;
                     showMemoryEditor->RegionSize = viewSize;
-                    showMemoryEditor->SelectOffset = -1;
+                    showMemoryEditor->SelectOffset = ULONG_MAX;
                     showMemoryEditor->SelectLength = 0;
                     showMemoryEditor->Title = sectionName ? PhConcatStrings2(L"Section - ", sectionName->Buffer) : PhCreateString(L"Section");
                     showMemoryEditor->Flags = PH_MEMORY_EDITOR_UNMAP_VIEW_OF_SECTION;
@@ -283,13 +297,18 @@ VOID PhShowHandleObjectProperties1(
                 }
                 else
                 {
-                    PhShowStatus(hWnd, L"Unable to map a view of the section", status, 0);
+                    PhShowStatus(hWnd, L"Unable to map a view of the section.", status, 0);
                 }
             }
 
             PhClearReference(&sectionName);
 
             NtClose(handle);
+        }
+
+        if (!NT_SUCCESS(status))
+        {
+            PhShowStatus(hWnd, L"Unable to query the section.", status, 0);
         }
     }
     else if (PhEqualString2(Info->TypeName, L"Thread", TRUE))
@@ -306,7 +325,7 @@ VOID PhShowHandleObjectProperties1(
         {
             if (NT_SUCCESS(PhOpenProcess(
                 &processHandle,
-                ProcessQueryAccess,
+                PROCESS_QUERY_LIMITED_INFORMATION,
                 Info->ProcessId
                 )))
             {
@@ -334,7 +353,7 @@ VOID PhShowHandleObjectProperties1(
 
             if (NT_SUCCESS(PhpDuplicateHandleFromProcessItem(
                 &handle,
-                ThreadQueryAccess,
+                THREAD_QUERY_LIMITED_INFORMATION,
                 Info->ProcessId,
                 Info->Handle
                 )))
@@ -352,7 +371,7 @@ VOID PhShowHandleObjectProperties1(
 
             if (targetProcessItem)
             {
-                propContext = PhCreateProcessPropContext(PhMainWndHandle, targetProcessItem);
+                propContext = PhCreateProcessPropContext(NULL, targetProcessItem);
                 PhDereferenceObject(targetProcessItem);
                 PhSetSelectThreadIdProcessPropContext(propContext, clientId.UniqueThread);
                 ProcessHacker_Invoke(PhMainWndHandle, PhpShowProcessPropContext, propContext);
@@ -370,6 +389,9 @@ VOID PhShowHandleObjectProperties2(
     _In_ PPH_HANDLE_ITEM_INFO Info
     )
 {
+    if (PhIsNullOrEmptyString(Info->TypeName))
+        return;
+
     if (PhEqualString2(Info->TypeName, L"File", TRUE) || PhEqualString2(Info->TypeName, L"DLL", TRUE) ||
         PhEqualString2(Info->TypeName, L"Mapped file", TRUE) || PhEqualString2(Info->TypeName, L"Mapped image", TRUE))
     {

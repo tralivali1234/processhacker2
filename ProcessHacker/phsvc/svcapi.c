@@ -3,6 +3,7 @@
  *   server API
  *
  * Copyright (C) 2011-2015 wj32
+ * Copyright (C) 2019 dmex
  *
  * This file is part of Process Hacker.
  *
@@ -22,17 +23,17 @@
 
 #include <phapp.h>
 #include <phsvc.h>
-
-#include <accctrl.h>
-
+#include <apiimport.h>
+#include <extmgri.h>
 #include <lsasup.h>
+#include <phplug.h>
 #include <secedit.h>
 #include <svcsup.h>
-#include <symprv.h>
 
-#include <extmgri.h>
-#include <mainwnd.h>
-#include <phplug.h>
+#include <accctrl.h>
+#include <dbghelp.h>
+#include <processsnapshot.h>
+#include <symprv.h>
 
 typedef struct _PHSVCP_CAPTURED_RUNAS_SERVICE_PARAMETERS
 {
@@ -64,7 +65,6 @@ PPHSVC_API_PROCEDURE PhSvcApiCallTable[] =
     PhSvcApiSendMessage,
     PhSvcApiCreateProcessIgnoreIfeoDebugger,
     PhSvcApiSetServiceSecurity,
-    PhSvcApiLoadDbgHelp,
     PhSvcApiWriteMiniDumpProcess
 };
 C_ASSERT(sizeof(PhSvcApiCallTable) / sizeof(PPHSVC_API_PROCEDURE) == PhSvcMaximumApiNumber - 1);
@@ -109,7 +109,7 @@ PVOID PhSvcValidateString(
     PPHSVC_CLIENT client = PhSvcGetCurrentClient();
     PVOID address;
 
-    address = (PCHAR)client->ClientViewBase + String->Offset;
+    address = PTR_ADD_OFFSET(client->ClientViewBase, String->Offset);
 
     if ((ULONG_PTR)address + String->Length < (ULONG_PTR)address ||
         (ULONG_PTR)address < (ULONG_PTR)client->ClientViewBase ||
@@ -240,7 +240,7 @@ NTSTATUS PhSvcCaptureSid(
 
     if (sid)
     {
-        if (String->Length < (ULONG)FIELD_OFFSET(struct _SID, IdentifierAuthority) ||
+        if (String->Length < UFIELD_OFFSET(struct _SID, IdentifierAuthority) ||
             String->Length < RtlLengthRequiredSid(((struct _SID *)sid)->SubAuthorityCount) ||
             !RtlValidSid(sid))
         {
@@ -397,6 +397,7 @@ NTSTATUS PhSvcpCaptureRunAsServiceParameters(
     Parameters->DesktopName = PhGetString(CapturedParameters->DesktopName);
     Parameters->UseLinkedToken = Payload->u.ExecuteRunAsCommand.i.UseLinkedToken;
     Parameters->ServiceName = PhGetString(CapturedParameters->ServiceName);
+    Parameters->CreateSuspendedProcess = Payload->u.ExecuteRunAsCommand.i.CreateSuspendedProcess;
 
     return status;
 }
@@ -522,7 +523,8 @@ NTSTATUS PhSvcApiControlProcess(
 
                 priorityClass.Foreground = FALSE;
                 priorityClass.PriorityClass = (UCHAR)Payload->u.ControlProcess.i.Argument;
-                status = NtSetInformationProcess(processHandle, ProcessPriorityClass, &priorityClass, sizeof(PROCESS_PRIORITY_CLASS));
+
+                status = PhSetProcessPriority(processHandle, priorityClass);
 
                 NtClose(processHandle);
             }
@@ -863,7 +865,7 @@ NTSTATUS PhSvcpUnpackBuffer(
     if (offset & (Alignment - 1))
         return STATUS_DATATYPE_MISALIGNMENT;
 
-    *OffsetInBuffer = (PVOID)((ULONG_PTR)CapturedBuffer + offset);
+    *OffsetInBuffer = PTR_ADD_OFFSET(CapturedBuffer, offset);
 
     return STATUS_SUCCESS;
 }
@@ -897,8 +899,8 @@ NTSTATUS PhSvcpUnpackStringZ(
     if (offset & 1)
         return STATUS_DATATYPE_MISALIGNMENT;
 
-    start = (PWCHAR)((ULONG_PTR)CapturedBuffer + offset);
-    end = (PWCHAR)((ULONG_PTR)CapturedBuffer + (PackedData->Length & -2));
+    start = (PWCHAR)PTR_ADD_OFFSET(CapturedBuffer, offset);
+    end = (PWCHAR)PTR_ADD_OFFSET(CapturedBuffer, (PackedData->Length & -2));
     remainingPart.Buffer = start;
     remainingPart.Length = (end - start) * sizeof(WCHAR);
 
@@ -1113,11 +1115,11 @@ NTSTATUS PhSvcApiSetTcpEntry(
     ULONG (__stdcall *localSetTcpEntry)(PVOID TcpRow);
     struct
     {
-        DWORD dwState;
-        DWORD dwLocalAddr;
-        DWORD dwLocalPort;
-        DWORD dwRemoteAddr;
-        DWORD dwRemotePort;
+        ULONG dwState;
+        ULONG dwLocalAddr;
+        ULONG dwLocalPort;
+        ULONG dwRemoteAddr;
+        ULONG dwRemotePort;
     } tcpRow;
     ULONG result;
 
@@ -1131,7 +1133,7 @@ NTSTATUS PhSvcApiSetTcpEntry(
 
         if (iphlpapiModule)
         {
-            localSetTcpEntry = (PVOID)GetProcAddress(iphlpapiModule, "SetTcpEntry");
+            localSetTcpEntry = PhGetDllBaseProcedureAddress(iphlpapiModule, "SetTcpEntry", 0);
 
             if (localSetTcpEntry)
             {
@@ -1392,27 +1394,24 @@ NTSTATUS PhSvcApiSetServiceSecurity(
     return status;
 }
 
-NTSTATUS PhSvcApiLoadDbgHelp(
-    _In_ PPHSVC_CLIENT Client,
-    _Inout_ PPHSVC_API_PAYLOAD Payload
+static BOOL CALLBACK PhpProcessMiniDumpCallback(
+    _In_ PVOID CallbackParam,
+    _In_ const PMINIDUMP_CALLBACK_INPUT CallbackInput,
+    _Inout_ PMINIDUMP_CALLBACK_OUTPUT CallbackOutput
     )
 {
-    static BOOLEAN alreadyLoaded;
-
-    NTSTATUS status;
-    PPH_STRING dbgHelpPath;
-
-    if (alreadyLoaded)
-        return STATUS_SOME_NOT_MAPPED;
-
-    if (NT_SUCCESS(status = PhSvcCaptureString(&Payload->u.LoadDbgHelp.i.DbgHelpPath, FALSE, &dbgHelpPath)))
+    switch (CallbackInput->CallbackType)
     {
-        PH_AUTO(dbgHelpPath);
-        PhLoadDbgHelpFromPath(dbgHelpPath->Buffer);
-        alreadyLoaded = TRUE;
+    case IsProcessSnapshotCallback:
+        if (CallbackParam)
+            CallbackOutput->Status = S_FALSE;
+        break;
+    case ReadMemoryFailureCallback:
+        CallbackOutput->Status = S_OK;
+        break;
     }
 
-    return status;
+    return TRUE;
 }
 
 NTSTATUS PhSvcApiWriteMiniDumpProcess(
@@ -1420,23 +1419,86 @@ NTSTATUS PhSvcApiWriteMiniDumpProcess(
     _Inout_ PPHSVC_API_PAYLOAD Payload
     )
 {
+    MINIDUMP_CALLBACK_INFORMATION callbackInfo = { 0 };
+    HANDLE processHandle = NULL;
+    HPSS snapshotHandle = NULL;
+
+    if (PssCaptureSnapshot_Import())
+    {
+        PssCaptureSnapshot_Import()(
+            UlongToHandle(Payload->u.WriteMiniDumpProcess.i.LocalProcessHandle),
+            PSS_CAPTURE_VA_CLONE | PSS_CAPTURE_VA_SPACE | PSS_CAPTURE_VA_SPACE_SECTION_INFORMATION |
+            PSS_CAPTURE_HANDLE_TRACE | PSS_CAPTURE_HANDLES | PSS_CAPTURE_HANDLE_BASIC_INFORMATION |
+            PSS_CAPTURE_HANDLE_TYPE_SPECIFIC_INFORMATION | PSS_CAPTURE_HANDLE_NAME_INFORMATION |
+            PSS_CAPTURE_THREADS | PSS_CAPTURE_THREAD_CONTEXT | PSS_CREATE_USE_VM_ALLOCATIONS,
+            CONTEXT_ALL,
+            &snapshotHandle
+            );
+    }
+
+    callbackInfo.CallbackRoutine = PhpProcessMiniDumpCallback;
+    callbackInfo.CallbackParam = snapshotHandle;
+
+    if (snapshotHandle)
+        processHandle = snapshotHandle;
+    else
+        processHandle = UlongToHandle(Payload->u.WriteMiniDumpProcess.i.LocalProcessHandle);
+
     if (PhWriteMiniDumpProcess(
-        UlongToHandle(Payload->u.WriteMiniDumpProcess.i.LocalProcessHandle),
+        processHandle,
         UlongToHandle(Payload->u.WriteMiniDumpProcess.i.ProcessId),
         UlongToHandle(Payload->u.WriteMiniDumpProcess.i.LocalFileHandle),
         Payload->u.WriteMiniDumpProcess.i.DumpType,
         NULL,
         NULL,
-        NULL
+        &callbackInfo
         ))
     {
+        if (snapshotHandle)
+        {
+            PSS_VA_CLONE_INFORMATION processInfo;
+
+            if (PssQuerySnapshot_Import() && PssQuerySnapshot_Import()(
+                snapshotHandle,
+                PSS_QUERY_VA_CLONE_INFORMATION,
+                &processInfo,
+                sizeof(PSS_VA_CLONE_INFORMATION)
+                ) == ERROR_SUCCESS)
+            {
+                NtClose(processInfo.VaCloneHandle);
+            }
+
+            if (PssFreeSnapshot_Import() && snapshotHandle)
+            {
+                PssFreeSnapshot_Import()(processHandle, snapshotHandle);
+            }
+        }
+
         return STATUS_SUCCESS;
     }
     else
     {
-        ULONG error;
+        ULONG error = GetLastError();
 
-        error = GetLastError();
+        if (snapshotHandle)
+        {
+            PSS_VA_CLONE_INFORMATION processInfo;
+
+            if (PssQuerySnapshot_Import() && PssQuerySnapshot_Import()(
+                snapshotHandle,
+                PSS_QUERY_VA_CLONE_INFORMATION,
+                &processInfo,
+                sizeof(PSS_VA_CLONE_INFORMATION)
+                ) == ERROR_SUCCESS)
+            {
+                NtClose(processInfo.VaCloneHandle);
+            }
+
+            if (PssFreeSnapshot_Import() && snapshotHandle)
+            {
+                PssFreeSnapshot_Import()(processHandle, snapshotHandle);
+            }
+        }
 
         if (error == HRESULT_FROM_WIN32(ERROR_INVALID_PARAMETER))
             return STATUS_INVALID_PARAMETER;

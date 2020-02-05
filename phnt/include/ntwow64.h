@@ -141,7 +141,8 @@ typedef struct _LDR_DATA_TABLE_ENTRY32
             ULONG CorImage : 1;
             ULONG DontRelocate : 1;
             ULONG CorILOnly : 1;
-            ULONG ReservedFlags5 : 3;
+            ULONG ChpeImage : 1;
+            ULONG ReservedFlags5 : 2;
             ULONG Redirected : 1;
             ULONG ReservedFlags6 : 2;
             ULONG CompatDatabaseProcessed : 1;
@@ -167,6 +168,7 @@ typedef struct _LDR_DATA_TABLE_ENTRY32
     ULONG ImplicitPathOptions;
     ULONG ReferenceCount;
     ULONG DependentLoadFlags;
+    UCHAR SigningLevel; // since REDSTONE2
 } LDR_DATA_TABLE_ENTRY32, *PLDR_DATA_TABLE_ENTRY32;
 
 typedef struct _CURDIR32
@@ -219,11 +221,16 @@ typedef struct _RTL_USER_PROCESS_PARAMETERS32
     UNICODE_STRING32 RuntimeData;
     RTL_DRIVE_LETTER_CURDIR32 CurrentDirectories[RTL_MAX_DRIVE_LETTERS];
 
-    ULONG EnvironmentSize;
-    ULONG EnvironmentVersion;
+    WOW64_POINTER(ULONG_PTR) EnvironmentSize;
+    WOW64_POINTER(ULONG_PTR) EnvironmentVersion;
     WOW64_POINTER(PVOID) PackageDependencyData;
     ULONG ProcessGroupId;
     ULONG LoaderThreads;
+
+    UNICODE_STRING32 RedirectionDllName; // REDSTONE4
+    UNICODE_STRING32 HeapPartitionName; // 19H1
+    WOW64_POINTER(ULONG_PTR) DefaultThreadpoolCpuSetMasks;
+    ULONG DefaultThreadpoolCpuSetMaskCount;
 } RTL_USER_PROCESS_PARAMETERS32, *PRTL_USER_PROCESS_PARAMETERS32;
 
 typedef struct _PEB32
@@ -274,7 +281,7 @@ typedef struct _PEB32
         WOW64_POINTER(PVOID) KernelCallbackTable;
         WOW64_POINTER(PVOID) UserSharedInfoPtr;
     };
-    ULONG SystemReserved[1];
+    ULONG SystemReserved;
     ULONG AtlThunkSListPtr32;
     WOW64_POINTER(PVOID) ApiSetMap;
     ULONG TlsExpansionCounter;
@@ -337,11 +344,13 @@ typedef struct _PEB32
 
     WOW64_POINTER(SIZE_T) MinimumStackCommit;
 
-    WOW64_POINTER(PVOID *) FlsCallback;
-    LIST_ENTRY32 FlsListHead;
-    WOW64_POINTER(PVOID) FlsBitmap;
-    ULONG FlsBitmapBits[FLS_MAXIMUM_AVAILABLE / (sizeof(ULONG) * 8)];
-    ULONG FlsHighIndex;
+    WOW64_POINTER(PVOID) SparePointers[4];
+    ULONG SpareUlongs[5];
+    //WOW64_POINTER(PVOID *) FlsCallback;
+    //LIST_ENTRY32 FlsListHead;
+    //WOW64_POINTER(PVOID) FlsBitmap;
+    //ULONG FlsBitmapBits[FLS_MAXIMUM_AVAILABLE / (sizeof(ULONG) * 8)];
+    //ULONG FlsHighIndex;
 
     WOW64_POINTER(PVOID) WerRegistrationData;
     WOW64_POINTER(PVOID) WerShipAssertPtr;
@@ -362,6 +371,11 @@ typedef struct _PEB32
     WOW64_POINTER(PVOID) TppWorkerpListLock;
     LIST_ENTRY32 TppWorkerpList;
     WOW64_POINTER(PVOID) WaitOnAddressHashTable[128];
+    WOW64_POINTER(PVOID) TelemetryCoverageHeader; // REDSTONE3
+    ULONG CloudFileFlags;
+    ULONG CloudFileDiagFlags; // REDSTONE4
+    CHAR PlaceholderCompatibilityMode;
+    CHAR PlaceholderCompatibilityModeReserved[7];
 } PEB32, *PPEB32;
 
 C_ASSERT(FIELD_OFFSET(PEB32, IFEOKey) == 0x024);
@@ -369,7 +383,8 @@ C_ASSERT(FIELD_OFFSET(PEB32, UnicodeCaseTableData) == 0x060);
 C_ASSERT(FIELD_OFFSET(PEB32, SystemAssemblyStorageMap) == 0x204);
 C_ASSERT(FIELD_OFFSET(PEB32, pImageHeaderHash) == 0x23c);
 C_ASSERT(FIELD_OFFSET(PEB32, WaitOnAddressHashTable) == 0x25c);
-C_ASSERT(sizeof(PEB32) == 0x460);
+//C_ASSERT(sizeof(PEB32) == 0x460); // REDSTONE3
+C_ASSERT(sizeof(PEB32) == 0x470);
 
 #define GDI_BATCH_BUFFER_SIZE 310
 

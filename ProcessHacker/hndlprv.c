@@ -3,6 +3,7 @@
  *   handle provider
  *
  * Copyright (C) 2010-2015 wj32
+ * Copyright (C) 2017 dmex
  *
  * This file is part of Process Hacker.
  *
@@ -25,6 +26,7 @@
 
 #include <hndlinfo.h>
 #include <kphuser.h>
+#include <settings.h>
 #include <workqueue.h>
 
 #include <extmgri.h>
@@ -45,29 +47,27 @@ VOID NTAPI PhpHandleItemDeleteProcedure(
     _In_ ULONG Flags
     );
 
-PPH_OBJECT_TYPE PhHandleProviderType;
-PPH_OBJECT_TYPE PhHandleItemType;
-
-BOOLEAN PhHandleProviderInitialization(
-    VOID
-    )
-{
-    PhHandleProviderType = PhCreateObjectType(L"HandleProvider", 0, PhpHandleProviderDeleteProcedure);
-    PhHandleItemType = PhCreateObjectType(L"HandleItem", 0, PhpHandleItemDeleteProcedure);
-
-    return TRUE;
-}
+PPH_OBJECT_TYPE PhHandleProviderType = NULL;
+PPH_OBJECT_TYPE PhHandleItemType = NULL;
 
 PPH_HANDLE_PROVIDER PhCreateHandleProvider(
     _In_ HANDLE ProcessId
     )
 {
+    static PH_INITONCE initOnce = PH_INITONCE_INIT;
     PPH_HANDLE_PROVIDER handleProvider;
+
+    if (PhBeginInitOnce(&initOnce))
+    {
+        PhHandleProviderType = PhCreateObjectType(L"HandleProvider", 0, PhpHandleProviderDeleteProcedure);
+        PhEndInitOnce(&initOnce);
+    }
 
     handleProvider = PhCreateObject(
         PhEmGetObjectSize(EmHandleProviderType, sizeof(PH_HANDLE_PROVIDER)),
         PhHandleProviderType
         );
+    memset(handleProvider, 0, sizeof(PH_HANDLE_PROVIDER));
 
     handleProvider->HandleHashSetSize = 128;
     handleProvider->HandleHashSet = PhCreateHashSet(handleProvider->HandleHashSetSize);
@@ -84,11 +84,11 @@ PPH_HANDLE_PROVIDER PhCreateHandleProvider(
 
     handleProvider->RunStatus = PhOpenProcess(
         &handleProvider->ProcessHandle,
-        PROCESS_DUP_HANDLE,
+        PROCESS_QUERY_INFORMATION | PROCESS_DUP_HANDLE,
         ProcessId
         );
 
-    handleProvider->TempListHashtable = PhCreateSimpleHashtable(20);
+    handleProvider->TempListHashtable = PhCreateSimpleHashtable(512);
 
     PhEmCallObjectOperation(EmHandleProviderType, handleProvider, EmObjectCreate);
 
@@ -122,7 +122,14 @@ PPH_HANDLE_ITEM PhCreateHandleItem(
     _In_opt_ PSYSTEM_HANDLE_TABLE_ENTRY_INFO_EX Handle
     )
 {
+    static PH_INITONCE initOnce = PH_INITONCE_INIT;
     PPH_HANDLE_ITEM handleItem;
+
+    if (PhBeginInitOnce(&initOnce))
+    {
+        PhHandleItemType = PhCreateObjectType(L"HandleItem", 0, PhpHandleItemDeleteProcedure);
+        PhEndInitOnce(&initOnce);
+    }
 
     handleItem = PhCreateObject(
         PhEmGetObjectSize(EmHandleItemType, sizeof(PH_HANDLE_ITEM)),
@@ -133,12 +140,10 @@ PPH_HANDLE_ITEM PhCreateHandleItem(
     if (Handle)
     {
         handleItem->Handle = (HANDLE)Handle->HandleValue;
-        PhPrintPointer(handleItem->HandleString, (PVOID)handleItem->Handle);
         handleItem->Object = Handle->Object;
-        PhPrintPointer(handleItem->ObjectString, handleItem->Object);
         handleItem->Attributes = Handle->HandleAttributes;
         handleItem->GrantedAccess = (ACCESS_MASK)Handle->GrantedAccess;
-        PhPrintPointer(handleItem->GrantedAccessString, UlongToPtr(handleItem->GrantedAccess));
+        handleItem->TypeIndex = Handle->ObjectTypeIndex;
     }
 
     PhEmCallObjectOperation(EmHandleItemType, handleItem, EmObjectCreate);
@@ -299,12 +304,9 @@ NTSTATUS PhEnumHandlesGeneric(
     NTSTATUS status;
 
     // There are three ways of enumerating handles:
-    // * When KProcessHacker is available, using KphEnumerateProcessHandles
-    //   is the most efficient method.
-    // * On Windows XP and later, NtQuerySystemInformation with
-    //   SystemExtendedHandleInformation can be used.
-    // * Otherwise, NtQuerySystemInformation with SystemHandleInformation
-    //   can be used.
+    // * On Windows 8 and later, NtQueryInformationProcess with ProcessHandleInformation is the most efficient method.
+    // * On Windows XP and later, NtQuerySystemInformation with SystemExtendedHandleInformation.
+    // * Otherwise, NtQuerySystemInformation with SystemHandleInformation can be used.
 
     if (KphIsConnected())
     {
@@ -315,105 +317,76 @@ NTSTATUS PhEnumHandlesGeneric(
         // Enumerate handles using KProcessHacker. Unlike with NtQuerySystemInformation,
         // this only enumerates handles for a single process and saves a lot of processing.
 
-        if (NT_SUCCESS(status = KphEnumerateProcessHandles2(ProcessHandle, &handles)))
-        {
-            convertedHandles = PhAllocate(
-                FIELD_OFFSET(SYSTEM_HANDLE_INFORMATION_EX, Handles) +
-                sizeof(SYSTEM_HANDLE_TABLE_ENTRY_INFO_EX) * handles->HandleCount
-                );
-
-            convertedHandles->NumberOfHandles = handles->HandleCount;
-
-            for (i = 0; i < handles->HandleCount; i++)
-            {
-                convertedHandles->Handles[i].Object = handles->Handles[i].Object;
-                convertedHandles->Handles[i].UniqueProcessId = (ULONG_PTR)ProcessId;
-                convertedHandles->Handles[i].HandleValue = (ULONG_PTR)handles->Handles[i].Handle;
-                convertedHandles->Handles[i].GrantedAccess = (ULONG)handles->Handles[i].GrantedAccess;
-                convertedHandles->Handles[i].CreatorBackTraceIndex = 0;
-                convertedHandles->Handles[i].ObjectTypeIndex = handles->Handles[i].ObjectTypeIndex;
-                convertedHandles->Handles[i].HandleAttributes = handles->Handles[i].HandleAttributes;
-            }
-
-            PhFree(handles);
-
-            *Handles = convertedHandles;
-            *FilterNeeded = FALSE;
-
-            return status;
-        }
-    }
-
-    if (WindowsVersion >= WINDOWS_XP)
-    {
-        PSYSTEM_HANDLE_INFORMATION_EX handles;
-
-        // Enumerate handles using the new method; no conversion
-        // necessary.
-
-        if (!NT_SUCCESS(status = PhEnumHandlesEx(&handles)))
-            return status;
-
-        *Handles = handles;
-        *FilterNeeded = TRUE;
-    }
-    else
-    {
-        PSYSTEM_HANDLE_INFORMATION handles;
-        PSYSTEM_HANDLE_INFORMATION_EX convertedHandles;
-        ULONG count;
-        ULONG allocatedCount;
-        ULONG i;
-
-        // Enumerate handles using the old info class and convert
-        // the relevant entries to the new format.
-
-        if (!NT_SUCCESS(status = PhEnumHandles(&handles)))
-            return status;
-
-        count = 0;
-        allocatedCount = 100;
+        if (!NT_SUCCESS(status = KphEnumerateProcessHandles2(ProcessHandle, &handles)))
+            goto FAILED;
 
         convertedHandles = PhAllocate(
             FIELD_OFFSET(SYSTEM_HANDLE_INFORMATION_EX, Handles) +
-            sizeof(SYSTEM_HANDLE_TABLE_ENTRY_INFO_EX) * allocatedCount
+            sizeof(SYSTEM_HANDLE_TABLE_ENTRY_INFO_EX) * handles->HandleCount
             );
 
-        for (i = 0; i < handles->NumberOfHandles; i++)
+        convertedHandles->NumberOfHandles = handles->HandleCount;
+
+        for (i = 0; i < handles->HandleCount; i++)
         {
-            if ((HANDLE)handles->Handles[i].UniqueProcessId != ProcessId)
-                continue;
-
-            if (count == allocatedCount)
-            {
-                allocatedCount *= 2;
-                convertedHandles = PhReAllocate(
-                    convertedHandles,
-                    FIELD_OFFSET(SYSTEM_HANDLE_INFORMATION_EX, Handles) +
-                    sizeof(SYSTEM_HANDLE_TABLE_ENTRY_INFO_EX) * allocatedCount
-                    );
-            }
-
-            convertedHandles->Handles[count].Object = handles->Handles[i].Object;
-            convertedHandles->Handles[count].UniqueProcessId = (ULONG_PTR)handles->Handles[i].UniqueProcessId;
-            convertedHandles->Handles[count].HandleValue = (ULONG_PTR)handles->Handles[i].HandleValue;
-            convertedHandles->Handles[count].GrantedAccess = handles->Handles[i].GrantedAccess;
-            convertedHandles->Handles[count].CreatorBackTraceIndex = handles->Handles[i].CreatorBackTraceIndex;
-            convertedHandles->Handles[count].ObjectTypeIndex = handles->Handles[i].ObjectTypeIndex;
-            convertedHandles->Handles[count].HandleAttributes = (ULONG)handles->Handles[i].HandleAttributes;
-
-            count++;
+            convertedHandles->Handles[i].Object = handles->Handles[i].Object;
+            convertedHandles->Handles[i].UniqueProcessId = (ULONG_PTR)ProcessId;
+            convertedHandles->Handles[i].HandleValue = (ULONG_PTR)handles->Handles[i].Handle;
+            convertedHandles->Handles[i].GrantedAccess = (ULONG)handles->Handles[i].GrantedAccess;
+            convertedHandles->Handles[i].CreatorBackTraceIndex = 0;
+            convertedHandles->Handles[i].ObjectTypeIndex = handles->Handles[i].ObjectTypeIndex;
+            convertedHandles->Handles[i].HandleAttributes = handles->Handles[i].HandleAttributes;
         }
-
-        convertedHandles->NumberOfHandles = count;
 
         PhFree(handles);
 
         *Handles = convertedHandles;
         *FilterNeeded = FALSE;
     }
+    else if (WindowsVersion >= WINDOWS_8 && PhGetIntegerSetting(L"EnableHandleSnapshot"))
+    {
+        PPROCESS_HANDLE_SNAPSHOT_INFORMATION handles;
+        PSYSTEM_HANDLE_INFORMATION_EX convertedHandles;
+        ULONG i;
 
-    return STATUS_SUCCESS;
+        if (!NT_SUCCESS(status = PhEnumHandlesEx2(ProcessHandle, &handles)))
+            goto FAILED;
+
+        convertedHandles = PhAllocate(
+            FIELD_OFFSET(SYSTEM_HANDLE_INFORMATION_EX, Handles) +
+            sizeof(SYSTEM_HANDLE_TABLE_ENTRY_INFO_EX) * handles->NumberOfHandles
+            );
+
+        convertedHandles->NumberOfHandles = handles->NumberOfHandles;
+
+        for (i = 0; i < handles->NumberOfHandles; i++)
+        {
+            convertedHandles->Handles[i].Object = 0;
+            convertedHandles->Handles[i].UniqueProcessId = (ULONG_PTR)ProcessId;
+            convertedHandles->Handles[i].HandleValue = (ULONG_PTR)handles->Handles[i].HandleValue;
+            convertedHandles->Handles[i].GrantedAccess = handles->Handles[i].GrantedAccess;
+            convertedHandles->Handles[i].CreatorBackTraceIndex = 0;
+            convertedHandles->Handles[i].ObjectTypeIndex = (USHORT)handles->Handles[i].ObjectTypeIndex;
+            convertedHandles->Handles[i].HandleAttributes = handles->Handles[i].HandleAttributes;
+        }
+
+        PhFree(handles);
+
+        *Handles = convertedHandles;
+        *FilterNeeded = FALSE;
+    }
+    else
+    {
+        PSYSTEM_HANDLE_INFORMATION_EX handles;
+FAILED:
+        if (!NT_SUCCESS(status = PhEnumHandlesEx(&handles)))
+            return status;
+
+        *Handles = handles;
+        *FilterNeeded = TRUE;
+    }
+
+    return status;
 }
 
 NTSTATUS PhpCreateHandleItemFunction(
@@ -463,7 +436,7 @@ VOID PhHandleProviderUpdate(
     )
 {
     static PH_INITONCE initOnce = PH_INITONCE_INIT;
-    static ULONG fileObjectTypeIndex = -1;
+    static ULONG fileObjectTypeIndex = ULONG_MAX;
 
     PPH_HANDLE_PROVIDER handleProvider = (PPH_HANDLE_PROVIDER)Object;
     PSYSTEM_HANDLE_INFORMATION_EX handleInfo;
@@ -487,17 +460,17 @@ VOID PhHandleProviderUpdate(
         )))
         goto UpdateExit;
 
-    if (!KphIsConnected() && WindowsVersion >= WINDOWS_VISTA)
+    if (!KphIsConnected())
     {
         useWorkQueue = TRUE;
         PhInitializeWorkQueue(&workQueue, 1, 20, 1000);
 
         if (PhBeginInitOnce(&initOnce))
         {
-            UNICODE_STRING fileTypeName;
+            UNICODE_STRING fileTypeName = RTL_CONSTANT_STRING(L"File");
 
-            RtlInitUnicodeString(&fileTypeName, L"File");
             fileObjectTypeIndex = PhGetObjectTypeNumber(&fileTypeName);
+
             PhEndInitOnce(&initOnce);
         }
     }
@@ -508,7 +481,7 @@ VOID PhHandleProviderUpdate(
     // Make a list of the relevant handles.
     if (filterNeeded)
     {
-        for (i = 0; i < (ULONG)numberOfHandles; i++)
+        for (i = 0; i < numberOfHandles; i++)
         {
             PSYSTEM_HANDLE_TABLE_ENTRY_INFO_EX handle = &handles[i];
 
@@ -524,7 +497,7 @@ VOID PhHandleProviderUpdate(
     }
     else
     {
-        for (i = 0; i < (ULONG)numberOfHandles; i++)
+        for (i = 0; i < numberOfHandles; i++)
         {
             PSYSTEM_HANDLE_TABLE_ENTRY_INFO_EX handle = &handles[i];
 
@@ -564,9 +537,20 @@ VOID PhHandleProviderUpdate(
                     // different object wasn't re-opened with the same
                     // handle value. This isn't 100% accurate as pool
                     // addresses may be re-used, but it works well.
-                    if (handleItem->Object == (*tempHashtableValue)->Object)
+                    if (handleItem->Object && handleItem->Object == (*tempHashtableValue)->Object)
                     {
                         found = TRUE;
+                    }
+                    else
+                    {
+                        if (
+                            handleItem->Handle == (HANDLE)(*tempHashtableValue)->HandleValue &&
+                            handleItem->GrantedAccess == (*tempHashtableValue)->GrantedAccess &&
+                            handleItem->TypeIndex == (*tempHashtableValue)->ObjectTypeIndex
+                            )
+                        {
+                            found = TRUE;
+                        }
                     }
                 }
 
@@ -641,14 +625,20 @@ VOID PhHandleProviderUpdate(
                 NULL
                 );
 
-            // We need at least a type name to continue.
-            if (!handleItem->TypeName)
+            // HACK: Some security products block NtQueryObject with ObjectTypeInformation and return an invalid type
+            // so we need to lookup the TypeName using the TypeIndex. We should improve PhGetHandleInformationEx for this case
+            // but for now we'll preserve backwards compat by doing the lookup here. (dmex)
+            if (PhIsNullOrEmptyString(handleItem->TypeName))
             {
-                PhDereferenceObject(handleItem);
-                continue;
+                PPH_STRING typeName;
+
+                if (typeName = PhGetObjectTypeName(handleItem->TypeIndex))
+                {
+                    PhMoveReference(&handleItem->TypeName, typeName);
+                }
             }
 
-            if (PhEqualString2(handleItem->TypeName, L"File", TRUE) && KphIsConnected())
+            if (handleItem->TypeName && PhEqualString2(handleItem->TypeName, L"File", TRUE) && KphIsConnected())
             {
                 KPH_FILE_OBJECT_INFORMATION objectInfo;
 

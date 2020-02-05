@@ -14,7 +14,10 @@
 #define PHNETLC_STATE 6
 #define PHNETLC_OWNER 7
 #define PHNETLC_TIMESTAMP 8
-#define PHNETLC_MAXIMUM 9
+#define PHNETLC_LOCALHOSTNAME 9
+#define PHNETLC_REMOTEHOSTNAME 10
+#define PHNETLC_PID 11
+#define PHNETLC_MAXIMUM 12
 
 // begin_phapppub
 typedef struct _PH_NETWORK_NODE
@@ -28,11 +31,10 @@ typedef struct _PH_NETWORK_NODE
 
     PH_STRINGREF TextCache[PHNETLC_MAXIMUM];
 
-    LONG UniqueId;
+    ULONG64 UniqueId;
     PPH_STRING ProcessNameText;
-    PH_STRINGREF LocalAddressText;
-    PH_STRINGREF RemoteAddressText;
     PPH_STRING TimeStampText;
+    PPH_STRING PidText;
 
     PPH_STRING TooltipText;
 // begin_phapppub

@@ -20,6 +20,16 @@
 #define PHHNTLC_MAXIMUM 9
 
 // begin_phapppub
+typedef enum _PH_HANDLE_TREE_MENUITEM
+{
+    PH_HANDLE_TREE_MENUITEM_NONE,
+    PH_HANDLE_TREE_MENUITEM_HIDEUNNAMEDHANDLES,
+    PH_HANDLE_TREE_MENUITEM_HIDEETWHANDLES,
+    PH_HANDLE_TREE_MENUITEM_MAXIMUM
+} PH_HANDLE_TREE_MENUITEM;
+// end_phapppub
+
+// begin_phapppub
 typedef struct _PH_HANDLE_NODE
 {
     PH_TREENEW_NODE Node;
@@ -34,6 +44,7 @@ typedef struct _PH_HANDLE_NODE
 
     PPH_STRING GrantedAccessSymbolicText;
     WCHAR FileShareAccessText[4];
+    WCHAR ObjectString[PH_PTR_STR_LEN_1];
 // begin_phapppub
 } PH_HANDLE_NODE, *PPH_HANDLE_NODE;
 // end_phapppub
@@ -43,14 +54,27 @@ typedef struct _PH_HANDLE_LIST_CONTEXT
     HWND ParentWindowHandle;
     HWND TreeNewHandle;
     ULONG TreeNewSortColumn;
+
+    PH_TN_FILTER_SUPPORT TreeFilterSupport;
     PH_SORT_ORDER TreeNewSortOrder;
     PH_CM_MANAGER Cm;
-    BOOLEAN HideUnnamedHandles;
+
+    BOOLEAN EnableStateHighlighting;
+
+    union
+    {
+        ULONG Flags;
+        struct
+        {
+            ULONG Reserved : 1;
+            ULONG HideUnnamedHandles : 1;
+            ULONG HideEtwHandles : 1;
+            ULONG Spare : 22;
+        };
+    };
 
     PPH_HASHTABLE NodeHashtable;
     PPH_LIST NodeList;
-
-    BOOLEAN EnableStateHighlighting;
     PPH_POINTER_LIST NodeStateList;
 } PH_HANDLE_LIST_CONTEXT, *PPH_HANDLE_LIST_CONTEXT;
 
@@ -74,7 +98,7 @@ VOID PhSaveSettingsHandleList(
 
 VOID PhSetOptionsHandleList(
     _Inout_ PPH_HANDLE_LIST_CONTEXT Context,
-    _In_ BOOLEAN HideUnnamedHandles
+    _In_ ULONG Options
     );
 
 PPH_HANDLE_NODE PhAddHandleNode(
@@ -96,6 +120,11 @@ VOID PhRemoveHandleNode(
 VOID PhUpdateHandleNode(
     _In_ PPH_HANDLE_LIST_CONTEXT Context,
     _In_ PPH_HANDLE_NODE HandleNode
+    );
+
+VOID PhExpandAllHandleNodes(
+    _In_ PPH_HANDLE_LIST_CONTEXT Context,
+    _In_ BOOLEAN Expand
     );
 
 VOID PhTickHandleNodes(

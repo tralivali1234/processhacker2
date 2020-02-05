@@ -2,7 +2,7 @@
  * Process Hacker Plugins -
  *   Hardware Devices Plugin
  *
- * Copyright (C) 2016 dmex
+ * Copyright (C) 2016-2018 dmex
  *
  * This file is part of Process Hacker.
  *
@@ -21,72 +21,55 @@
  */
 
 #include "devices.h"
-#include <Dbt.h>
+#include <dbt.h>
 
-static BOOLEAN SubclassActive = FALSE;
+BOOLEAN MainWndDeviceChangeRegistrationEnabled = FALSE;
+PH_CALLBACK_REGISTRATION MainWndDeviceChangeEventRegistration;
 
-LRESULT CALLBACK MainWndDevicesSubclassProc(
-    _In_ HWND hWnd,
-    _In_ UINT uMsg,
-    _In_ WPARAM wParam,
-    _In_ LPARAM lParam,
-    _In_ UINT_PTR uIdSubclass,
-    _In_ ULONG_PTR dwRefData
+VOID NTAPI HardwareDevicesDeviceChangeCallback(
+    _In_opt_ PVOID Parameter,
+    _In_opt_ PVOID Context
     )
 {
-    // Subclassing the main window just to process drive letter notifications
-    // is bad and I don't know of any other way to achieve this.
-    // The IOCTL_MOUNTMGR_CHANGE_NOTIFY callback would have been preferred but
-    // doesn't work from non-elevated processes.
+    PMSG message = Parameter;
 
-    switch (uMsg)
+    if (!message)
+        return;
+
+    switch (message->wParam)
     {
-    case WM_DEVICECHANGE:
+    case DBT_DEVICEARRIVAL: // Drive letter added
+    case DBT_DEVICEREMOVECOMPLETE: // Drive letter removed
         {
-            switch (wParam)
+            DEV_BROADCAST_HDR* deviceBroadcast = (DEV_BROADCAST_HDR*)message->lParam;
+
+            if (deviceBroadcast->dbch_devicetype == DBT_DEVTYP_VOLUME)
             {
-            case DBT_DEVICEARRIVAL: // Drive letter added
-            case DBT_DEVICEREMOVECOMPLETE: // Drive letter removed
+                //PDEV_BROADCAST_VOLUME deviceVolume = (PDEV_BROADCAST_VOLUME)deviceBroadcast;
+
+                PhAcquireQueuedLockShared(&DiskDrivesListLock);
+
+                for (ULONG i = 0; i < DiskDrivesList->Count; i++)
                 {
-                    DEV_BROADCAST_HDR* deviceBroadcast = (DEV_BROADCAST_HDR*)lParam;
+                    PDV_DISK_ENTRY entry;
 
-                    if (deviceBroadcast->dbch_devicetype == DBT_DEVTYP_VOLUME)
-                    {
-                        //PDEV_BROADCAST_VOLUME deviceVolume = (PDEV_BROADCAST_VOLUME)deviceBroadcast;
+                    entry = PhReferenceObjectSafe(DiskDrivesList->Items[i]);
 
-                        PhAcquireQueuedLockShared(&DiskDrivesListLock);
+                    if (!entry)
+                        continue;
 
-                        for (ULONG i = 0; i < DiskDrivesList->Count; i++)
-                        {
-                            PDV_DISK_ENTRY entry;
+                    // Reset the DiskIndex so we can re-query the index on the next interval update.
+                    entry->DiskIndex = ULONG_MAX;
+                    // Reset the DiskIndexName so we can re-query the name on the next interval update.
+                    PhClearReference(&entry->DiskIndexName);
 
-                            entry = PhReferenceObjectSafe(DiskDrivesList->Items[i]);
-
-                            if (!entry)
-                                continue;
-
-                            // Reset the DiskIndex so we can re-query the index on the next interval update.
-                            entry->DiskIndex = ULONG_MAX;
-                            // Reset the DiskIndexName so we can re-query the name on the next interval update.
-                            PhClearReference(&entry->DiskIndexName);
-
-                            PhDereferenceObjectDeferDelete(entry);
-                        }
-
-                        PhReleaseQueuedLockShared(&DiskDrivesListLock);
-                    }
+                    PhDereferenceObjectDeferDelete(entry);
                 }
+
+                PhReleaseQueuedLockShared(&DiskDrivesListLock);
             }
-
-            goto DefaultWndProc;
         }
-        break;
     }
-
-    return DefSubclassProc(hWnd, uMsg, wParam, lParam);
-
-DefaultWndProc:
-    return DefWindowProc(hWnd, uMsg, wParam, lParam);
 }
 
 VOID AddRemoveDeviceChangeCallback(
@@ -98,22 +81,27 @@ VOID AddRemoveDeviceChangeCallback(
         return;
 
     // Add the subclass only when disks are being monitored, remove when no longer needed.
-    if (DiskDrivesList->Count != 0)
+    if (DiskDrivesList->Count)
     {
-        if (!SubclassActive)
+        if (!MainWndDeviceChangeRegistrationEnabled)
         {
-            // We have a disk device, subclass the main window to detect drive letter changes.
-            SetWindowSubclass(PhMainWndHandle, MainWndDevicesSubclassProc, 0, 0);
-            SubclassActive = TRUE;
+            // We have a disk device, register for window events needed to detect drive letter changes.
+            MainWndDeviceChangeRegistrationEnabled = TRUE;
+            PhRegisterCallback(
+                PhGetGeneralCallback(GeneralCallbackWindowNotifyEvent),
+                HardwareDevicesDeviceChangeCallback,
+                NULL,
+                &MainWndDeviceChangeEventRegistration
+                );
         }
     }
     else
     {
-        if (SubclassActive)
+        if (MainWndDeviceChangeRegistrationEnabled)
         {
-            // The user has removed the last disk device, remove the subclass.
-            RemoveWindowSubclass(PhMainWndHandle, MainWndDevicesSubclassProc, 0);
-            SubclassActive = FALSE;
+            // Remove the event callback after the user has removed the last disk device.
+            PhUnregisterCallback(PhGetGeneralCallback(GeneralCallbackWindowNotifyEvent), &MainWndDeviceChangeEventRegistration);
+            MainWndDeviceChangeRegistrationEnabled = FALSE;
         }
     }
 }

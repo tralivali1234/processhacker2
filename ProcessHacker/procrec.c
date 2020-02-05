@@ -77,7 +77,7 @@ PPH_STRING PhpaGetRelativeTimeString(
 }
 
 FORCEINLINE PWSTR PhpGetStringOrNa(
-    _In_ PPH_STRING String
+    _In_ _Maybenull_ PPH_STRING String
     )
 {
     if (String)
@@ -98,15 +98,15 @@ INT_PTR CALLBACK PhpProcessRecordDlgProc(
     if (uMsg == WM_INITDIALOG)
     {
         context = (PPROCESS_RECORD_CONTEXT)lParam;
-        SetProp(hwndDlg, PhMakeContextAtom(), (HANDLE)context);
+        PhSetWindowContext(hwndDlg, PH_WINDOW_CONTEXT_DEFAULT, context);
     }
     else
     {
-        context = (PPROCESS_RECORD_CONTEXT)GetProp(hwndDlg, PhMakeContextAtom());
+        context = PhGetWindowContext(hwndDlg, PH_WINDOW_CONTEXT_DEFAULT);
 
         if (uMsg == WM_DESTROY)
         {
-            RemoveProp(hwndDlg, PhMakeContextAtom());
+            PhRemoveWindowContext(hwndDlg, PH_WINDOW_CONTEXT_DEFAULT);
         }
     }
 
@@ -133,34 +133,30 @@ INT_PTR CALLBACK PhpProcessRecordDlgProc(
             }
 
             PhCenterWindow(hwndDlg, GetParent(hwndDlg));
-            SendMessage(hwndDlg, WM_NEXTDLGCTL, (WPARAM)GetDlgItem(hwndDlg, IDOK), TRUE);
-            SetWindowText(hwndDlg, processNameString->Buffer);
+            PhSetDialogFocus(hwndDlg, GetDlgItem(hwndDlg, IDOK));
+            PhSetWindowText(hwndDlg, processNameString->Buffer);
 
-            SetDlgItemText(hwndDlg, IDC_PROCESSNAME, processNameString->Buffer);
+            PhSetDialogItemText(hwndDlg, IDC_PROCESSNAME, processNameString->Buffer);
 
             if (processItem = PhReferenceProcessItemForRecord(context->Record))
             {
                 PPH_PROCESS_ITEM parentProcess;
 
-                if (parentProcess = PhReferenceProcessItemForParent(
-                    processItem->ParentProcessId,
-                    processItem->ProcessId,
-                    &processItem->CreateTime
-                    ))
+                if (parentProcess = PhReferenceProcessItemForParent(processItem))
                 {
                     CLIENT_ID clientId;
 
                     clientId.UniqueProcess = parentProcess->ProcessId;
                     clientId.UniqueThread = NULL;
 
-                    SetDlgItemText(hwndDlg, IDC_PARENT,
+                    PhSetDialogItemText(hwndDlg, IDC_PARENT,
                         PH_AUTO_T(PH_STRING, PhGetClientIdNameEx(&clientId, parentProcess->ProcessName))->Buffer);
 
                     PhDereferenceObject(parentProcess);
                 }
                 else
                 {
-                    SetDlgItemText(hwndDlg, IDC_PARENT, PhaFormatString(L"Non-existent process (%u)",
+                    PhSetDialogItemText(hwndDlg, IDC_PARENT, PhaFormatString(L"Non-existent process (%u)",
                         HandleToUlong(context->Record->ParentProcessId))->Buffer);
                 }
 
@@ -168,7 +164,7 @@ INT_PTR CALLBACK PhpProcessRecordDlgProc(
             }
             else
             {
-                SetDlgItemText(hwndDlg, IDC_PARENT, PhaFormatString(L"Unknown process (%u)",
+                PhSetDialogItemText(hwndDlg, IDC_PARENT, PhaFormatString(L"Unknown process (%u)",
                     HandleToUlong(context->Record->ParentProcessId))->Buffer);
 
                 EnableWindow(GetDlgItem(hwndDlg, IDC_PROPERTIES), FALSE);
@@ -179,21 +175,35 @@ INT_PTR CALLBACK PhpProcessRecordDlgProc(
 
             if (context->Record->FileName)
             {
+                PhExtractIcon(
+                    context->Record->FileName->Buffer,
+                    &context->FileIcon,
+                    NULL
+                    );
+
                 if (PhInitializeImageVersionInfo(&versionInfo, context->Record->FileName->Buffer))
                     versionInfoInitialized = TRUE;
             }
 
-            context->FileIcon = PhGetFileShellIcon(PhGetString(context->Record->FileName), L".exe", TRUE);
+            if (context->FileIcon)
+            {
+                SendMessage(GetDlgItem(hwndDlg, IDC_FILEICON), STM_SETICON, (WPARAM)context->FileIcon, 0);
+            }
+            else
+            {
+                HICON largeIcon;
+
+                PhGetStockApplicationIcon(NULL, &largeIcon);
+                SendMessage(GetDlgItem(hwndDlg, IDC_FILEICON), STM_SETICON, (WPARAM)largeIcon, 0);
+            }
 
             SendMessage(GetDlgItem(hwndDlg, IDC_OPENFILENAME), BM_SETIMAGE, IMAGE_ICON,
-                (LPARAM)PH_LOAD_SHARED_ICON_SMALL(MAKEINTRESOURCE(IDI_FOLDER)));
-            SendMessage(GetDlgItem(hwndDlg, IDC_FILEICON), STM_SETICON,
-                (WPARAM)context->FileIcon, 0);
-
-            SetDlgItemText(hwndDlg, IDC_NAME, PhpGetStringOrNa(versionInfo.FileDescription));
-            SetDlgItemText(hwndDlg, IDC_COMPANYNAME, PhpGetStringOrNa(versionInfo.CompanyName));
-            SetDlgItemText(hwndDlg, IDC_VERSION, PhpGetStringOrNa(versionInfo.FileVersion));
-            SetDlgItemText(hwndDlg, IDC_FILENAME, PhpGetStringOrNa(context->Record->FileName));
+                (LPARAM)PH_LOAD_SHARED_ICON_SMALL(PhInstanceHandle, MAKEINTRESOURCE(IDI_FOLDER)));
+  
+            PhSetDialogItemText(hwndDlg, IDC_NAME, PhpGetStringOrNa(versionInfo.FileDescription));
+            PhSetDialogItemText(hwndDlg, IDC_COMPANYNAME, PhpGetStringOrNa(versionInfo.CompanyName));
+            PhSetDialogItemText(hwndDlg, IDC_VERSION, PhpGetStringOrNa(versionInfo.FileVersion));
+            PhSetDialogItemText(hwndDlg, IDC_FILENAME, PhpGetStringOrNa(context->Record->FileName));
 
             if (versionInfoInitialized)
                 PhDeleteImageVersionInfo(&versionInfo);
@@ -201,19 +211,19 @@ INT_PTR CALLBACK PhpProcessRecordDlgProc(
             if (!context->Record->FileName)
                 EnableWindow(GetDlgItem(hwndDlg, IDC_OPENFILENAME), FALSE);
 
-            SetDlgItemText(hwndDlg, IDC_CMDLINE, PhpGetStringOrNa(context->Record->CommandLine));
+            PhSetDialogItemText(hwndDlg, IDC_CMDLINE, PhpGetStringOrNa(context->Record->CommandLine));
 
             if (context->Record->CreateTime.QuadPart != 0)
-                SetDlgItemText(hwndDlg, IDC_STARTED, PhpaGetRelativeTimeString(&context->Record->CreateTime)->Buffer);
+                PhSetDialogItemText(hwndDlg, IDC_STARTED, PhpaGetRelativeTimeString(&context->Record->CreateTime)->Buffer);
             else
-                SetDlgItemText(hwndDlg, IDC_STARTED, L"N/A");
+                PhSetDialogItemText(hwndDlg, IDC_STARTED, L"N/A");
 
             if (context->Record->ExitTime.QuadPart != 0)
-                SetDlgItemText(hwndDlg, IDC_TERMINATED, PhpaGetRelativeTimeString(&context->Record->ExitTime)->Buffer);
+                PhSetDialogItemText(hwndDlg, IDC_TERMINATED, PhpaGetRelativeTimeString(&context->Record->ExitTime)->Buffer);
             else
-                SetDlgItemText(hwndDlg, IDC_TERMINATED, L"N/A");
+                PhSetDialogItemText(hwndDlg, IDC_TERMINATED, L"N/A");
 
-            SetDlgItemInt(hwndDlg, IDC_SESSIONID, context->Record->SessionId, FALSE);
+            PhSetDialogItemValue(hwndDlg, IDC_SESSIONID, context->Record->SessionId, FALSE);
         }
         break;
     case WM_DESTROY:
@@ -235,7 +245,15 @@ INT_PTR CALLBACK PhpProcessRecordDlgProc(
             case IDC_OPENFILENAME:
                 {
                     if (context->Record->FileName)
-                        PhShellExploreFile(hwndDlg, context->Record->FileName->Buffer);
+                    {
+                        PhShellExecuteUserString(
+                            PhMainWndHandle,
+                            L"FileBrowseExecutable",
+                            context->Record->FileName->Buffer,
+                            FALSE,
+                            L"Make sure the Explorer executable file is present."
+                            );
+                    }
                 }
                 break;
             case IDC_PROPERTIES:

@@ -3,6 +3,7 @@
  *   Process properties: Token page
  *
  * Copyright (C) 2009-2016 wj32
+ * Copyright (C) 2018 dmex
  *
  * This file is part of Process Hacker.
  *
@@ -24,6 +25,8 @@
 #include <procprp.h>
 #include <procprpp.h>
 
+#include <settings.h>
+
 NTSTATUS NTAPI PhpOpenProcessTokenForPage(
     _Out_ PHANDLE Handle,
     _In_ ACCESS_MASK DesiredAccess,
@@ -33,14 +36,29 @@ NTSTATUS NTAPI PhpOpenProcessTokenForPage(
     NTSTATUS status;
     HANDLE processHandle;
 
+    if (!Context)
+        return STATUS_UNSUCCESSFUL;
+
     if (!NT_SUCCESS(status = PhOpenProcess(
         &processHandle,
-        ProcessQueryAccess,
+        PROCESS_QUERY_LIMITED_INFORMATION,
         (HANDLE)Context
         )))
         return status;
 
-    status = PhOpenProcessToken(processHandle, DesiredAccess, Handle);
+    if (!NT_SUCCESS(status = PhOpenProcessToken(
+        processHandle,
+        DesiredAccess | TOKEN_READ | TOKEN_ADJUST_DEFAULT | READ_CONTROL, // HACK: Add extra access_masks for querying default token. (dmex)
+        Handle
+        )))
+    {
+        status = PhOpenProcessToken(
+            processHandle,
+            DesiredAccess,
+            Handle
+            );
+    }
+
     NtClose(processHandle);
 
     return status;
@@ -57,59 +75,31 @@ INT_PTR CALLBACK PhpProcessTokenHookProc(
     {
     case WM_DESTROY:
         {
-            RemoveProp(hwndDlg, PhMakeContextAtom());
+            if (PhGetWindowContext(hwndDlg, 0xD))
+                PhRemoveWindowContext(hwndDlg, 0xD);
         }
         break;
     case WM_SHOWWINDOW:
         {
-            if (!GetProp(hwndDlg, PhMakeContextAtom())) // LayoutInitialized
+            if (!PhGetWindowContext(hwndDlg, 0xD)) // LayoutInitialized
             {
                 PPH_LAYOUT_ITEM dialogItem;
-                HWND groupsLv;
-                HWND privilegesLv;
 
                 // This is a big violation of abstraction...
 
-                dialogItem = PhAddPropPageLayoutItem(hwndDlg, hwndDlg,
-                    PH_PROP_PAGE_TAB_CONTROL_PARENT, PH_ANCHOR_ALL);
-                PhAddPropPageLayoutItem(hwndDlg, GetDlgItem(hwndDlg, IDC_USER),
-                    dialogItem, PH_ANCHOR_LEFT | PH_ANCHOR_TOP | PH_ANCHOR_RIGHT);
-                PhAddPropPageLayoutItem(hwndDlg, GetDlgItem(hwndDlg, IDC_USERSID),
-                    dialogItem, PH_ANCHOR_LEFT | PH_ANCHOR_TOP | PH_ANCHOR_RIGHT);
-                PhAddPropPageLayoutItem(hwndDlg, GetDlgItem(hwndDlg, IDC_VIRTUALIZED),
-                    dialogItem, PH_ANCHOR_LEFT | PH_ANCHOR_TOP | PH_ANCHOR_RIGHT);
-                PhAddPropPageLayoutItem(hwndDlg, GetDlgItem(hwndDlg, IDC_APPCONTAINERSID),
-                    dialogItem, PH_ANCHOR_LEFT | PH_ANCHOR_TOP | PH_ANCHOR_RIGHT);
-                PhAddPropPageLayoutItem(hwndDlg, GetDlgItem(hwndDlg, IDC_GROUPS),
-                    dialogItem, PH_ANCHOR_LEFT | PH_ANCHOR_TOP | PH_ANCHOR_RIGHT);
-                PhAddPropPageLayoutItem(hwndDlg, GetDlgItem(hwndDlg, IDC_PRIVILEGES),
-                    dialogItem, PH_ANCHOR_ALL);
-                PhAddPropPageLayoutItem(hwndDlg, GetDlgItem(hwndDlg, IDC_INSTRUCTION),
-                    dialogItem, PH_ANCHOR_LEFT | PH_ANCHOR_BOTTOM);
-                PhAddPropPageLayoutItem(hwndDlg, GetDlgItem(hwndDlg, IDC_INTEGRITY),
-                    dialogItem, PH_ANCHOR_RIGHT | PH_ANCHOR_BOTTOM);
-                PhAddPropPageLayoutItem(hwndDlg, GetDlgItem(hwndDlg, IDC_ADVANCED),
-                    dialogItem, PH_ANCHOR_RIGHT | PH_ANCHOR_BOTTOM);
+                dialogItem = PhAddPropPageLayoutItem(hwndDlg, hwndDlg, PH_PROP_PAGE_TAB_CONTROL_PARENT, PH_ANCHOR_ALL);
+                PhAddPropPageLayoutItem(hwndDlg, GetDlgItem(hwndDlg, IDC_USER), dialogItem, PH_ANCHOR_LEFT | PH_ANCHOR_TOP | PH_ANCHOR_RIGHT);
+                PhAddPropPageLayoutItem(hwndDlg, GetDlgItem(hwndDlg, IDC_USERSID), dialogItem, PH_ANCHOR_LEFT | PH_ANCHOR_TOP | PH_ANCHOR_RIGHT);
+                PhAddPropPageLayoutItem(hwndDlg, GetDlgItem(hwndDlg, IDC_VIRTUALIZED), dialogItem, PH_ANCHOR_LEFT | PH_ANCHOR_TOP | PH_ANCHOR_RIGHT);
+                PhAddPropPageLayoutItem(hwndDlg, GetDlgItem(hwndDlg, IDC_GROUPS), dialogItem, PH_ANCHOR_ALL);
+                PhAddPropPageLayoutItem(hwndDlg, GetDlgItem(hwndDlg, IDC_DEFAULTPERM), dialogItem, PH_ANCHOR_RIGHT | PH_ANCHOR_BOTTOM);
+                PhAddPropPageLayoutItem(hwndDlg, GetDlgItem(hwndDlg, IDC_PERMISSIONS), dialogItem, PH_ANCHOR_RIGHT | PH_ANCHOR_BOTTOM);
+                PhAddPropPageLayoutItem(hwndDlg, GetDlgItem(hwndDlg, IDC_INTEGRITY), dialogItem, PH_ANCHOR_RIGHT | PH_ANCHOR_BOTTOM);
+                PhAddPropPageLayoutItem(hwndDlg, GetDlgItem(hwndDlg, IDC_ADVANCED), dialogItem, PH_ANCHOR_RIGHT | PH_ANCHOR_BOTTOM);
 
                 PhDoPropPageLayout(hwndDlg);
 
-                groupsLv = GetDlgItem(hwndDlg, IDC_GROUPS);
-                privilegesLv = GetDlgItem(hwndDlg, IDC_PRIVILEGES);
-
-                if (ListView_GetItemCount(groupsLv) != 0)
-                {
-                    ListView_SetColumnWidth(groupsLv, 0, LVSCW_AUTOSIZE);
-                    ExtendedListView_SetColumnWidth(groupsLv, 1, ELVSCW_AUTOSIZE_REMAININGSPACE);
-                }
-
-                if (ListView_GetItemCount(privilegesLv) != 0)
-                {
-                    ListView_SetColumnWidth(privilegesLv, 0, LVSCW_AUTOSIZE);
-                    ListView_SetColumnWidth(privilegesLv, 1, LVSCW_AUTOSIZE);
-                    ExtendedListView_SetColumnWidth(privilegesLv, 2, ELVSCW_AUTOSIZE_REMAININGSPACE);
-                }
-
-                SetProp(hwndDlg, PhMakeContextAtom(), (HANDLE)TRUE);
+                PhSetWindowContext(hwndDlg, 0xD, UlongToPtr(TRUE));
             }
         }
         break;

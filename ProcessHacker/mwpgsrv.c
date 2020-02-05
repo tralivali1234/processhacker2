@@ -3,6 +3,7 @@
  *   Main window: Services tab
  *
  * Copyright (C) 2009-2016 wj32
+ * Copyright (C) 2017 dmex
  *
  * This file is part of Process Hacker.
  *
@@ -37,16 +38,14 @@
 
 PPH_MAIN_TAB_PAGE PhMwpServicesPage;
 HWND PhMwpServiceTreeNewHandle;
+PH_PROVIDER_EVENT_QUEUE PhMwpServiceEventQueue;
 
 static PH_CALLBACK_REGISTRATION ServiceAddedRegistration;
 static PH_CALLBACK_REGISTRATION ServiceModifiedRegistration;
 static PH_CALLBACK_REGISTRATION ServiceRemovedRegistration;
 static PH_CALLBACK_REGISTRATION ServicesUpdatedRegistration;
 
-static PPH_POINTER_LIST ServicesPendingList;
 static BOOLEAN ServiceTreeListLoaded = FALSE;
-static BOOLEAN ServicesNeedsRedraw = FALSE;
-
 static PPH_TN_FILTER_ENTRY DriverFilterEntry = NULL;
 
 BOOLEAN PhMwpServicesPageCallback(
@@ -62,26 +61,28 @@ BOOLEAN PhMwpServicesPageCallback(
         {
             PhMwpServicesPage = Page;
 
+            PhInitializeProviderEventQueue(&PhMwpServiceEventQueue, 100);
+
             PhRegisterCallback(
-                &PhServiceAddedEvent,
+                PhGetGeneralCallback(GeneralCallbackServiceProviderAddedEvent),
                 PhMwpServiceAddedHandler,
                 NULL,
                 &ServiceAddedRegistration
                 );
             PhRegisterCallback(
-                &PhServiceModifiedEvent,
+                PhGetGeneralCallback(GeneralCallbackServiceProviderModifiedEvent),
                 PhMwpServiceModifiedHandler,
                 NULL,
                 &ServiceModifiedRegistration
                 );
             PhRegisterCallback(
-                &PhServiceRemovedEvent,
+                PhGetGeneralCallback(GeneralCallbackServiceProviderRemovedEvent),
                 PhMwpServiceRemovedHandler,
                 NULL,
                 &ServiceRemovedRegistration
                 );
             PhRegisterCallback(
-                &PhServicesUpdatedEvent,
+                PhGetGeneralCallback(GeneralCallbackServiceProviderUpdatedEvent),
                 PhMwpServicesUpdatedHandler,
                 NULL,
                 &ServicesUpdatedRegistration
@@ -90,7 +91,10 @@ BOOLEAN PhMwpServicesPageCallback(
         break;
     case MainTabPageCreateWindow:
         {
-            *(HWND *)Parameter1 = PhMwpServiceTreeNewHandle;
+            if (Parameter1)
+            {
+                *(HWND*)Parameter1 = PhMwpServiceTreeNewHandle;
+            }
         }
         return TRUE;
     case MainTabPageSelected:
@@ -104,11 +108,17 @@ BOOLEAN PhMwpServicesPageCallback(
     case MainTabPageInitializeSectionMenuItems:
         {
             PPH_MAIN_TAB_PAGE_MENU_INFORMATION menuInfo = Parameter1;
-            PPH_EMENU menu = menuInfo->Menu;
-            ULONG startIndex = menuInfo->StartIndex;
+            PPH_EMENU menu;
+            ULONG startIndex;
             PPH_EMENU_ITEM menuItem;
 
-            PhInsertEMenuItem(menu, PhCreateEMenuItem(0, ID_VIEW_HIDEDRIVERSERVICES, L"Hide driver services", NULL, NULL), startIndex);
+            if (!menuInfo)
+                break;
+
+            menu = menuInfo->Menu;
+            startIndex = menuInfo->StartIndex;
+
+            PhInsertEMenuItem(menu, PhCreateEMenuItem(0, ID_VIEW_HIDEDRIVERSERVICES, L"&Hide driver services", NULL, NULL), startIndex);
 
             if (DriverFilterEntry && (menuItem = PhFindEMenuItem(menu, 0, NULL, ID_VIEW_HIDEDRIVERSERVICES)))
                 menuItem->Flags |= PH_EMENU_CHECKED;
@@ -116,7 +126,8 @@ BOOLEAN PhMwpServicesPageCallback(
         return TRUE;
     case MainTabPageLoadSettings:
         {
-            // Nothing
+            if (PhGetIntegerSetting(L"HideDriverServices"))
+                DriverFilterEntry = PhAddTreeNewFilter(PhGetFilterSupportServiceTreeList(), PhMwpDriverServiceTreeFilter, NULL);
         }
         return TRUE;
     case MainTabPageSaveSettings:
@@ -129,14 +140,15 @@ BOOLEAN PhMwpServicesPageCallback(
         {
             PPH_MAIN_TAB_PAGE_EXPORT_CONTENT exportContent = Parameter1;
 
-            PhWriteServiceList(exportContent->FileStream, exportContent->Mode);
+            if (exportContent)
+                PhWriteServiceList(exportContent->FileStream, exportContent->Mode);
         }
         return TRUE;
     case MainTabPageFontChanged:
         {
             HFONT font = (HFONT)Parameter1;
 
-            SendMessage(PhMwpServiceTreeNewHandle, WM_SETFONT, (WPARAM)font, TRUE);
+            SetWindowFont(PhMwpServiceTreeNewHandle, font, TRUE);
         }
         break;
     case MainTabPageUpdateAutomaticallyChanged:
@@ -158,27 +170,7 @@ VOID PhMwpNeedServiceTreeList(
     if (!ServiceTreeListLoaded)
     {
         ServiceTreeListLoaded = TRUE;
-
         PhLoadSettingsServiceTreeList();
-
-        if (PhGetIntegerSetting(L"HideDriverServices"))
-            DriverFilterEntry = PhAddTreeNewFilter(PhGetFilterSupportServiceTreeList(), PhMwpDriverServiceTreeFilter, NULL);
-
-        if (ServicesPendingList)
-        {
-            PPH_SERVICE_ITEM serviceItem;
-            ULONG enumerationKey = 0;
-
-            while (PhEnumPointerList(ServicesPendingList, &enumerationKey, (PVOID *)&serviceItem))
-            {
-                PhMwpOnServiceAdded(serviceItem, 1);
-            }
-
-            // Force a re-draw.
-            PhMwpOnServicesUpdated();
-
-            PhClearReference(&ServicesPendingList);
-        }
     }
 }
 
@@ -307,9 +299,20 @@ VOID PhShowServiceContextMenu(
         PPH_EMENU_ITEM item;
 
         menu = PhCreateEMenu();
-        PhLoadResourceEMenuItem(menu, PhInstanceHandle, MAKEINTRESOURCE(IDR_SERVICE), 0);
+        PhInsertEMenuItem(menu, PhCreateEMenuItem(0, ID_SERVICE_START, L"&Start", NULL, NULL), ULONG_MAX);
+        PhInsertEMenuItem(menu, PhCreateEMenuItem(0, ID_SERVICE_CONTINUE, L"C&ontinue", NULL, NULL), ULONG_MAX);
+        PhInsertEMenuItem(menu, PhCreateEMenuItem(0, ID_SERVICE_PAUSE, L"&Pause", NULL, NULL), ULONG_MAX);
+        PhInsertEMenuItem(menu, PhCreateEMenuItem(0, ID_SERVICE_STOP, L"S&top", NULL, NULL), ULONG_MAX);
+        PhInsertEMenuItem(menu, PhCreateEMenuItem(0, ID_SERVICE_DELETE, L"&Delete\bDel", NULL, NULL), ULONG_MAX);
+        PhInsertEMenuItem(menu, PhCreateEMenuSeparator(), ULONG_MAX);
+        PhInsertEMenuItem(menu, PhCreateEMenuItem(0, ID_SERVICE_GOTOPROCESS, L"&Go to process", NULL, NULL), ULONG_MAX);
+        PhInsertEMenuItem(menu, PhCreateEMenuSeparator(), ULONG_MAX);
+        PhInsertEMenuItem(menu, PhCreateEMenuItem(0, ID_SERVICE_OPENKEY, L"Open &key", NULL, NULL), ULONG_MAX);
+        PhInsertEMenuItem(menu, PhCreateEMenuItem(0, ID_SERVICE_OPENFILELOCATION, L"Open &file location\bCtrl+Enter", NULL, NULL), ULONG_MAX);
+        PhInsertEMenuItem(menu, PhCreateEMenuItem(0, ID_SERVICE_PROPERTIES, L"P&roperties\bEnter", NULL, NULL), ULONG_MAX);
+        PhInsertEMenuItem(menu, PhCreateEMenuSeparator(), ULONG_MAX);
+        PhInsertEMenuItem(menu, PhCreateEMenuItem(0, ID_SERVICE_COPY, L"&Copy\bCtrl+C", NULL, NULL), ULONG_MAX);
         PhSetFlagsEMenuItem(menu, ID_SERVICE_PROPERTIES, PH_EMENU_DEFAULT, PH_EMENU_DEFAULT);
-
         PhMwpInitializeServiceMenu(menu, services, numberOfServices);
         PhInsertCopyCellEMenuItem(menu, ID_SERVICE_COPY, PhMwpServiceTreeNewHandle, ContextMenu->Column);
 
@@ -357,13 +360,11 @@ VOID NTAPI PhMwpServiceAddedHandler(
 {
     PPH_SERVICE_ITEM serviceItem = (PPH_SERVICE_ITEM)Parameter;
 
+    if (!serviceItem)
+        return;
+
     PhReferenceObject(serviceItem);
-    PostMessage(
-        PhMainWndHandle,
-        WM_PH_SERVICE_ADDED,
-        PhGetRunIdProvider(&PhMwpServiceProviderRegistration),
-        (LPARAM)serviceItem
-        );
+    PhPushProviderEventQueue(&PhMwpServiceEventQueue, ProviderAddedEvent, Parameter, PhGetRunIdProvider(&PhMwpServiceProviderRegistration));
 }
 
 VOID NTAPI PhMwpServiceModifiedHandler(
@@ -374,9 +375,12 @@ VOID NTAPI PhMwpServiceModifiedHandler(
     PPH_SERVICE_MODIFIED_DATA serviceModifiedData = (PPH_SERVICE_MODIFIED_DATA)Parameter;
     PPH_SERVICE_MODIFIED_DATA copy;
 
+    if (!serviceModifiedData)
+        return;
+
     copy = PhAllocateCopy(serviceModifiedData, sizeof(PH_SERVICE_MODIFIED_DATA));
 
-    PostMessage(PhMainWndHandle, WM_PH_SERVICE_MODIFIED, 0, (LPARAM)copy);
+    PhPushProviderEventQueue(&PhMwpServiceEventQueue, ProviderModifiedEvent, copy, PhGetRunIdProvider(&PhMwpServiceProviderRegistration));
 }
 
 VOID NTAPI PhMwpServiceRemovedHandler(
@@ -386,7 +390,7 @@ VOID NTAPI PhMwpServiceRemovedHandler(
 {
     PPH_SERVICE_ITEM serviceItem = (PPH_SERVICE_ITEM)Parameter;
 
-    PostMessage(PhMainWndHandle, WM_PH_SERVICE_REMOVED, 0, (LPARAM)serviceItem);
+    PhPushProviderEventQueue(&PhMwpServiceEventQueue, ProviderRemovedEvent, Parameter, PhGetRunIdProvider(&PhMwpServiceProviderRegistration));
 }
 
 VOID NTAPI PhMwpServicesUpdatedHandler(
@@ -394,7 +398,7 @@ VOID NTAPI PhMwpServicesUpdatedHandler(
     _In_opt_ PVOID Context
     )
 {
-    PostMessage(PhMainWndHandle, WM_PH_SERVICES_UPDATED, 0, 0);
+    ProcessHacker_Invoke(PhMainWndHandle, PhMwpOnServicesUpdated, PhGetRunIdProvider(&PhMwpServiceProviderRegistration));
 }
 
 VOID PhMwpOnServiceAdded(
@@ -404,24 +408,8 @@ VOID PhMwpOnServiceAdded(
 {
     PPH_SERVICE_NODE serviceNode;
 
-    if (ServiceTreeListLoaded)
-    {
-        if (!ServicesNeedsRedraw)
-        {
-            TreeNew_SetRedraw(PhMwpServiceTreeNewHandle, FALSE);
-            ServicesNeedsRedraw = TRUE;
-        }
-
-        serviceNode = PhAddServiceNode(ServiceItem, RunId);
-        // ServiceItem dereferenced below
-    }
-    else
-    {
-        if (!ServicesPendingList)
-            ServicesPendingList = PhCreatePointerList(100);
-
-        PhAddItemPointerList(ServicesPendingList, ServiceItem);
-    }
+    serviceNode = PhAddServiceNode(ServiceItem, RunId);
+    // ServiceItem dereferenced below
 
     if (RunId != 1)
     {
@@ -444,30 +432,20 @@ VOID PhMwpOnServiceAdded(
         }
     }
 
-    if (ServiceTreeListLoaded)
-        PhDereferenceObject(ServiceItem);
+    PhDereferenceObject(ServiceItem);
 }
 
 VOID PhMwpOnServiceModified(
-    _In_ struct _PH_SERVICE_MODIFIED_DATA *ServiceModifiedData
+    _In_ PPH_SERVICE_MODIFIED_DATA ServiceModifiedData
     )
 {
     PH_SERVICE_CHANGE serviceChange;
     UCHAR logEntryType;
 
-    if (ServiceTreeListLoaded)
-    {
-        //if (!ServicesNeedsRedraw)
-        //{
-        //    TreeNew_SetRedraw(PhMwpServiceTreeNewHandle, FALSE);
-        //    ServicesNeedsRedraw = TRUE;
-        //}
+    PhUpdateServiceNode(PhFindServiceNode(ServiceModifiedData->Service));
 
-        PhUpdateServiceNode(PhFindServiceNode(ServiceModifiedData->Service));
-
-        if (DriverFilterEntry)
-            PhApplyTreeNewFilters(PhGetFilterSupportServiceTreeList());
-    }
+    if (DriverFilterEntry)
+        PhApplyTreeNewFilters(PhGetFilterSupportServiceTreeList());
 
     serviceChange = PhGetServiceChange(ServiceModifiedData);
 
@@ -536,15 +514,6 @@ VOID PhMwpOnServiceRemoved(
     _In_ PPH_SERVICE_ITEM ServiceItem
     )
 {
-    if (ServiceTreeListLoaded)
-    {
-        if (!ServicesNeedsRedraw)
-        {
-            TreeNew_SetRedraw(PhMwpServiceTreeNewHandle, FALSE);
-            ServicesNeedsRedraw = TRUE;
-        }
-    }
-
     PhLogServiceEntry(PH_LOG_ENTRY_SERVICE_DELETE, ServiceItem->Name, ServiceItem->DisplayName);
 
     if (PhMwpNotifyIconNotifyMask & PH_NOTIFY_SERVICE_CREATE)
@@ -563,38 +532,47 @@ VOID PhMwpOnServiceRemoved(
         }
     }
 
-    if (ServiceTreeListLoaded)
-    {
-        PhRemoveServiceNode(PhFindServiceNode(ServiceItem));
-    }
-    else
-    {
-        if (ServicesPendingList)
-        {
-            HANDLE pointerHandle;
-
-            // Remove the service from the pending list so we don't try to add it later.
-
-            if (pointerHandle = PhFindItemPointerList(ServicesPendingList, ServiceItem))
-                PhRemoveItemPointerList(ServicesPendingList, pointerHandle);
-
-            PhDereferenceObject(ServiceItem);
-        }
-    }
+    PhRemoveServiceNode(PhFindServiceNode(ServiceItem));
 }
 
 VOID PhMwpOnServicesUpdated(
-    VOID
+    _In_ ULONG RunId
     )
 {
-    if (ServiceTreeListLoaded)
-    {
-        PhTickServiceNodes();
+    PPH_PROVIDER_EVENT events;
+    ULONG count;
+    ULONG i;
 
-        if (ServicesNeedsRedraw)
+    events = PhFlushProviderEventQueue(&PhMwpServiceEventQueue, RunId, &count);
+
+    if (events)
+    {
+        TreeNew_SetRedraw(PhMwpServiceTreeNewHandle, FALSE);
+
+        for (i = 0; i < count; i++)
         {
-            TreeNew_SetRedraw(PhMwpServiceTreeNewHandle, TRUE);
-            ServicesNeedsRedraw = FALSE;
+            PH_PROVIDER_EVENT_TYPE type = PH_PROVIDER_EVENT_TYPE(events[i]);
+            PPH_SERVICE_ITEM serviceItem = PH_PROVIDER_EVENT_OBJECT(events[i]);
+
+            switch (type)
+            {
+            case ProviderAddedEvent:
+                PhMwpOnServiceAdded(serviceItem, events[i].RunId);
+                break;
+            case ProviderModifiedEvent:
+                PhMwpOnServiceModified((PPH_SERVICE_MODIFIED_DATA)serviceItem);
+                break;
+            case ProviderRemovedEvent:
+                PhMwpOnServiceRemoved(serviceItem);
+                break;
+            }
         }
+
+        PhFree(events);
     }
+
+    PhTickServiceNodes();
+
+    if (count != 0)
+        TreeNew_SetRedraw(PhMwpServiceTreeNewHandle, TRUE);
 }

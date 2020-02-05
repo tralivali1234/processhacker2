@@ -44,6 +44,25 @@ typedef enum _PH_GENERAL_CALLBACK
     GeneralCallbackMemoryItemListControl = 31, // PPH_PLUGIN_MEMORY_ITEM_LIST_CONTROL Data [properties thread]
     GeneralCallbackMiniInformationInitializing = 32, // PPH_PLUGIN_MINIINFO_POINTERS Data [main thread]
     GeneralCallbackMiListSectionMenuInitializing = 33, // PPH_PLUGIN_MENU_INFORMATION Data [main thread]
+    GeneralCallbackOptionsWindowInitializing = 34, // PPH_PLUGIN_OBJECT_PROPERTIES Data [main thread]
+
+    GeneralCallbackProcessProviderAddedEvent, // [process provider thread]
+    GeneralCallbackProcessProviderModifiedEvent, // [process provider thread]
+    GeneralCallbackProcessProviderRemovedEvent, // [process provider thread]
+    GeneralCallbackProcessProviderUpdatedEvent, // [process provider thread]
+    GeneralCallbackServiceProviderAddedEvent, // [service provider thread]
+    GeneralCallbackServiceProviderModifiedEvent, // [service provider thread]
+    GeneralCallbackServiceProviderRemovedEvent, // [service provider thread]
+    GeneralCallbackServiceProviderUpdatedEvent, // [service provider thread]
+    GeneralCallbackNetworkProviderAddedEvent, // [network provider thread]
+    GeneralCallbackNetworkProviderModifiedEvent, // [network provider thread]
+    GeneralCallbackNetworkProviderRemovedEvent, // [network provider thread]
+    GeneralCallbackNetworkProviderUpdatedEvent, // [network provider thread]
+
+    GeneralCallbackLoggedEvent,
+    GeneralCallbackTrayIconsInitializing,
+    GeneralCallbackWindowNotifyEvent,
+    GeneralCallbackProcessStatsNotifyEvent,
     GeneralCallbackMaximum
 } PH_GENERAL_CALLBACK, *PPH_GENERAL_CALLBACK;
 
@@ -66,6 +85,7 @@ typedef struct _PH_PLUGIN_GET_HIGHLIGHTING_COLOR
 
     PVOID Parameter;
     COLORREF BackColor;
+    COLORREF ForeColor;
     BOOLEAN Handled;
     BOOLEAN Cache;
 } PH_PLUGIN_GET_HIGHLIGHTING_COLOR, *PPH_PLUGIN_GET_HIGHLIGHTING_COLOR;
@@ -108,6 +128,14 @@ typedef struct _PH_PLUGIN_OBJECT_PROPERTIES
     ULONG MaximumNumberOfPages;
     HPROPSHEETPAGE *Pages;
 } PH_PLUGIN_OBJECT_PROPERTIES, *PPH_PLUGIN_OBJECT_PROPERTIES;
+
+typedef struct _PH_PLUGIN_PROCESS_STATS_EVENT
+{
+    ULONG Version;
+    ULONG Type;
+    PPH_PROCESS_ITEM ProcessItem;
+    PVOID Parameter;
+} PH_PLUGIN_PROCESS_STATS_EVENT, *PPH_PLUGIN_PROCESS_STATS_EVENT;
 
 typedef struct _PH_PLUGIN_HANDLE_PROPERTIES_CONTEXT
 {
@@ -324,7 +352,83 @@ typedef struct _PH_PLUGIN_MINIINFO_POINTERS
     PPH_MINIINFO_FIND_SECTION FindSection;
     PPH_MINIINFO_CREATE_LIST_SECTION CreateListSection;
 } PH_PLUGIN_MINIINFO_POINTERS, *PPH_PLUGIN_MINIINFO_POINTERS;
+// end_phapppub
 
+// begin_phapppub
+/**
+ * Creates a notification icon.
+ *
+ * \param Plugin A plugin instance structure.
+ * \param SubId An identifier for the column. This should be unique within the
+ * plugin.
+ * \param Guid A unique guid for this icon.
+ * \param Context A user-defined value.
+ * \param Text A string describing the notification icon.
+ * \param Flags A combination of flags.
+ * \li \c PH_NF_ICON_UNAVAILABLE The notification icon is currently unavailable.
+ * \param RegistrationData A \ref PH_NF_ICON_REGISTRATION_DATA structure that
+ * contains registration information.
+ */
+typedef struct _PH_NF_ICON * (NTAPI *PPH_REGISTER_TRAY_ICON)(
+    _In_ struct _PH_PLUGIN * Plugin,
+    _In_ ULONG SubId,
+    _In_ GUID Guid,
+    _In_opt_ PVOID Context,
+    _In_ PWSTR Text,
+    _In_ ULONG Flags,
+    _In_ struct _PH_NF_ICON_REGISTRATION_DATA *RegistrationData
+    );
+
+typedef struct _PH_TRAY_ICON_POINTERS
+{
+    PPH_REGISTER_TRAY_ICON RegisterTrayIcon;
+} PH_TRAY_ICON_POINTERS, *PPH_TRAY_ICON_POINTERS;
+// end_phapppub
+
+// begin_phapppub
+typedef struct _PH_OPTIONS_SECTION
+{
+    PH_STRINGREF Name;
+    // end_phapppub
+
+    PVOID Instance;
+    PWSTR Template;
+    DLGPROC DialogProc;
+    PVOID Parameter;
+
+    HWND DialogHandle;
+    HTREEITEM TreeItemHandle;
+    // begin_phapppub
+} PH_OPTIONS_SECTION, *PPH_OPTIONS_SECTION;
+// end_phapppub
+
+// begin_phapppub
+typedef PPH_OPTIONS_SECTION (NTAPI *PPH_OPTIONS_CREATE_SECTION)(
+    _In_ PWSTR Name,
+    _In_ PVOID Instance,
+    _In_ PWSTR Template,
+    _In_ DLGPROC DialogProc,
+    _In_opt_ PVOID Parameter
+    );
+
+typedef PPH_OPTIONS_SECTION (NTAPI *PPH_OPTIONS_FIND_SECTION)(
+    _In_ PPH_STRINGREF Name
+    );
+
+typedef VOID (NTAPI *PPH_OPTIONS_ENTER_SECTION_VIEW)(
+    _In_ PPH_OPTIONS_SECTION NewSection
+    );
+
+typedef struct _PH_PLUGIN_OPTIONS_POINTERS
+{
+    HWND WindowHandle;
+    PPH_OPTIONS_CREATE_SECTION CreateSection;
+    PPH_OPTIONS_FIND_SECTION FindSection;
+    PPH_OPTIONS_ENTER_SECTION_VIEW EnterSectionView;
+} PH_PLUGIN_OPTIONS_POINTERS, *PPH_PLUGIN_OPTIONS_POINTERS;
+// end_phapppub
+
+// begin_phapppub
 typedef struct _PH_PLUGIN_TREENEW_MESSAGE
 {
     HWND TreeNewHandle;
@@ -339,6 +443,7 @@ typedef LONG (NTAPI *PPH_PLUGIN_TREENEW_SORT_FUNCTION)(
     _In_ PVOID Node1,
     _In_ PVOID Node2,
     _In_ ULONG SubId,
+    _In_ PH_SORT_ORDER SortOrder,
     _In_ PVOID Context
     );
 
@@ -498,25 +603,11 @@ typedef struct _PH_PLUGIN_MENU_ITEM
 } PH_PLUGIN_MENU_ITEM, *PPH_PLUGIN_MENU_ITEM;
 
 // Location
+#define PH_MENU_ITEM_LOCATION_HACKER 0
 #define PH_MENU_ITEM_LOCATION_VIEW 1
 #define PH_MENU_ITEM_LOCATION_TOOLS 2
-
-// Id flags (non-functional)
-#define PH_MENU_ITEM_SUB_MENU 0x80000000
-#define PH_MENU_ITEM_RETURN_MENU 0x40000000
-#define PH_MENU_ITEM_VALID_FLAGS 0xc0000000
-
-PHAPPAPI
-ULONG_PTR
-NTAPI
-PhPluginAddMenuItem(
-    _In_ PPH_PLUGIN Plugin,
-    _In_ ULONG_PTR Location,
-    _In_opt_ PWSTR InsertAfter,
-    _In_ ULONG Id,
-    _In_ PWSTR Text,
-    _In_opt_ PVOID Context
-    );
+#define PH_MENU_ITEM_LOCATION_USERS 3
+#define PH_MENU_ITEM_LOCATION_HELP 4
 
 typedef struct _PH_PLUGIN_SYSTEM_STATISTICS
 {
@@ -633,18 +724,6 @@ PhPluginGetObjectExtension(
     );
 
 PHAPPAPI
-struct _PH_NF_ICON *
-NTAPI
-PhPluginRegisterIcon(
-    _In_ PPH_PLUGIN Plugin,
-    _In_ ULONG SubId,
-    _In_opt_ PVOID Context,
-    _In_ PWSTR Text,
-    _In_ ULONG Flags,
-    _In_ struct _PH_NF_ICON_REGISTRATION_DATA *RegistrationData
-    );
-
-PHAPPAPI
 VOID
 NTAPI
 PhPluginEnableTreeNewNotify(
@@ -653,6 +732,7 @@ PhPluginEnableTreeNewNotify(
     );
 
 PHAPPAPI
+_Success_(return)
 BOOLEAN
 NTAPI
 PhPluginQueryPhSvc(
@@ -670,6 +750,14 @@ PhPluginCallPhSvc(
     _Out_writes_bytes_opt_(OutLength) PVOID OutBuffer,
     _In_ ULONG OutLength
     );
+
+PHAPPAPI
+PPH_STRING
+NTAPI
+PhGetPluginName(
+    _In_ PPH_PLUGIN Plugin
+    );
+
 // end_phapppub
 
 #endif

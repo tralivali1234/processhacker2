@@ -90,7 +90,7 @@ static VOID CstFailWith(
     )
 {
     wprintf(L"%s\n", Message);
-    RtlExitUserProcess(1);
+    exit(1);
 }
 
 DECLSPEC_NORETURN
@@ -101,7 +101,7 @@ static VOID CstFailWithStatus(
     )
 {
     wprintf(L"%s: %s\n", Message, PhGetStatusMessage(Status, Win32Result)->Buffer);
-    RtlExitUserProcess(1);
+    exit(1);
 }
 
 static VOID CstExportKey(
@@ -213,8 +213,8 @@ static PVOID CstHashFile(
     hash = PhAllocate(hashSize);
     if (!NT_SUCCESS(status = BCryptFinishHash(hashHandle, hash, hashSize, 0)))
         CstFailWithStatus(L"Unable to complete the hash", status, 0);
-    PhFree(hashObject);
     BCryptDestroyHash(hashHandle);
+    PhFree(hashObject); // must be freed after destroying hash object
     BCryptCloseAlgorithmProvider(hashAlgHandle, 0);
 
     *HashSize = hashSize;
@@ -234,7 +234,7 @@ int __cdecl wmain(int argc, wchar_t *argv[])
     NTSTATUS status;
     PH_STRINGREF commandLine;
 
-    if (!NT_SUCCESS(PhInitializePhLibEx(0, 0, 0)))
+    if (!NT_SUCCESS(PhInitializePhLib()))
         return 1;
 
     PhUnicodeStringToStringRef(&NtCurrentPeb()->ProcessParameters->CommandLine, &commandLine);

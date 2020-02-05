@@ -1,4 +1,4 @@
-# Auto detect text files and perform LF normalization
+# Auto detect text files
 * text=crlf
 
 # Custom for Visual Studio
@@ -8,6 +8,22 @@
 *.vbproj merge=union
 *.fsproj merge=union
 *.dbproj merge=union
+
+# Project files
+*.bat eol=crlf
+*.c eol=crlf
+*.cs eol=crlf
+*.config eol=crlf
+*.cmd eol=crlf
+*.csproj eol=crlf
+*.def eol=crlf
+*.h eol=crlf
+*.manifest eol=crlf
+*.resx eol=crlf
+*.rc eol=crlf
+*.sln eol=crlf
+*.txt eol=crlf
+*.vcxproj eol=crlf
 
 # Standard to msysgit
 *.doc    diff=astextplain

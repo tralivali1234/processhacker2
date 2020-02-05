@@ -3,6 +3,7 @@
  *   memory searchers
  *
  * Copyright (C) 2010 wj32
+ * Copyright (C) 2017 dmex
  *
  * This file is part of Process Hacker.
  *
@@ -21,12 +22,10 @@
  */
 
 #include <phapp.h>
-
-#include <windowsx.h>
-
 #include <mainwnd.h>
 #include <memsrch.h>
 #include <procprv.h>
+#include <phsettings.h>
 
 #define WM_PH_MEMORY_STATUS_UPDATE (WM_APP + 301)
 
@@ -38,13 +37,25 @@ typedef struct _MEMORY_STRING_CONTEXT
     HANDLE ProcessId;
     HANDLE ProcessHandle;
     ULONG MinimumLength;
-    BOOLEAN DetectUnicode;
-    BOOLEAN Private;
-    BOOLEAN Image;
-    BOOLEAN Mapped;
 
+    union
+    {
+        BOOLEAN Flags;
+        struct
+        {
+            BOOLEAN DetectUnicode : 1;
+            BOOLEAN Private : 1;
+            BOOLEAN Image : 1;
+            BOOLEAN Mapped : 1;
+            BOOLEAN EnableCloseDialog : 1;
+            BOOLEAN ExtendedUnicode : 1;
+            BOOLEAN Spare : 2;
+        };
+    };
+
+    HWND ParentWindowHandle;
     HWND WindowHandle;
-    HANDLE ThreadHandle;
+    WNDPROC DefaultWindowProc;
     PH_MEMORY_STRING_OPTIONS Options;
     PPH_LIST Results;
 } MEMORY_STRING_CONTEXT, *PMEMORY_STRING_CONTEXT;
@@ -56,11 +67,8 @@ INT_PTR CALLBACK PhpMemoryStringDlgProc(
     _In_ LPARAM lParam
     );
 
-INT_PTR CALLBACK PhpMemoryStringProgressDlgProc(
-    _In_ HWND hwndDlg,
-    _In_ UINT uMsg,
-    _In_ WPARAM wParam,
-    _In_ LPARAM lParam
+BOOLEAN PhpShowMemoryStringProgressDialog(
+    _In_ PMEMORY_STRING_CONTEXT Context
     );
 
 PVOID PhMemorySearchHeap = NULL;
@@ -90,6 +98,13 @@ PVOID PhAllocateForMemorySearch(
 
     if (PhMemorySearchHeap)
     {
+        RtlSetHeapInformation(
+            PhMemorySearchHeap,
+            HeapCompatibilityInformation,
+            &(ULONG){ HEAP_COMPATIBILITY_LFH },
+            sizeof(ULONG)
+            );
+
         // Don't use HEAP_NO_SERIALIZE - it's very slow on Vista and above.
         memory = RtlAllocateHeap(PhMemorySearchHeap, 0, Size);
 
@@ -125,6 +140,7 @@ VOID PhFreeForMemorySearch(
 
 PVOID PhCreateMemoryResult(
     _In_ PVOID Address,
+    _In_ PVOID BaseAddress,
     _In_ SIZE_T Length
     )
 {
@@ -137,6 +153,7 @@ PVOID PhCreateMemoryResult(
 
     result->RefCount = 1;
     result->Address = Address;
+    result->BaseAddress = BaseAddress;
     result->Length = Length;
     result->Display.Length = 0;
     result->Display.Buffer = NULL;
@@ -169,9 +186,7 @@ VOID PhDereferenceMemoryResults(
     _In_ ULONG NumberOfResults
     )
 {
-    ULONG i;
-
-    for (i = 0; i < NumberOfResults; i++)
+    for (ULONG i = 0; i < NumberOfResults; i++)
         PhDereferenceMemoryResult(Results[i]);
 }
 
@@ -182,6 +197,7 @@ VOID PhSearchMemoryString(
 {
     ULONG minimumLength;
     BOOLEAN detectUnicode;
+    BOOLEAN extendedUnicode;
     ULONG memoryTypeMask;
     PVOID baseAddress;
     MEMORY_BASIC_INFORMATION basicInfo;
@@ -191,8 +207,9 @@ VOID PhSearchMemoryString(
     SIZE_T displayBufferCount;
 
     minimumLength = Options->MinimumLength;
-    detectUnicode = Options->DetectUnicode;
     memoryTypeMask = Options->MemoryTypeMask;
+    detectUnicode = Options->DetectUnicode;
+    extendedUnicode = Options->ExtendedUnicode;
 
     if (minimumLength < 4)
         return;
@@ -286,7 +303,15 @@ VOID PhSearchMemoryString(
             for (i = 0; i < readSize; i++)
             {
                 byte = buffer[i];
-                printable = PhCharIsPrintable[byte];
+
+                // dmex: We don't want to enable extra bits in the PhCharIsPrintable array by default
+                // or we'll get higher amounts of false positive search results. If the user selects the 
+                // ExtendedUnicode option then we'll use iswprint (GetStringTypeW) which does check 
+                // every available character by default.
+                if (detectUnicode && extendedUnicode && !iswascii(byte))
+                    printable = !!iswprint(byte);
+                else
+                    printable = PhCharIsPrintable[byte];
 
                 // To find strings Process Hacker uses a state table.
                 // * byte2 - byte before previous byte
@@ -430,6 +455,7 @@ CreateResult:
 
                     if (!(isWide && !detectUnicode) && (result = PhCreateMemoryResult(
                         PTR_ADD_OFFSET(baseAddress, i - bias - lengthInBytes),
+                        baseAddress,
                         lengthInBytes
                         )))
                     {
@@ -438,7 +464,7 @@ CreateResult:
                         if (result->Display.Buffer = PhAllocateForMemorySearch(displayLength + sizeof(WCHAR)))
                         {
                             memcpy(result->Display.Buffer, displayBuffer, displayLength);
-                            result->Display.Buffer[displayLength / sizeof(WCHAR)] = 0;
+                            result->Display.Buffer[displayLength / sizeof(WCHAR)] = UNICODE_NULL;
                             result->Display.Length = displayLength;
                         }
 
@@ -463,6 +489,9 @@ ContinueLoop:
         baseAddress = PTR_ADD_OFFSET(baseAddress, basicInfo.RegionSize);
     }
 
+    if (displayBuffer)
+        PhFreePage(displayBuffer);
+
     if (buffer)
         PhFreePage(buffer);
 }
@@ -475,7 +504,6 @@ VOID PhShowMemoryStringDialog(
     NTSTATUS status;
     HANDLE processHandle;
     MEMORY_STRING_CONTEXT context;
-    PPH_SHOW_MEMORY_RESULTS showMemoryResults;
 
     if (!NT_SUCCESS(status = PhOpenProcess(
         &processHandle,
@@ -488,6 +516,7 @@ VOID PhShowMemoryStringDialog(
     }
 
     memset(&context, 0, sizeof(MEMORY_STRING_CONTEXT));
+    context.ParentWindowHandle = ParentWindowHandle;
     context.ProcessId = ProcessItem->ProcessId;
     context.ProcessHandle = processHandle;
 
@@ -505,14 +534,10 @@ VOID PhShowMemoryStringDialog(
 
     context.Results = PhCreateList(1024);
 
-    if (DialogBoxParam(
-        PhInstanceHandle,
-        MAKEINTRESOURCE(IDD_PROGRESS),
-        ParentWindowHandle,
-        PhpMemoryStringProgressDlgProc,
-        (LPARAM)&context
-        ) == IDOK)
+    if (PhpShowMemoryStringProgressDialog(&context))
     {
+        PPH_SHOW_MEMORY_RESULTS showMemoryResults;
+
         showMemoryResults = PhAllocate(sizeof(PH_SHOW_MEMORY_RESULTS));
         showMemoryResults->ProcessId = ProcessItem->ProcessId;
         showMemoryResults->Results = context.Results;
@@ -535,33 +560,50 @@ INT_PTR CALLBACK PhpMemoryStringDlgProc(
     _In_ LPARAM lParam
     )
 {
+    PMEMORY_STRING_CONTEXT context;
+
+    if (uMsg == WM_INITDIALOG)
+    {
+        context = (PMEMORY_STRING_CONTEXT)lParam;
+
+        PhSetWindowContext(hwndDlg, PH_WINDOW_CONTEXT_DEFAULT, context);
+    }
+    else
+    {
+        context = PhGetWindowContext(hwndDlg, PH_WINDOW_CONTEXT_DEFAULT);
+    }
+
+    if (!context)
+        return FALSE;
+
     switch (uMsg)
     {
     case WM_INITDIALOG:
         {
             PhCenterWindow(hwndDlg, GetParent(hwndDlg));
-            SetProp(hwndDlg, PhMakeContextAtom(), (HANDLE)lParam);
 
-            SetDlgItemText(hwndDlg, IDC_MINIMUMLENGTH, L"10");
+            PhSetDialogItemText(hwndDlg, IDC_MINIMUMLENGTH, L"10");
+
             Button_SetCheck(GetDlgItem(hwndDlg, IDC_DETECTUNICODE), BST_CHECKED);
             Button_SetCheck(GetDlgItem(hwndDlg, IDC_PRIVATE), BST_CHECKED);
+
+            PhInitializeWindowTheme(hwndDlg, PhEnableThemeSupport);
         }
         break;
     case WM_DESTROY:
         {
-            RemoveProp(hwndDlg, PhMakeContextAtom());
+            PhRemoveWindowContext(hwndDlg, PH_WINDOW_CONTEXT_DEFAULT);
         }
         break;
     case WM_COMMAND:
         {
-            switch (LOWORD(wParam))
+            switch (GET_WM_COMMAND_ID(wParam, lParam))
             {
             case IDCANCEL:
                 EndDialog(hwndDlg, IDCANCEL);
                 break;
             case IDOK:
                 {
-                    PMEMORY_STRING_CONTEXT context = (PMEMORY_STRING_CONTEXT)GetProp(hwndDlg, PhMakeContextAtom());
                     ULONG64 minimumLength = 10;
 
                     PhStringToInteger64(&PhaGetDlgItemText(hwndDlg, IDC_MINIMUMLENGTH)->sr, 0, &minimumLength);
@@ -574,11 +616,25 @@ INT_PTR CALLBACK PhpMemoryStringDlgProc(
 
                     context->MinimumLength = (ULONG)minimumLength;
                     context->DetectUnicode = Button_GetCheck(GetDlgItem(hwndDlg, IDC_DETECTUNICODE)) == BST_CHECKED;
+                    context->ExtendedUnicode = Button_GetCheck(GetDlgItem(hwndDlg, IDC_EXTENDEDUNICODE)) == BST_CHECKED;
                     context->Private = Button_GetCheck(GetDlgItem(hwndDlg, IDC_PRIVATE)) == BST_CHECKED;
                     context->Image = Button_GetCheck(GetDlgItem(hwndDlg, IDC_IMAGE)) == BST_CHECKED;
                     context->Mapped = Button_GetCheck(GetDlgItem(hwndDlg, IDC_MAPPED)) == BST_CHECKED;
 
                     EndDialog(hwndDlg, IDOK);
+                }
+                break;
+            case IDC_DETECTUNICODE:
+                {
+                    if (Button_GetCheck(GetDlgItem(hwndDlg, IDC_DETECTUNICODE)) == BST_UNCHECKED)
+                    {
+                        Button_SetCheck(GetDlgItem(hwndDlg, IDC_EXTENDEDUNICODE), BST_UNCHECKED);
+                        Button_Enable(GetDlgItem(hwndDlg, IDC_EXTENDEDUNICODE), FALSE);
+                    }
+                    else
+                    {
+                        Button_Enable(GetDlgItem(hwndDlg, IDC_EXTENDEDUNICODE), TRUE);
+                    }
                 }
                 break;
             }
@@ -611,6 +667,7 @@ NTSTATUS PhpMemoryStringThreadStart(
     context->Options.Header.Context = context;
     context->Options.MinimumLength = context->MinimumLength;
     context->Options.DetectUnicode = context->DetectUnicode;
+    context->Options.ExtendedUnicode = context->ExtendedUnicode;
 
     if (context->Private)
         context->Options.MemoryTypeMask |= MEM_PRIVATE;
@@ -631,100 +688,136 @@ NTSTATUS PhpMemoryStringThreadStart(
     return STATUS_SUCCESS;
 }
 
-INT_PTR CALLBACK PhpMemoryStringProgressDlgProc(
+LRESULT CALLBACK PhpMemoryStringTaskDialogSubclassProc(
     _In_ HWND hwndDlg,
     _In_ UINT uMsg,
     _In_ WPARAM wParam,
     _In_ LPARAM lParam
     )
 {
+    PMEMORY_STRING_CONTEXT context;
+    WNDPROC oldWndProc;
+
+    if (!(context = PhGetWindowContext(hwndDlg, 0xF)))
+        return 0;
+
+    oldWndProc = context->DefaultWindowProc;
+
     switch (uMsg)
     {
-    case WM_INITDIALOG:
-        {
-            PMEMORY_STRING_CONTEXT context = (PMEMORY_STRING_CONTEXT)lParam;
-
-            PhCenterWindow(hwndDlg, GetParent(hwndDlg));
-            SetProp(hwndDlg, PhMakeContextAtom(), (HANDLE)context);
-
-            SetDlgItemText(hwndDlg, IDC_PROGRESSTEXT, L"Searching...");
-
-            PhSetWindowStyle(GetDlgItem(hwndDlg, IDC_PROGRESS), PBS_MARQUEE, PBS_MARQUEE);
-            SendMessage(GetDlgItem(hwndDlg, IDC_PROGRESS), PBM_SETMARQUEE, TRUE, 75);
-
-            context->WindowHandle = hwndDlg;
-            context->ThreadHandle = PhCreateThread(0, PhpMemoryStringThreadStart, context);
-
-            if (!context->ThreadHandle)
-            {
-                PhShowStatus(hwndDlg, L"Unable to create the search thread", 0, GetLastError());
-                EndDialog(hwndDlg, IDCANCEL);
-                return FALSE;
-            }
-
-            SetTimer(hwndDlg, 1, 500, NULL);
-        }
-        break;
     case WM_DESTROY:
         {
-            PMEMORY_STRING_CONTEXT context;
-
-            context = (PMEMORY_STRING_CONTEXT)GetProp(hwndDlg, PhMakeContextAtom());
-
-            if (context->ThreadHandle)
-                NtClose(context->ThreadHandle);
-
-            RemoveProp(hwndDlg, PhMakeContextAtom());
+            SetWindowLongPtr(hwndDlg, GWLP_WNDPROC, (LONG_PTR)oldWndProc);
+            PhRemoveWindowContext(hwndDlg, 0xF);
         }
         break;
-    case WM_COMMAND:
+    case WM_PH_MEMORY_STATUS_UPDATE:
         {
-            switch (LOWORD(wParam))
+            switch (wParam)
             {
-            case IDCANCEL:
+            case PH_SEARCH_COMPLETED:
                 {
-                    PMEMORY_STRING_CONTEXT context =
-                        (PMEMORY_STRING_CONTEXT)GetProp(hwndDlg, PhMakeContextAtom());
-
-                    EnableWindow(GetDlgItem(hwndDlg, IDCANCEL), FALSE);
-                    context->Options.Header.Cancel = TRUE;
+                    context->EnableCloseDialog = TRUE;
+                    SendMessage(hwndDlg, TDM_CLICK_BUTTON, IDOK, 0);
                 }
                 break;
             }
         }
         break;
-    case WM_TIMER:
-        {
-            if (wParam == 1)
-            {
-                PMEMORY_STRING_CONTEXT context =
-                    (PMEMORY_STRING_CONTEXT)GetProp(hwndDlg, PhMakeContextAtom());
-                PPH_STRING progressText;
-                PPH_STRING numberText;
+    }
 
-                numberText = PhFormatUInt64(context->Results->Count, TRUE);
-                progressText = PhFormatString(L"%s strings found...", numberText->Buffer);
-                PhDereferenceObject(numberText);
-                SetDlgItemText(hwndDlg, IDC_PROGRESSTEXT, progressText->Buffer);
-                PhDereferenceObject(progressText);
-                InvalidateRect(GetDlgItem(hwndDlg, IDC_PROGRESSTEXT), NULL, FALSE);
-            }
+    return CallWindowProc(oldWndProc, hwndDlg, uMsg, wParam, lParam);
+}
+
+HRESULT CALLBACK PhpMemoryStringTaskDialogCallback(
+    _In_ HWND hwndDlg,
+    _In_ UINT uMsg,
+    _In_ WPARAM wParam,
+    _In_ LPARAM lParam,
+    _In_ LONG_PTR dwRefData
+    )
+{
+    PMEMORY_STRING_CONTEXT context = (PMEMORY_STRING_CONTEXT)dwRefData;
+
+    switch (uMsg)
+    {
+    case TDN_CREATED:
+        {
+            HICON iconSmall;
+            HICON iconLarge;
+
+            context->WindowHandle = hwndDlg;
+
+            // Create the Taskdialog icons.
+            iconSmall = PH_LOAD_SHARED_ICON_SMALL(PhInstanceHandle, MAKEINTRESOURCE(IDI_PROCESSHACKER));
+            iconLarge = PH_LOAD_SHARED_ICON_LARGE(PhInstanceHandle, MAKEINTRESOURCE(IDI_PROCESSHACKER));
+            SendMessage(hwndDlg, WM_SETICON, ICON_SMALL, (LPARAM)iconSmall);
+            SendMessage(hwndDlg, WM_SETICON, ICON_BIG, (LPARAM)iconLarge);
+            SendMessage(hwndDlg, TDM_UPDATE_ICON, TDIE_ICON_MAIN, (LPARAM)iconLarge);
+
+            // Set the progress state.
+            SendMessage(hwndDlg, TDM_SET_MARQUEE_PROGRESS_BAR, TRUE, 0);
+            SendMessage(hwndDlg, TDM_SET_PROGRESS_BAR_MARQUEE, TRUE, 1);
+
+            // Subclass the Taskdialog.
+            context->DefaultWindowProc = (WNDPROC)GetWindowLongPtr(hwndDlg, GWLP_WNDPROC);
+            PhSetWindowContext(hwndDlg, 0xF, context);
+            SetWindowLongPtr(hwndDlg, GWLP_WNDPROC, (LONG_PTR)PhpMemoryStringTaskDialogSubclassProc);
+
+            // Create the search thread.
+            PhCreateThread2(PhpMemoryStringThreadStart, context);
         }
         break;
-    case WM_PH_MEMORY_STATUS_UPDATE:
+    case TDN_BUTTON_CLICKED:
         {
-            PMEMORY_STRING_CONTEXT context;
+            if ((INT)wParam == IDCANCEL)
+                context->Options.Header.Cancel = TRUE;
 
-            context = (PMEMORY_STRING_CONTEXT)GetProp(hwndDlg, PhMakeContextAtom());
-
-            switch (wParam)
-            {
-            case PH_SEARCH_COMPLETED:
-                EndDialog(hwndDlg, IDOK);
-                break;
-            }
+            if (!context->EnableCloseDialog)
+                return S_FALSE;
         }
         break;
+    case TDN_TIMER:
+        {
+            PPH_STRING numberText;
+            PPH_STRING progressText;
+
+            numberText = PhFormatUInt64(context->Results->Count, TRUE);
+            progressText = PhFormatString(L"%s strings found...", numberText->Buffer);
+
+            SendMessage(hwndDlg, TDM_SET_ELEMENT_TEXT, TDE_CONTENT, (LPARAM)progressText->Buffer);
+
+            PhDereferenceObject(progressText);
+            PhDereferenceObject(numberText);
+        }
+        break;
+    }
+
+    return S_OK;
+}
+
+BOOLEAN PhpShowMemoryStringProgressDialog(
+    _In_ PMEMORY_STRING_CONTEXT Context
+    )
+{
+    TASKDIALOGCONFIG config;
+    INT result = 0;
+
+    memset(&config, 0, sizeof(TASKDIALOGCONFIG));
+    config.cbSize = sizeof(TASKDIALOGCONFIG);
+    config.dwFlags = TDF_USE_HICON_MAIN | TDF_ALLOW_DIALOG_CANCELLATION | TDF_POSITION_RELATIVE_TO_WINDOW | TDF_SHOW_MARQUEE_PROGRESS_BAR | TDF_CALLBACK_TIMER;
+    config.dwCommonButtons = TDCBF_CANCEL_BUTTON;
+    config.pfCallback = PhpMemoryStringTaskDialogCallback;
+    config.lpCallbackData = (LONG_PTR)Context;
+    config.hwndParent = Context->ParentWindowHandle;
+    config.pszWindowTitle = PhApplicationName;
+    config.pszMainInstruction = L"Searching memory strings...";
+    config.pszContent = L" ";
+    config.cxWidth = 200;
+
+    if (SUCCEEDED(TaskDialogIndirect(&config, &result, NULL, NULL)) && result == IDOK)
+    {
+        return TRUE;
     }
 
     return FALSE;

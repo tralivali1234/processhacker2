@@ -21,9 +21,7 @@
  */
 
 #include <phapp.h>
-
 #include <ntgdi.h>
-
 #include <procprv.h>
 
 typedef struct _GDI_HANDLES_CONTEXT
@@ -54,7 +52,6 @@ VOID PhShowGdiHandlesDialog(
     )
 {
     GDI_HANDLES_CONTEXT context;
-    ULONG i;
 
     context.ProcessItem = ProcessItem;
     context.List = PhCreateList(20);
@@ -66,18 +63,6 @@ VOID PhShowGdiHandlesDialog(
         PhpGdiHandlesDlgProc,
         (LPARAM)&context
         );
-
-    for (i = 0; i < context.List->Count; i++)
-    {
-        PPH_GDI_HANDLE_ITEM gdiHandleItem = context.List->Items[i];
-
-        if (gdiHandleItem->Information)
-            PhDereferenceObject(gdiHandleItem->Information);
-
-        PhFree(context.List->Items[i]);
-    }
-
-    PhDereferenceObject(context.List);
 }
 
 PWSTR PhpGetGdiHandleTypeName(
@@ -321,16 +306,29 @@ INT_PTR CALLBACK PhpGdiHandlesDlgProc(
     _In_ LPARAM lParam
     )
 {
+    PGDI_HANDLES_CONTEXT context = NULL;
+
+    if (uMsg == WM_INITDIALOG)
+    {
+        context = (PGDI_HANDLES_CONTEXT)lParam;
+
+        PhSetWindowContext(hwndDlg, PH_WINDOW_CONTEXT_DEFAULT, context);
+    }
+    else
+    {
+        context = PhGetWindowContext(hwndDlg, PH_WINDOW_CONTEXT_DEFAULT);
+    }
+
+    if (!context)
+        return FALSE;
+
     switch (uMsg)
     {
     case WM_INITDIALOG:
         {
-            PGDI_HANDLES_CONTEXT context = (PGDI_HANDLES_CONTEXT)lParam;
             HWND lvHandle;
 
             PhCenterWindow(hwndDlg, GetParent(hwndDlg));
-
-            SetProp(hwndDlg, PhMakeContextAtom(), (HANDLE)context);
 
             lvHandle = GetDlgItem(hwndDlg, IDC_LIST);
 
@@ -352,12 +350,24 @@ INT_PTR CALLBACK PhpGdiHandlesDlgProc(
         break;
     case WM_DESTROY:
         {
-            RemoveProp(hwndDlg, PhMakeContextAtom());
+            PhRemoveWindowContext(hwndDlg, PH_WINDOW_CONTEXT_DEFAULT);
+
+            for (ULONG i = 0; i < context->List->Count; i++)
+            {
+                PPH_GDI_HANDLE_ITEM gdiHandleItem = context->List->Items[i];
+
+                if (gdiHandleItem->Information)
+                    PhDereferenceObject(gdiHandleItem->Information);
+
+                PhFree(context->List->Items[i]);
+            }
+
+            PhDereferenceObject(context->List);
         }
         break;
     case WM_COMMAND:
         {
-            switch (LOWORD(wParam))
+            switch (GET_WM_COMMAND_ID(wParam, lParam))
             {
             case IDCANCEL:
             case IDOK:
@@ -365,7 +375,7 @@ INT_PTR CALLBACK PhpGdiHandlesDlgProc(
                 break;
             case IDC_REFRESH:
                 {
-                    PhpRefreshGdiHandles(hwndDlg, (PGDI_HANDLES_CONTEXT)GetProp(hwndDlg, PhMakeContextAtom()));
+                    PhpRefreshGdiHandles(hwndDlg, context);
                 }
                 break;
             }

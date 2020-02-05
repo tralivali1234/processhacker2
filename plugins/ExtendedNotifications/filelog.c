@@ -21,6 +21,7 @@
  */
 
 #include <phdk.h>
+#include <settings.h>
 #include "extnoti.h"
 
 VOID NTAPI LoggedCallback(
@@ -40,7 +41,7 @@ VOID FileLogInitialization(
 
     fileName = PhaGetStringSetting(SETTING_NAME_LOG_FILENAME);
 
-    if (fileName->Length != 0)
+    if (!PhIsNullOrEmptyString(fileName))
     {
         status = PhCreateFileStream(
             &LogFileStream,
@@ -54,7 +55,7 @@ VOID FileLogInitialization(
         if (NT_SUCCESS(status))
         {
             PhRegisterCallback(
-                &PhLoggedCallback,
+                PhGetGeneralCallback(GeneralCallbackLoggedEvent),
                 LoggedCallback,
                 NULL,
                 &LoggedCallbackRegistration

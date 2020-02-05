@@ -2,20 +2,12 @@
 #define PH_PROCPRV_H
 
 #define PH_RECORD_MAX_USAGE
-#define PH_ENABLE_VERIFY_CACHE
 
 extern PPH_OBJECT_TYPE PhProcessItemType;
-
-PHAPPAPI extern PH_CALLBACK PhProcessAddedEvent; // phapppub
-PHAPPAPI extern PH_CALLBACK PhProcessModifiedEvent; // phapppub
-PHAPPAPI extern PH_CALLBACK PhProcessRemovedEvent; // phapppub
-PHAPPAPI extern PH_CALLBACK PhProcessesUpdatedEvent; // phapppub
-
 extern PPH_LIST PhProcessRecordList;
 extern PH_QUEUED_LOCK PhProcessRecordListLock;
 
 extern ULONG PhStatisticsSampleCount;
-extern BOOLEAN PhEnableProcessQueryStage2;
 extern BOOLEAN PhEnablePurgeProcessRecords;
 extern BOOLEAN PhEnableCycleCpuUsage;
 
@@ -117,6 +109,7 @@ typedef struct _PH_PROCESS_ITEM
 
     // Parameters
 
+    PPH_STRING FileNameWin32;
     PPH_STRING FileName;
     PPH_STRING CommandLine;
 
@@ -128,14 +121,13 @@ typedef struct _PH_PROCESS_ITEM
 
     // Security
 
-    PPH_STRING UserName;
+    PSID Sid;
     TOKEN_ELEVATION_TYPE ElevationType;
     MANDATORY_LEVEL IntegrityLevel;
     PWSTR IntegrityString;
 
     // Other
 
-    PPH_STRING JobName;
     HANDLE ConsoleHostProcessId;
 
     // Signature, Packed
@@ -159,14 +151,18 @@ typedef struct _PH_PROCESS_ITEM
             ULONG IsInJob : 1;
             ULONG IsInSignificantJob : 1;
             ULONG IsPacked : 1;
-            ULONG Reserved : 1;
+            ULONG IsHandleValid : 1;
             ULONG IsSuspended : 1;
             ULONG IsWow64 : 1;
             ULONG IsImmersive : 1;
             ULONG IsWow64Valid : 1;
             ULONG IsPartiallySuspended : 1;
-            ULONG AddedEventSent : 1;
-            ULONG Spare : 18;
+            ULONG IsProtectedHandle : 1;
+            ULONG IsProtectedProcess : 1;
+            ULONG IsSecureProcess : 1;
+            ULONG IsSubsystemProcess : 1;
+            ULONG IsControlFlowGuardEnabled : 1;
+            ULONG Spare : 14;
         };
     };
 
@@ -213,7 +209,7 @@ typedef struct _PH_PROCESS_ITEM
     ULONG PeakNumberOfThreads; // since WIN7
     ULONG HardFaultCount; // since WIN7
 
-    ULONG SequenceNumber;
+    ULONG TimeSequenceNumber;
     PH_CIRCULAR_BUFFER_FLOAT CpuKernelHistory;
     PH_CIRCULAR_BUFFER_FLOAT CpuUserHistory;
     PH_CIRCULAR_BUFFER_ULONG64 IoReadHistory;
@@ -225,8 +221,12 @@ typedef struct _PH_PROCESS_ITEM
     // New fields
     PH_UINTPTR_DELTA PrivateBytesDelta;
     PPH_STRING PackageFullName;
+    PPH_STRING UserName;
 
-    PH_QUEUED_LOCK RemoveLock;
+    ULONGLONG ProcessSequenceNumber;
+    PH_KNOWN_PROCESS_TYPE KnownProcessType;
+    PS_PROTECTION Protection;
+    ULONG JobObjectId;
 } PH_PROCESS_ITEM, *PPH_PROCESS_ITEM;
 // end_phapppub
 
@@ -245,6 +245,7 @@ typedef struct _PH_PROCESS_RECORD
     HANDLE ProcessId;
     HANDLE ParentProcessId;
     ULONG SessionId;
+    ULONGLONG ProcessSequenceNumber;
     LARGE_INTEGER CreateTime;
     LARGE_INTEGER ExitTime;
 
@@ -308,13 +309,13 @@ typedef struct _PH_VERIFY_FILE_INFO *PPH_VERIFY_FILE_INFO;
 
 VERIFY_RESULT PhVerifyFileWithAdditionalCatalog(
     _In_ PPH_VERIFY_FILE_INFO Information,
-    _In_opt_ PWSTR PackageFullName,
+    _In_opt_ PPH_STRING PackageFullName,
     _Out_opt_ PPH_STRING *SignerName
     );
 
 VERIFY_RESULT PhVerifyFileCached(
     _In_ PPH_STRING FileName,
-    _In_opt_ PWSTR PackageFullName,
+    _In_opt_ PPH_STRING PackageFullName,
     _Out_opt_ PPH_STRING *SignerName,
     _In_ BOOLEAN CachedOnly
     );
@@ -339,7 +340,7 @@ PhGetStatisticsTimeString(
 // end_phapppub
 
 VOID PhFlushProcessQueryData(
-    _In_ BOOLEAN SendModifiedEvent
+    VOID
     );
 
 VOID PhProcessProviderUpdate(
@@ -393,9 +394,7 @@ PHAPPAPI
 PPH_PROCESS_ITEM
 NTAPI
 PhReferenceProcessItemForParent(
-    _In_ HANDLE ParentProcessId,
-    _In_ HANDLE ProcessId,
-    _In_ PLARGE_INTEGER CreateTime
+    _In_ PPH_PROCESS_ITEM ProcessItem
     );
 
 PHAPPAPI
@@ -406,4 +405,12 @@ PhReferenceProcessItemForRecord(
     );
 // end_phapppub
 
+// begin_phapppub
+PHAPPAPI
+PVOID
+NTAPI
+PhGetProcessInformationCache(
+    VOID
+    );
+// end_phapppub
 #endif

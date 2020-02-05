@@ -2,7 +2,7 @@
  * Process Hacker Plugins -
  *   Update Checker Plugin
  *
- * Copyright (C) 2016 dmex
+ * Copyright (C) 2016-2019 dmex
  *
  * This file is part of Process Hacker.
  *
@@ -36,14 +36,11 @@ HRESULT CALLBACK CheckingForUpdatesCallbackProc(
     {
     case TDN_NAVIGATED:
         {
-            HANDLE updateCheckThread = NULL;
-
             SendMessage(hwndDlg, TDM_SET_MARQUEE_PROGRESS_BAR, TRUE, 0);
             SendMessage(hwndDlg, TDM_SET_PROGRESS_BAR_MARQUEE, TRUE, 1);
 
-            // Create the update check thread.
-            if (updateCheckThread = PhCreateThread(0, UpdateCheckThread, context))
-                NtClose(updateCheckThread);
+            PhReferenceObject(context);
+            PhQueueItemWorkQueue(PhGetGlobalWorkQueue(), UpdateCheckThread, context);
         }
         break;
     }
@@ -62,13 +59,12 @@ VOID ShowCheckingForUpdatesDialog(
     config.dwFlags = TDF_USE_HICON_MAIN | TDF_ALLOW_DIALOG_CANCELLATION | TDF_CAN_BE_MINIMIZED | TDF_SHOW_MARQUEE_PROGRESS_BAR;
     config.dwCommonButtons = TDCBF_CLOSE_BUTTON;
     config.hMainIcon = Context->IconLargeHandle;
-
-    config.pszWindowTitle = L"Process Hacker - Updater";
-    config.pszMainInstruction = L"Checking for new releases...";
-
     config.cxWidth = 200;
     config.pfCallback = CheckingForUpdatesCallbackProc;
     config.lpCallbackData = (LONG_PTR)Context;
 
-    SendMessage(Context->DialogHandle, TDM_NAVIGATE_PAGE, 0, (LPARAM)&config);
+    config.pszWindowTitle = L"Process Hacker - Updater";
+    config.pszMainInstruction = L"Checking for new releases...";
+
+    TaskDialogNavigatePage(Context->DialogHandle, &config);
 }

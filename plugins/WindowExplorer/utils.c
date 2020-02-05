@@ -3,6 +3,7 @@
  *   utility functions
  *
  * Copyright (C) 2011 wj32
+ * Copyright (C) 2017-2018 dmex
  *
  * This file is part of Process Hacker.
  *
@@ -28,12 +29,7 @@ PVOID WeGetProcedureAddress(
     _In_ PSTR Name
     )
 {
-    static PVOID imageBase = NULL;
-
-    if (!imageBase)
-        imageBase = GetModuleHandle(L"ProcessHacker.exe");
-
-    return (PVOID)GetProcAddress(imageBase, Name);
+    return PhGetProcedureAddress(NtCurrentPeb()->ImageBaseAddress, Name, 0);
 }
 
 VOID WeFormatLocalObjectName(
@@ -72,9 +68,8 @@ VOID WeInvertWindowBorder(
     HDC hdc;
 
     GetWindowRect(hWnd, &rect);
-    hdc = GetWindowDC(hWnd);
 
-    if (hdc)
+    if (hdc = GetWindowDC(hWnd))
     {
         ULONG penWidth = GetSystemMetrics(SM_CXBORDER) * 3;
         INT oldDc;
@@ -87,17 +82,16 @@ VOID WeInvertWindowBorder(
         SetROP2(hdc, R2_NOT);
 
         pen = CreatePen(PS_INSIDEFRAME, penWidth, RGB(0x00, 0x00, 0x00));
-        SelectObject(hdc, pen);
+        SelectPen(hdc, pen);
 
         brush = GetStockObject(NULL_BRUSH);
-        SelectObject(hdc, brush);
+        SelectBrush(hdc, brush);
 
         // Draw the rectangle.
         Rectangle(hdc, 0, 0, rect.right - rect.left, rect.bottom - rect.top);
 
         // Cleanup.
-        DeleteObject(pen);
-
+        DeletePen(pen);
         RestoreDC(hdc, oldDc);
         ReleaseDC(hWnd, hdc);
     }

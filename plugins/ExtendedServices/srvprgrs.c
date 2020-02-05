@@ -42,14 +42,14 @@ INT_PTR CALLBACK EspRestartServiceDlgProc(
     if (uMsg == WM_INITDIALOG)
     {
         context = (PRESTART_SERVICE_CONTEXT)lParam;
-        SetProp(hwndDlg, L"Context", (HANDLE)context);
+        PhSetWindowContext(hwndDlg, PH_WINDOW_CONTEXT_DEFAULT, context);
     }
     else
     {
-        context = (PRESTART_SERVICE_CONTEXT)GetProp(hwndDlg, L"Context");
+        context = PhGetWindowContext(hwndDlg, PH_WINDOW_CONTEXT_DEFAULT);
 
         if (uMsg == WM_DESTROY)
-            RemoveProp(hwndDlg, L"Context");
+            PhRemoveWindowContext(hwndDlg, PH_WINDOW_CONTEXT_DEFAULT);
     }
 
     if (!context)
@@ -65,7 +65,7 @@ INT_PTR CALLBACK EspRestartServiceDlgProc(
             PhSetWindowStyle(GetDlgItem(hwndDlg, IDC_PROGRESS), PBS_MARQUEE, PBS_MARQUEE);
             SendMessage(GetDlgItem(hwndDlg, IDC_PROGRESS), PBM_SETMARQUEE, TRUE, 75);
 
-            SetDlgItemText(hwndDlg, IDC_MESSAGE, PhaFormatString(L"Attempting to stop %s...", context->ServiceItem->Name->Buffer)->Buffer);
+            PhSetDialogItemText(hwndDlg, IDC_MESSAGE, PhaFormatString(L"Attempting to stop %s...", context->ServiceItem->Name->Buffer)->Buffer);
 
             if (PhUiStopService(hwndDlg, context->ServiceItem))
             {
@@ -75,14 +75,18 @@ INT_PTR CALLBACK EspRestartServiceDlgProc(
             {
                 EndDialog(hwndDlg, IDCANCEL);
             }
+
+            PhInitializeWindowTheme(hwndDlg, !!PhGetIntegerSetting(L"EnableThemeSupport"));
         }
         break;
     case WM_COMMAND:
         {
-            switch (LOWORD(wParam))
+            switch (GET_WM_COMMAND_ID(wParam, lParam))
             {
             case IDCANCEL:
                 {
+                    KillTimer(hwndDlg, 1);
+
                     EndDialog(hwndDlg, IDCANCEL);
                 }
                 break;
@@ -101,7 +105,7 @@ INT_PTR CALLBACK EspRestartServiceDlgProc(
                     {
                         // The service is stopped, so start the service now.
 
-                        SetDlgItemText(hwndDlg, IDC_MESSAGE,
+                        PhSetDialogItemText(hwndDlg, IDC_MESSAGE,
                             PhaFormatString(L"Attempting to start %s...", context->ServiceItem->Name->Buffer)->Buffer);
                         context->DisableTimer = TRUE;
 

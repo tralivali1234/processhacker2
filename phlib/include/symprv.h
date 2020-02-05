@@ -6,7 +6,7 @@ extern "C" {
 #endif
 
 extern PPH_OBJECT_TYPE PhSymbolProviderType;
-extern PH_CALLBACK PhSymInitCallback;
+extern PH_CALLBACK PhSymbolEventCallback;
 
 #define PH_MAX_SYMBOL_NAME_LEN 128
 
@@ -15,12 +15,21 @@ typedef struct _PH_SYMBOL_PROVIDER
     LIST_ENTRY ModulesListHead;
     PH_QUEUED_LOCK ModulesListLock;
     HANDLE ProcessHandle;
-    BOOLEAN IsRealHandle;
-    BOOLEAN IsRegistered;
+
+    union
+    {
+        BOOLEAN Flags;
+        struct
+        {
+            BOOLEAN IsRealHandle : 1;
+            BOOLEAN IsRegistered : 1;
+            BOOLEAN Terminating : 1;
+            BOOLEAN Spare : 5;
+        };
+    };
 
     PH_INITONCE InitOnce;
     PH_AVL_TREE ModulesSet;
-    PH_CALLBACK EventCallback;
 } PH_SYMBOL_PROVIDER, *PPH_SYMBOL_PROVIDER;
 
 typedef enum _PH_SYMBOL_RESOLVE_LEVEL
@@ -45,39 +54,13 @@ typedef struct _PH_SYMBOL_LINE_INFORMATION
     ULONG64 Address;
 } PH_SYMBOL_LINE_INFORMATION, *PPH_SYMBOL_LINE_INFORMATION;
 
-typedef enum _PH_SYMBOL_EVENT_TYPE
-{
-    SymbolDeferredSymbolLoadStart = 1,
-    SymbolDeferredSymbolLoadComplete = 2,
-    SymbolDeferredSymbolLoadFailure = 3,
-    SymbolSymbolsUnloaded = 4,
-    SymbolDeferredSymbolLoadCancel = 7
-} PH_SYMBOL_EVENT_TYPE;
-
 typedef struct _PH_SYMBOL_EVENT_DATA
 {
+    ULONG ActionCode;
+    HANDLE ProcessHandle;
     PPH_SYMBOL_PROVIDER SymbolProvider;
-    PH_SYMBOL_EVENT_TYPE Type;
-
-    ULONG64 BaseAddress;
-    ULONG CheckSum;
-    ULONG TimeStamp;
-    PPH_STRING FileName;
+    PVOID EventData;
 } PH_SYMBOL_EVENT_DATA, *PPH_SYMBOL_EVENT_DATA;
-
-PHLIBAPI
-BOOLEAN
-NTAPI
-PhSymbolProviderInitialization(
-    VOID
-    );
-
-PHLIBAPI
-VOID
-NTAPI
-PhSymbolProviderCompleteInitialization(
-    _In_opt_ PVOID DbgHelpBase
-    );
 
 PHLIBAPI
 PPH_SYMBOL_PROVIDER
@@ -169,7 +152,7 @@ ULONG64
 __stdcall
 PhGetModuleBase64(
     _In_ HANDLE hProcess,
-    _In_ DWORD64 dwAddr
+    _In_ ULONG64 dwAddr
     );
 
 PHLIBAPI
@@ -177,7 +160,7 @@ PVOID
 __stdcall
 PhFunctionTableAccess64(
     _In_ HANDLE hProcess,
-    _In_ DWORD64 AddrBase
+    _In_ ULONG64 AddrBase
     );
 
 #ifndef _DBGHELP_
@@ -189,23 +172,23 @@ typedef struct _tagADDRESS64 *LPADDRESS64;
 
 typedef BOOL (__stdcall *PREAD_PROCESS_MEMORY_ROUTINE64)(
     _In_ HANDLE hProcess,
-    _In_ DWORD64 qwBaseAddress,
+    _In_ ULONG64 qwBaseAddress,
     _Out_writes_bytes_(nSize) PVOID lpBuffer,
-    _In_ DWORD nSize,
-    _Out_ LPDWORD lpNumberOfBytesRead
+    _In_ ULONG nSize,
+    _Out_ PULONG lpNumberOfBytesRead
     );
 
 typedef PVOID (__stdcall *PFUNCTION_TABLE_ACCESS_ROUTINE64)(
     _In_ HANDLE ahProcess,
-    _In_ DWORD64 AddrBase
+    _In_ ULONG64 AddrBase
     );
 
-typedef DWORD64 (__stdcall *PGET_MODULE_BASE_ROUTINE64)(
+typedef ULONG64 (__stdcall *PGET_MODULE_BASE_ROUTINE64)(
     _In_ HANDLE hProcess,
-    _In_ DWORD64 Address
+    _In_ ULONG64 Address
     );
 
-typedef DWORD64 (__stdcall *PTRANSLATE_ADDRESS_ROUTINE64)(
+typedef ULONG64 (__stdcall *PTRANSLATE_ADDRESS_ROUTINE64)(
     _In_ HANDLE hProcess,
     _In_ HANDLE hThread,
     _In_ LPADDRESS64 lpaddr
@@ -294,6 +277,46 @@ PhWalkThreadStack(
     _In_ ULONG Flags,
     _In_ PPH_WALK_THREAD_STACK_CALLBACK Callback,
     _In_opt_ PVOID Context
+    );
+
+PHLIBAPI
+PPH_STRING
+NTAPI
+PhUndecorateSymbolName(
+    _In_ PPH_SYMBOL_PROVIDER SymbolProvider,
+    _In_ PWSTR DecoratedName
+    );
+
+typedef struct _PH_SYMBOL_INFO {
+    PH_STRINGREF Name;
+    ULONG        TypeIndex;        // Type Index of symbol
+    ULONG        Index;
+    ULONG        Size;
+    ULONG64      ModBase;          // Base Address of module comtaining this symbol
+    ULONG        Flags;
+    ULONG64      Value;            // Value of symbol, ValuePresent should be 1
+    ULONG64      Address;          // Address of symbol including base address of module
+    ULONG        Register;         // register holding value or pointer to value
+    ULONG        Scope;            // scope of the symbol
+    ULONG        Tag;              // pdb classification
+} PH_SYMBOL_INFO, *PPH_SYMBOL_INFO;
+
+typedef BOOLEAN (NTAPI* PPH_ENUMERATE_SYMBOLS_CALLBACK)(
+    _In_ PPH_SYMBOL_INFO pSymInfo,
+    _In_ ULONG SymbolSize,
+    _In_opt_ PVOID UserContext
+    );
+
+PHLIBAPI
+BOOLEAN
+NTAPI
+PhEnumerateSymbols(
+    _In_ PPH_SYMBOL_PROVIDER SymbolProvider,
+    _In_ HANDLE ProcessHandle,
+    _In_ ULONG64 BaseOfDll,
+    _In_opt_ PCWSTR Mask,
+    _In_ PPH_ENUMERATE_SYMBOLS_CALLBACK EnumSymbolsCallback,
+    _In_opt_ const PVOID UserContext
     );
 
 #ifdef __cplusplus

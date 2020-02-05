@@ -2,11 +2,6 @@
 #define PH_NETPRV_H
 
 extern PPH_OBJECT_TYPE PhNetworkItemType;
-PHAPPAPI extern PH_CALLBACK PhNetworkItemAddedEvent; // phapppub
-PHAPPAPI extern PH_CALLBACK PhNetworkItemModifiedEvent; // phapppub
-PHAPPAPI extern PH_CALLBACK PhNetworkItemRemovedEvent; // phapppub
-PHAPPAPI extern PH_CALLBACK PhNetworkItemsUpdatedEvent; // phapppub
-
 extern BOOLEAN PhEnableNetworkProviderResolve;
 
 // begin_phapppub
@@ -17,7 +12,7 @@ typedef struct _PH_NETWORK_ITEM
     ULONG ProtocolType;
     PH_IP_ENDPOINT LocalEndpoint;
     PH_IP_ENDPOINT RemoteEndpoint;
-    ULONG State;
+    MIB_TCP_STATE State;
     HANDLE ProcessId;
 
     PPH_STRING ProcessName;
@@ -25,17 +20,32 @@ typedef struct _PH_NETWORK_ITEM
     BOOLEAN ProcessIconValid;
     PPH_STRING OwnerName;
 
-    BOOLEAN JustResolved;
+    ULONG JustResolved;
 
-    WCHAR LocalAddressString[65];
+    WCHAR LocalAddressString[INET6_ADDRSTRLEN];
     WCHAR LocalPortString[PH_INT32_STR_LEN_1];
-    WCHAR RemoteAddressString[65];
+    WCHAR RemoteAddressString[INET6_ADDRSTRLEN];
     WCHAR RemotePortString[PH_INT32_STR_LEN_1];
     PPH_STRING LocalHostString;
     PPH_STRING RemoteHostString;
 
     LARGE_INTEGER CreateTime;
     ULONGLONG OwnerInfo[PH_NETWORK_OWNER_INFO_SIZE];
+    ULONG LocalScopeId;
+    ULONG RemoteScopeId;
+
+    union
+    {
+        ULONG Flags;
+        struct
+        {
+            ULONG UnknownProcess : 1;
+            ULONG SubsystemProcess : 1;
+            ULONG Spare : 30;
+        };
+    };
+
+    PPH_PROCESS_ITEM ProcessItem;
 } PH_NETWORK_ITEM, *PPH_NETWORK_ITEM;
 // end_phapppub
 
@@ -59,9 +69,9 @@ PhReferenceNetworkItem(
     );
 // end_phapppub
 
-PPH_STRING PhGetHostNameFromAddress(
-    _In_ PPH_IP_ADDRESS Address
-    );
+//PPH_STRING PhGetHostNameFromAddress(
+//    _In_ PPH_IP_ADDRESS Address
+//    );
 
 VOID PhNetworkProviderUpdate(
     _In_ PVOID Object

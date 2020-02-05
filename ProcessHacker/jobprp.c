@@ -3,6 +3,7 @@
  *   job properties
  *
  * Copyright (C) 2010 wj32
+ * Copyright (C) 2018-2019 dmex
  *
  * This file is part of Process Hacker.
  *
@@ -21,18 +22,23 @@
  */
 
 #include <phapp.h>
+#include <phplug.h>
+#include <phsettings.h>
+#include <procprv.h>
 
+#include <emenu.h>
 #include <hndlinfo.h>
 #include <secedit.h>
-
-#include <procprv.h>
 #include <settings.h>
+
+#define MSG_UPDATE (WM_APP + 1)
 
 typedef struct _JOB_PAGE_CONTEXT
 {
     PPH_OPEN_OBJECT OpenObject;
     PVOID Context;
     DLGPROC HookProc;
+    PH_CALLBACK_REGISTRATION ProcessesUpdatedRegistration;
 } JOB_PAGE_CONTEXT, *PJOB_PAGE_CONTEXT;
 
 INT CALLBACK PhpJobPropPageProc(
@@ -74,6 +80,7 @@ VOID PhShowJobProperties(
         PSH_NOAPPLYNOW |
         PSH_NOCONTEXTHELP |
         PSH_PROPTITLE;
+    propSheetHeader.hInstance = PhInstanceHandle;
     propSheetHeader.hwndParent = ParentWindowHandle;
     propSheetHeader.pszCaption = Title ? Title : L"Job";
     propSheetHeader.nPages = 1;
@@ -105,6 +112,7 @@ HPROPSHEETPAGE PhCreateJobPage(
     propSheetPage.dwSize = sizeof(PROPSHEETPAGE);
     propSheetPage.dwFlags = PSP_USECALLBACK;
     propSheetPage.pszTemplate = MAKEINTRESOURCE(IDD_OBJJOB);
+    propSheetPage.hInstance = PhInstanceHandle;
     propSheetPage.pfnDlgProc = PhpJobPageProc;
     propSheetPage.lParam = (LPARAM)jobPageContext;
     propSheetPage.pfnCallback = PhpJobPropPageProc;
@@ -146,8 +154,7 @@ FORCEINLINE PJOB_PAGE_CONTEXT PhpJobPageHeader(
     _In_ LPARAM lParam
     )
 {
-    return (PJOB_PAGE_CONTEXT)PhpGenericPropertyPageHeader(
-        hwndDlg, uMsg, wParam, lParam, L"JobPageContext");
+    return PhpGenericPropertyPageHeader(hwndDlg, uMsg, wParam, lParam, 1);
 }
 
 static VOID PhpAddLimit(
@@ -226,13 +233,15 @@ INT_PTR CALLBACK PhpJobPageProc(
             PhSetListViewStyle(limitsLv, FALSE, TRUE);
             PhSetControlTheme(processesLv, L"explorer");
             PhSetControlTheme(limitsLv, L"explorer");
+            PhSetExtendedListView(processesLv);
+            PhSetExtendedListView(limitsLv);
 
             PhAddListViewColumn(processesLv, 0, 0, 0, LVCFMT_LEFT, 240, L"Name");
-
             PhAddListViewColumn(limitsLv, 0, 0, 0, LVCFMT_LEFT, 120, L"Name");
             PhAddListViewColumn(limitsLv, 1, 1, 1, LVCFMT_LEFT, 160, L"Value");
+            PhLoadListViewColumnsFromSetting(L"JobListViewColumns", limitsLv);
 
-            SetDlgItemText(hwndDlg, IDC_NAME, L"Unknown");
+            PhSetDialogItemText(hwndDlg, IDC_NAME, L"Unknown");
 
             if (NT_SUCCESS(jobPageContext->OpenObject(
                 &jobHandle,
@@ -249,7 +258,7 @@ INT_PTR CALLBACK PhpJobPageProc(
                 PhGetHandleInformation(
                     NtCurrentProcess(),
                     jobHandle,
-                    -1,
+                    ULONG_MAX,
                     NULL,
                     NULL,
                     NULL,
@@ -260,7 +269,7 @@ INT_PTR CALLBACK PhpJobPageProc(
                 if (jobObjectName && jobObjectName->Length == 0)
                     jobObjectName = NULL;
 
-                SetDlgItemText(hwndDlg, IDC_NAME, PhGetStringOrDefault(jobObjectName, L"(unnamed job)"));
+                PhSetDialogItemText(hwndDlg, IDC_NAME, PhGetStringOrDefault(jobObjectName, L"(unnamed job)"));
 
                 // Processes
                 PhpAddJobProcesses(hwndDlg, jobHandle);
@@ -382,11 +391,21 @@ INT_PTR CALLBACK PhpJobPageProc(
 
                 NtClose(jobHandle);
             }
+
+            PhInitializeWindowTheme(hwndDlg, PhEnableThemeSupport);
+        }
+        break;
+    case WM_DESTROY:
+        PhSaveListViewColumnsToSetting(L"JobListViewColumns", GetDlgItem(hwndDlg, IDC_LIMITS));
+        break;
+    case WM_SHOWWINDOW:
+        {
+            ExtendedListView_SetColumnWidth(GetDlgItem(hwndDlg, IDC_PROCESSES), 0, ELVSCW_AUTOSIZE_REMAININGSPACE);
         }
         break;
     case WM_COMMAND:
         {
-            switch (LOWORD(wParam))
+            switch (GET_WM_COMMAND_ID(wParam, lParam))
             {
             case IDC_TERMINATE:
                 {
@@ -472,8 +491,92 @@ INT_PTR CALLBACK PhpJobPageProc(
         break;
     case WM_NOTIFY:
         {
+            LPNMHDR header = (LPNMHDR)lParam;
+
+            switch (header->code)
+            {
+            case PSN_QUERYINITIALFOCUS:
+                SetWindowLongPtr(hwndDlg, DWLP_MSGRESULT, (LPARAM)GetDlgItem(hwndDlg, IDC_PROCESSES));
+                return TRUE;
+            }
+
             PhHandleListViewNotifyBehaviors(lParam, GetDlgItem(hwndDlg, IDC_PROCESSES), PH_LIST_VIEW_DEFAULT_1_BEHAVIORS);
             PhHandleListViewNotifyBehaviors(lParam, GetDlgItem(hwndDlg, IDC_LIMITS), PH_LIST_VIEW_DEFAULT_1_BEHAVIORS);
+        }
+        break;
+    case WM_SIZE:
+        {
+            ExtendedListView_SetColumnWidth(GetDlgItem(hwndDlg, IDC_PROCESSES), 0, ELVSCW_AUTOSIZE_REMAININGSPACE);
+        }
+        break;
+    case WM_CONTEXTMENU:
+        {
+            HWND listViewHandle = NULL;
+
+            if ((HWND)wParam == GetDlgItem(hwndDlg, IDC_PROCESSES))
+                listViewHandle = GetDlgItem(hwndDlg, IDC_PROCESSES);
+            else if ((HWND)wParam == GetDlgItem(hwndDlg, IDC_LIMITS))
+                listViewHandle = GetDlgItem(hwndDlg, IDC_LIMITS);
+
+            if (listViewHandle)
+            {
+                POINT point;
+                PPH_EMENU menu;
+                PPH_EMENU item;
+                PVOID *listviewItems;
+                ULONG numberOfItems;
+
+                point.x = GET_X_LPARAM(lParam);
+                point.y = GET_Y_LPARAM(lParam);
+
+                if (point.x == -1 && point.y == -1)
+                    PhGetListViewContextMenuPoint((HWND)wParam, &point);
+
+                PhGetSelectedListViewItemParams(listViewHandle, &listviewItems, &numberOfItems);
+
+                if (numberOfItems != 0)
+                {
+                    menu = PhCreateEMenu();
+
+                    PhInsertEMenuItem(menu, PhCreateEMenuItem(0, IDC_COPY, L"&Copy", NULL, NULL), ULONG_MAX);
+                    PhInsertCopyListViewEMenuItem(menu, IDC_COPY, listViewHandle);
+
+                    item = PhShowEMenu(
+                        menu,
+                        hwndDlg,
+                        PH_EMENU_SHOW_SEND_COMMAND | PH_EMENU_SHOW_LEFTRIGHT,
+                        PH_ALIGN_LEFT | PH_ALIGN_TOP,
+                        point.x,
+                        point.y
+                        );
+
+                    if (item)
+                    {
+                        BOOLEAN handled = FALSE;
+
+                        handled = PhHandleCopyListViewEMenuItem(item);
+
+                        //if (!handled && PhPluginsEnabled)
+                        //    handled = PhPluginTriggerEMenuItem(&menuInfo, item);
+
+                        if (!handled)
+                        {
+                            switch (item->Id)
+                            {
+                            case IDC_COPY:
+                                {
+                                    PhCopyListView(listViewHandle);
+                                }
+                                break;
+                            }
+                        }
+                    }
+
+                    PhDestroyEMenu(menu);
+                }
+
+                PhFree(listviewItems);
+            }
         }
         break;
     }
@@ -489,14 +592,12 @@ VOID PhpShowJobAdvancedProperties(
     PROPSHEETHEADER propSheetHeader = { sizeof(propSheetHeader) };
     HPROPSHEETPAGE pages[2];
     PROPSHEETPAGE statisticsPage;
-    PH_STD_OBJECT_SECURITY stdObjectSecurity;
-    PPH_ACCESS_ENTRY accessEntries;
-    ULONG numberOfAccessEntries;
 
     propSheetHeader.dwFlags =
         PSH_NOAPPLYNOW |
         PSH_NOCONTEXTHELP |
         PSH_PROPTITLE;
+    propSheetHeader.hInstance = PhInstanceHandle;
     propSheetHeader.hwndParent = ParentWindowHandle;
     propSheetHeader.pszCaption = L"Job";
     propSheetHeader.nPages = 2;
@@ -508,28 +609,20 @@ VOID PhpShowJobAdvancedProperties(
     memset(&statisticsPage, 0, sizeof(PROPSHEETPAGE));
     statisticsPage.dwSize = sizeof(PROPSHEETPAGE);
     statisticsPage.pszTemplate = MAKEINTRESOURCE(IDD_JOBSTATISTICS);
+    statisticsPage.hInstance = PhInstanceHandle;
     statisticsPage.pfnDlgProc = PhpJobStatisticsPageProc;
     statisticsPage.lParam = (LPARAM)Context;
     pages[0] = CreatePropertySheetPage(&statisticsPage);
 
     // Security
 
-    stdObjectSecurity.OpenObject = Context->OpenObject;
-    stdObjectSecurity.ObjectType = L"Job";
-    stdObjectSecurity.Context = Context->Context;
-
-    if (PhGetAccessEntries(L"Job", &accessEntries, &numberOfAccessEntries))
-    {
-        pages[1] = PhCreateSecurityPage(
-            L"Job",
-            PhStdGetObjectSecurity,
-            PhStdSetObjectSecurity,
-            &stdObjectSecurity,
-            accessEntries,
-            numberOfAccessEntries
-            );
-        PhFree(accessEntries);
-    }
+    pages[1] = PhCreateSecurityPage(
+        L"Job",
+        L"Job",
+        Context->OpenObject,
+        NULL,
+        Context->Context
+        );
 
     PhModalPropertySheet(&propSheetHeader);
 }
@@ -556,47 +649,47 @@ static VOID PhpRefreshJobStatisticsInfo(
     {
         WCHAR timeSpan[PH_TIMESPAN_STR_LEN_1];
 
-        SetDlgItemInt(hwndDlg, IDC_ZACTIVEPROCESSES_V, basicAndIo.BasicInfo.ActiveProcesses, FALSE);
-        SetDlgItemInt(hwndDlg, IDC_ZTOTALPROCESSES_V, basicAndIo.BasicInfo.TotalProcesses, FALSE);
-        SetDlgItemInt(hwndDlg, IDC_ZTERMINATEDPROCESSES_V, basicAndIo.BasicInfo.TotalTerminatedProcesses, FALSE);
+        PhSetDialogItemValue(hwndDlg, IDC_ZACTIVEPROCESSES_V, basicAndIo.BasicInfo.ActiveProcesses, FALSE);
+        PhSetDialogItemValue(hwndDlg, IDC_ZTOTALPROCESSES_V, basicAndIo.BasicInfo.TotalProcesses, FALSE);
+        PhSetDialogItemValue(hwndDlg, IDC_ZTERMINATEDPROCESSES_V, basicAndIo.BasicInfo.TotalTerminatedProcesses, FALSE);
 
         PhPrintTimeSpan(timeSpan, basicAndIo.BasicInfo.TotalUserTime.QuadPart, PH_TIMESPAN_HMSM);
-        SetDlgItemText(hwndDlg, IDC_ZUSERTIME_V, timeSpan);
+        PhSetDialogItemText(hwndDlg, IDC_ZUSERTIME_V, timeSpan);
         PhPrintTimeSpan(timeSpan, basicAndIo.BasicInfo.TotalKernelTime.QuadPart, PH_TIMESPAN_HMSM);
-        SetDlgItemText(hwndDlg, IDC_ZKERNELTIME_V, timeSpan);
+        PhSetDialogItemText(hwndDlg, IDC_ZKERNELTIME_V, timeSpan);
         PhPrintTimeSpan(timeSpan, basicAndIo.BasicInfo.ThisPeriodTotalUserTime.QuadPart, PH_TIMESPAN_HMSM);
-        SetDlgItemText(hwndDlg, IDC_ZUSERTIMEPERIOD_V, timeSpan);
+        PhSetDialogItemText(hwndDlg, IDC_ZUSERTIMEPERIOD_V, timeSpan);
         PhPrintTimeSpan(timeSpan, basicAndIo.BasicInfo.ThisPeriodTotalKernelTime.QuadPart, PH_TIMESPAN_HMSM);
-        SetDlgItemText(hwndDlg, IDC_ZKERNELTIMEPERIOD_V, timeSpan);
+        PhSetDialogItemText(hwndDlg, IDC_ZKERNELTIMEPERIOD_V, timeSpan);
 
-        SetDlgItemText(hwndDlg, IDC_ZPAGEFAULTS_V, PhaFormatUInt64(basicAndIo.BasicInfo.TotalPageFaultCount, TRUE)->Buffer);
+        PhSetDialogItemText(hwndDlg, IDC_ZPAGEFAULTS_V, PhaFormatUInt64(basicAndIo.BasicInfo.TotalPageFaultCount, TRUE)->Buffer);
 
-        SetDlgItemText(hwndDlg, IDC_ZIOREADS_V, PhaFormatUInt64(basicAndIo.IoInfo.ReadOperationCount, TRUE)->Buffer);
-        SetDlgItemText(hwndDlg, IDC_ZIOREADBYTES_V, PhaFormatSize(basicAndIo.IoInfo.ReadTransferCount, -1)->Buffer);
-        SetDlgItemText(hwndDlg, IDC_ZIOWRITES_V, PhaFormatUInt64(basicAndIo.IoInfo.WriteOperationCount, TRUE)->Buffer);
-        SetDlgItemText(hwndDlg, IDC_ZIOWRITEBYTES_V, PhaFormatSize(basicAndIo.IoInfo.WriteTransferCount, -1)->Buffer);
-        SetDlgItemText(hwndDlg, IDC_ZIOOTHER_V, PhaFormatUInt64(basicAndIo.IoInfo.OtherOperationCount, TRUE)->Buffer);
-        SetDlgItemText(hwndDlg, IDC_ZIOOTHERBYTES_V, PhaFormatSize(basicAndIo.IoInfo.OtherTransferCount, -1)->Buffer);
+        PhSetDialogItemText(hwndDlg, IDC_ZIOREADS_V, PhaFormatUInt64(basicAndIo.IoInfo.ReadOperationCount, TRUE)->Buffer);
+        PhSetDialogItemText(hwndDlg, IDC_ZIOREADBYTES_V, PhaFormatSize(basicAndIo.IoInfo.ReadTransferCount, ULONG_MAX)->Buffer);
+        PhSetDialogItemText(hwndDlg, IDC_ZIOWRITES_V, PhaFormatUInt64(basicAndIo.IoInfo.WriteOperationCount, TRUE)->Buffer);
+        PhSetDialogItemText(hwndDlg, IDC_ZIOWRITEBYTES_V, PhaFormatSize(basicAndIo.IoInfo.WriteTransferCount, ULONG_MAX)->Buffer);
+        PhSetDialogItemText(hwndDlg, IDC_ZIOOTHER_V, PhaFormatUInt64(basicAndIo.IoInfo.OtherOperationCount, TRUE)->Buffer);
+        PhSetDialogItemText(hwndDlg, IDC_ZIOOTHERBYTES_V, PhaFormatSize(basicAndIo.IoInfo.OtherTransferCount, ULONG_MAX)->Buffer);
     }
     else
     {
-        SetDlgItemText(hwndDlg, IDC_ZACTIVEPROCESSES_V, L"Unknown");
-        SetDlgItemText(hwndDlg, IDC_ZTOTALPROCESSES_V, L"Unknown");
-        SetDlgItemText(hwndDlg, IDC_ZTERMINATEDPROCESSES_V, L"Unknown");
+        PhSetDialogItemText(hwndDlg, IDC_ZACTIVEPROCESSES_V, L"Unknown");
+        PhSetDialogItemText(hwndDlg, IDC_ZTOTALPROCESSES_V, L"Unknown");
+        PhSetDialogItemText(hwndDlg, IDC_ZTERMINATEDPROCESSES_V, L"Unknown");
 
-        SetDlgItemText(hwndDlg, IDC_ZUSERTIME_V, L"Unknown");
-        SetDlgItemText(hwndDlg, IDC_ZKERNELTIME_V, L"Unknown");
-        SetDlgItemText(hwndDlg, IDC_ZUSERTIMEPERIOD_V, L"Unknown");
-        SetDlgItemText(hwndDlg, IDC_ZKERNELTIMEPERIOD_V, L"Unknown");
+        PhSetDialogItemText(hwndDlg, IDC_ZUSERTIME_V, L"Unknown");
+        PhSetDialogItemText(hwndDlg, IDC_ZKERNELTIME_V, L"Unknown");
+        PhSetDialogItemText(hwndDlg, IDC_ZUSERTIMEPERIOD_V, L"Unknown");
+        PhSetDialogItemText(hwndDlg, IDC_ZKERNELTIMEPERIOD_V, L"Unknown");
 
-        SetDlgItemText(hwndDlg, IDC_ZPAGEFAULTS_V, L"Unknown");
+        PhSetDialogItemText(hwndDlg, IDC_ZPAGEFAULTS_V, L"Unknown");
 
-        SetDlgItemText(hwndDlg, IDC_ZIOREADS_V, L"Unknown");
-        SetDlgItemText(hwndDlg, IDC_ZIOREADBYTES_V, L"Unknown");
-        SetDlgItemText(hwndDlg, IDC_ZIOWRITES_V, L"Unknown");
-        SetDlgItemText(hwndDlg, IDC_ZIOWRITEBYTES_V, L"Unknown");
-        SetDlgItemText(hwndDlg, IDC_ZIOOTHER_V, L"Unknown");
-        SetDlgItemText(hwndDlg, IDC_ZIOOTHERBYTES_V, L"Unknown");
+        PhSetDialogItemText(hwndDlg, IDC_ZIOREADS_V, L"Unknown");
+        PhSetDialogItemText(hwndDlg, IDC_ZIOREADBYTES_V, L"Unknown");
+        PhSetDialogItemText(hwndDlg, IDC_ZIOWRITES_V, L"Unknown");
+        PhSetDialogItemText(hwndDlg, IDC_ZIOWRITEBYTES_V, L"Unknown");
+        PhSetDialogItemText(hwndDlg, IDC_ZIOOTHER_V, L"Unknown");
+        PhSetDialogItemText(hwndDlg, IDC_ZIOOTHERBYTES_V, L"Unknown");
     }
 
     if (jobHandle && NT_SUCCESS(PhGetJobExtendedLimits(
@@ -604,17 +697,25 @@ static VOID PhpRefreshJobStatisticsInfo(
         &extendedLimitInfo
         )))
     {
-        SetDlgItemText(hwndDlg, IDC_ZPEAKPROCESSUSAGE_V, PhaFormatSize(extendedLimitInfo.PeakProcessMemoryUsed, -1)->Buffer);
-        SetDlgItemText(hwndDlg, IDC_ZPEAKJOBUSAGE_V, PhaFormatSize(extendedLimitInfo.PeakJobMemoryUsed, -1)->Buffer);
+        PhSetDialogItemText(hwndDlg, IDC_ZPEAKPROCESSUSAGE_V, PhaFormatSize(extendedLimitInfo.PeakProcessMemoryUsed, ULONG_MAX)->Buffer);
+        PhSetDialogItemText(hwndDlg, IDC_ZPEAKJOBUSAGE_V, PhaFormatSize(extendedLimitInfo.PeakJobMemoryUsed, ULONG_MAX)->Buffer);
     }
     else
     {
-        SetDlgItemText(hwndDlg, IDC_ZPEAKPROCESSUSAGE_V, L"Unknown");
-        SetDlgItemText(hwndDlg, IDC_ZPEAKJOBUSAGE_V, L"Unknown");
+        PhSetDialogItemText(hwndDlg, IDC_ZPEAKPROCESSUSAGE_V, L"Unknown");
+        PhSetDialogItemText(hwndDlg, IDC_ZPEAKJOBUSAGE_V, L"Unknown");
     }
 
     if (jobHandle)
         NtClose(jobHandle);
+}
+
+static VOID NTAPI ProcessesUpdatedCallback(
+    _In_opt_ PVOID Parameter,
+    _In_opt_ PVOID Context
+    )
+{
+    PostMessage(Context, MSG_UPDATE, 0, 0);
 }
 
 INT_PTR CALLBACK PhpJobStatisticsPageProc(
@@ -635,19 +736,28 @@ INT_PTR CALLBACK PhpJobStatisticsPageProc(
     {
     case WM_INITDIALOG:
         {
-            // HACK
-            PhCenterWindow(GetParent(hwndDlg), GetParent(GetParent(hwndDlg)));
+            PhCenterWindow(GetParent(hwndDlg), GetParent(GetParent(hwndDlg))); // HACK
 
             PhpRefreshJobStatisticsInfo(hwndDlg, jobPageContext);
-            SetTimer(hwndDlg, 1, PhGetIntegerSetting(L"UpdateInterval"), NULL);
+
+            PhRegisterCallback(
+                PhGetGeneralCallback(GeneralCallbackProcessProviderUpdatedEvent),
+                ProcessesUpdatedCallback,
+                hwndDlg,
+                &jobPageContext->ProcessesUpdatedRegistration
+                );
+
+            PhInitializeWindowTheme(hwndDlg, PhEnableThemeSupport);
         }
         break;
-    case WM_TIMER:
+    case WM_DESTROY:
         {
-            if (wParam == 1)
-            {
-                PhpRefreshJobStatisticsInfo(hwndDlg, jobPageContext);
-            }
+            PhUnregisterCallback(PhGetGeneralCallback(GeneralCallbackProcessProviderUpdatedEvent), &jobPageContext->ProcessesUpdatedRegistration);
+        }
+        break;
+    case MSG_UPDATE:
+        {
+            PhpRefreshJobStatisticsInfo(hwndDlg, jobPageContext);
         }
         break;
     }

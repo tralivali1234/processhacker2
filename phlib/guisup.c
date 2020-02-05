@@ -3,6 +3,7 @@
  *   GUI support functions
  *
  * Copyright (C) 2009-2016 wj32
+ * Copyright (C) 2017-2018 dmex
  *
  * This file is part of Process Hacker.
  *
@@ -22,40 +23,79 @@
 
 #include <ph.h>
 #include <guisup.h>
-
+#include <settings.h>
 #include <shellapi.h>
 #include <uxtheme.h>
-#include <windowsx.h>
 
 #include <guisupp.h>
 
 #define SCALE_DPI(Value) PhMultiplyDivide(Value, PhGlobalDpi, 96)
 
-_ChangeWindowMessageFilter ChangeWindowMessageFilter_I;
-_IsImmersiveProcess IsImmersiveProcess_I;
-_RunFileDlg RunFileDlg;
-_SHAutoComplete SHAutoComplete_I;
+BOOLEAN NTAPI PhpWindowContextHashtableEqualFunction(
+    _In_ PVOID Entry1,
+    _In_ PVOID Entry2
+    );
+ULONG NTAPI PhpWindowContextHashtableHashFunction(
+    _In_ PVOID Entry
+    );
+BOOLEAN NTAPI PhpWindowCallbackHashtableEqualFunction(
+    _In_ PVOID Entry1,
+    _In_ PVOID Entry2
+    );
+ULONG NTAPI PhpWindowCallbackHashtableHashFunction(
+    _In_ PVOID Entry
+    );
+
+typedef struct _PH_WINDOW_PROPERTY_CONTEXT
+{
+    ULONG PropertyHash;
+    HWND WindowHandle;
+    PVOID Context;
+} PH_WINDOW_PROPERTY_CONTEXT, *PPH_WINDOW_PROPERTY_CONTEXT;
+
+HFONT PhApplicationFont = NULL;
+HFONT PhTreeWindowFont = NULL;
+PH_INTEGER_PAIR PhSmallIconSize = { 16, 16 };
+PH_INTEGER_PAIR PhLargeIconSize = { 32, 32 };
 
 static PH_INITONCE SharedIconCacheInitOnce = PH_INITONCE_INIT;
 static PPH_HASHTABLE SharedIconCacheHashtable;
 static PH_QUEUED_LOCK SharedIconCacheLock = PH_QUEUED_LOCK_INIT;
 
+static PPH_HASHTABLE WindowCallbackHashTable = NULL;
+static PH_QUEUED_LOCK WindowCallbackListLock = PH_QUEUED_LOCK_INIT;
+static PPH_HASHTABLE WindowContextHashTable = NULL;
+static PH_QUEUED_LOCK WindowContextListLock = PH_QUEUED_LOCK_INIT;
+
 VOID PhGuiSupportInitialization(
     VOID
     )
 {
-    HMODULE shell32Handle;
-    HMODULE shlwapiHandle;
+    HDC hdc;
 
-    shell32Handle = LoadLibrary(L"shell32.dll");
-    shlwapiHandle = LoadLibrary(L"shlwapi.dll");
+    WindowCallbackHashTable = PhCreateHashtable(
+        sizeof(PH_PLUGIN_WINDOW_CALLBACK_REGISTRATION),
+        PhpWindowCallbackHashtableEqualFunction,
+        PhpWindowCallbackHashtableHashFunction,
+        10
+        );
+    WindowContextHashTable = PhCreateHashtable(
+        sizeof(PH_WINDOW_PROPERTY_CONTEXT),
+        PhpWindowContextHashtableEqualFunction,
+        PhpWindowContextHashtableHashFunction,
+        10
+        );
 
-    if (WINDOWS_HAS_UAC)
-        ChangeWindowMessageFilter_I = PhGetModuleProcAddress(L"user32.dll", "ChangeWindowMessageFilter");
-    if (WINDOWS_HAS_IMMERSIVE)
-        IsImmersiveProcess_I = PhGetModuleProcAddress(L"user32.dll", "IsImmersiveProcess");
-    RunFileDlg = PhGetProcedureAddress(shell32Handle, NULL, 61);
-    SHAutoComplete_I = PhGetProcedureAddress(shlwapiHandle, "SHAutoComplete", 0);
+    PhSmallIconSize.X = GetSystemMetrics(SM_CXSMICON);
+    PhSmallIconSize.Y = GetSystemMetrics(SM_CYSMICON);
+    PhLargeIconSize.X = GetSystemMetrics(SM_CXICON);
+    PhLargeIconSize.Y = GetSystemMetrics(SM_CYICON);
+
+    if (hdc = GetDC(NULL))
+    {
+        PhGlobalDpi = GetDeviceCaps(hdc, LOGPIXELSY);
+        ReleaseDC(NULL, hdc);
+    }
 }
 
 VOID PhSetControlTheme(
@@ -63,10 +103,7 @@ VOID PhSetControlTheme(
     _In_ PWSTR Theme
     )
 {
-    if (WindowsVersion >= WINDOWS_VISTA)
-    {
-        SetWindowTheme(Handle, Theme, NULL);
-    }
+    SetWindowTheme(Handle, Theme, NULL);
 }
 
 INT PhAddListViewColumn(
@@ -132,50 +169,59 @@ INT PhFindListViewItemByParam(
     return ListView_FindItem(ListViewHandle, StartIndex, &findInfo);
 }
 
-LOGICAL PhGetListViewItemImageIndex(
+BOOLEAN PhGetListViewItemImageIndex(
     _In_ HWND ListViewHandle,
     _In_ INT Index,
     _Out_ PINT ImageIndex
     )
 {
-    LOGICAL result;
     LVITEM item;
 
     item.mask = LVIF_IMAGE;
     item.iItem = Index;
     item.iSubItem = 0;
 
-    result = ListView_GetItem(ListViewHandle, &item);
-
-    if (!result)
-        return result;
+    if (!ListView_GetItem(ListViewHandle, &item))
+        return FALSE;
 
     *ImageIndex = item.iImage;
 
-    return result;
+    return TRUE;
 }
 
-LOGICAL PhGetListViewItemParam(
+BOOLEAN PhGetListViewItemParam(
     _In_ HWND ListViewHandle,
     _In_ INT Index,
     _Out_ PVOID *Param
     )
 {
-    LOGICAL result;
     LVITEM item;
 
     item.mask = LVIF_PARAM;
     item.iItem = Index;
     item.iSubItem = 0;
 
-    result = ListView_GetItem(ListViewHandle, &item);
-
-    if (!result)
-        return result;
+    if (!ListView_GetItem(ListViewHandle, &item))
+        return FALSE;
 
     *Param = (PVOID)item.lParam;
 
-    return result;
+    return TRUE;
+}
+
+BOOLEAN PhSetListViewItemParam(
+    _In_ HWND ListViewHandle,
+    _In_ INT Index,
+    _In_ PVOID Param
+    )
+{
+    LVITEM item;
+
+    item.mask = LVIF_PARAM;
+    item.iItem = Index;
+    item.lParam = (LPARAM)Param;
+
+    return !!ListView_SetItem(ListViewHandle, &item);
 }
 
 VOID PhRemoveListViewItem(
@@ -219,130 +265,48 @@ VOID PhSetListViewSubItem(
     ListView_SetItem(ListViewHandle, &item);
 }
 
-BOOLEAN PhLoadListViewColumnSettings(
+INT PhAddListViewGroup(
     _In_ HWND ListViewHandle,
-    _In_ PPH_STRING Settings
+    _In_ INT GroupId,
+    _In_ PWSTR Text
     )
 {
-#define ORDER_LIMIT 50
-    PH_STRINGREF remainingPart;
-    ULONG columnIndex;
-    ULONG orderArray[ORDER_LIMIT]; // HACK, but reasonable limit
-    ULONG maxOrder;
-    ULONG scale;
+    LVGROUP group;
 
-    if (Settings->Length == 0)
-        return FALSE;
+    memset(&group, 0, sizeof(LVGROUP));
+    group.cbSize = sizeof(LVGROUP);
+    group.mask = LVGF_HEADER | LVGF_ALIGN | LVGF_STATE | LVGF_GROUPID;
+    group.uAlign = LVGA_HEADER_LEFT;
+    group.state = LVGS_COLLAPSIBLE;
+    group.iGroupId = GroupId;
+    group.pszHeader = Text;
 
-    remainingPart = Settings->sr;
-    columnIndex = 0;
-    memset(orderArray, 0, sizeof(orderArray));
-    maxOrder = 0;
-
-    if (remainingPart.Length != 0 && remainingPart.Buffer[0] == '@')
-    {
-        PH_STRINGREF scalePart;
-        ULONG64 integer;
-
-        PhSkipStringRef(&remainingPart, sizeof(WCHAR));
-        PhSplitStringRefAtChar(&remainingPart, '|', &scalePart, &remainingPart);
-
-        if (scalePart.Length == 0 || !PhStringToInteger64(&scalePart, 10, &integer))
-            return FALSE;
-
-        scale = (ULONG)integer;
-    }
-    else
-    {
-        scale = PhGlobalDpi;
-    }
-
-    while (remainingPart.Length != 0)
-    {
-        PH_STRINGREF columnPart;
-        PH_STRINGREF orderPart;
-        PH_STRINGREF widthPart;
-        ULONG64 integer;
-        ULONG order;
-        ULONG width;
-        LVCOLUMN lvColumn;
-
-        PhSplitStringRefAtChar(&remainingPart, '|', &columnPart, &remainingPart);
-
-        if (columnPart.Length == 0)
-            return FALSE;
-
-        PhSplitStringRefAtChar(&columnPart, ',', &orderPart, &widthPart);
-
-        if (orderPart.Length == 0 || widthPart.Length == 0)
-            return FALSE;
-
-        // Order
-
-        if (!PhStringToInteger64(&orderPart, 10, &integer))
-            return FALSE;
-
-        order = (ULONG)integer;
-
-        if (order < ORDER_LIMIT)
-        {
-            orderArray[order] = columnIndex;
-
-            if (maxOrder < order + 1)
-                maxOrder = order + 1;
-        }
-
-        // Width
-
-        if (!PhStringToInteger64(&widthPart, 10, &integer))
-            return FALSE;
-
-        width = (ULONG)integer;
-
-        if (scale != PhGlobalDpi && scale != 0)
-            width = PhMultiplyDivide(width, PhGlobalDpi, scale);
-
-        lvColumn.mask = LVCF_WIDTH;
-        lvColumn.cx = width;
-        ListView_SetColumn(ListViewHandle, columnIndex, &lvColumn);
-
-        columnIndex++;
-    }
-
-    ListView_SetColumnOrderArray(ListViewHandle, maxOrder, orderArray);
-
-    return TRUE;
+    return (INT)ListView_InsertGroup(ListViewHandle, MAXINT, &group);
 }
 
-PPH_STRING PhSaveListViewColumnSettings(
-    _In_ HWND ListViewHandle
+INT PhAddListViewGroupItem(
+    _In_ HWND ListViewHandle,
+    _In_ INT GroupId,
+    _In_ INT Index,
+    _In_ PWSTR Text,
+    _In_opt_ PVOID Param
     )
 {
-    PH_STRING_BUILDER stringBuilder;
-    ULONG i = 0;
-    LVCOLUMN lvColumn;
+    LVITEM item;
 
-    PhInitializeStringBuilder(&stringBuilder, 20);
+    item.mask = LVIF_TEXT | LVIF_GROUPID;
+    item.iItem = Index;
+    item.iSubItem = 0;
+    item.pszText = Text;
+    item.iGroupId = GroupId;
 
-    PhAppendFormatStringBuilder(&stringBuilder, L"@%u|", PhGlobalDpi);
-
-    lvColumn.mask = LVCF_WIDTH | LVCF_ORDER;
-
-    while (ListView_GetColumn(ListViewHandle, i, &lvColumn))
+    if (Param)
     {
-        PhAppendFormatStringBuilder(
-            &stringBuilder,
-            L"%u,%u|",
-            lvColumn.iOrder,
-            lvColumn.cx
-            );
-        i++;
+        item.mask |= LVIF_PARAM;
+        item.lParam = (LPARAM)Param;
     }
 
-    if (stringBuilder.String->Length != 0)
-        PhRemoveEndStringBuilder(&stringBuilder, 1);
-
-    return PhFinalStringBuilderString(&stringBuilder);
+    return ListView_InsertItem(ListViewHandle, &item);
 }
 
 INT PhAddTabControlTab(
@@ -435,6 +399,31 @@ ULONG PhGetWindowTextEx(
     }
 }
 
+ULONG PhGetWindowTextToBuffer(
+    _In_ HWND hwnd,
+    _In_ ULONG Flags,
+    _Out_writes_bytes_opt_(BufferLength) PWSTR Buffer,
+    _In_opt_ ULONG BufferLength,
+    _Out_opt_ PULONG ReturnLength
+    )
+{
+    ULONG status = ERROR_SUCCESS;
+    ULONG length;
+
+    if (Flags & PH_GET_WINDOW_TEXT_INTERNAL)
+        length = InternalGetWindowText(hwnd, Buffer, BufferLength);
+    else
+        length = GetWindowText(hwnd, Buffer, BufferLength);
+
+    if (length == 0)
+        status = GetLastError();
+
+    if (ReturnLength)
+        *ReturnLength = length;
+
+    return status;
+}
+
 VOID PhAddComboBoxStrings(
     _In_ HWND hWnd,
     _In_ PWSTR *Strings,
@@ -459,7 +448,7 @@ PPH_STRING PhGetComboBoxString(
     {
         Index = ComboBox_GetCurSel(hwnd);
 
-        if (Index == -1)
+        if (Index == CB_ERR)
             return NULL;
     }
 
@@ -470,7 +459,7 @@ PPH_STRING PhGetComboBoxString(
     if (length == 0)
         return PhReferenceEmptyString();
 
-    string = PhCreateStringEx(NULL, length * 2);
+    string = PhCreateStringEx(NULL, length * sizeof(WCHAR));
 
     if (ComboBox_GetLBText(hwnd, Index, string->Buffer) != CB_ERR)
     {
@@ -520,7 +509,7 @@ PPH_STRING PhGetListBoxString(
     {
         Index = ListBox_GetCurSel(hwnd);
 
-        if (Index == -1)
+        if (Index == LB_ERR)
             return NULL;
     }
 
@@ -531,7 +520,7 @@ PPH_STRING PhGetListBoxString(
     if (length == 0)
         return PhReferenceEmptyString();
 
-    string = PhCreateStringEx(NULL, length * 2);
+    string = PhCreateStringEx(NULL, length * sizeof(WCHAR));
 
     if (ListBox_GetText(hwnd, Index, string->Buffer) != LB_ERR)
     {
@@ -550,12 +539,12 @@ VOID PhSetStateAllListViewItems(
     _In_ ULONG Mask
     )
 {
-    ULONG i;
-    ULONG count;
+    INT i;
+    INT count;
 
     count = ListView_GetItemCount(hWnd);
 
-    if (count == -1)
+    if (count <= 0)
         return;
 
     for (i = 0; i < count; i++)
@@ -633,7 +622,7 @@ VOID PhSetImageListBitmap(
     if (bitmap)
     {
         ImageList_Replace(ImageList, Index, bitmap, NULL);
-        DeleteObject(bitmap);
+        DeleteBitmap(bitmap);
     }
 }
 
@@ -655,7 +644,7 @@ static BOOLEAN SharedIconCacheHashtableEqualFunction(
     if (IS_INTRESOURCE(entry1->Name))
     {
         if (IS_INTRESOURCE(entry2->Name))
-            return entry1->Name == entry2->Name;
+            return PtrToUlong(entry1->Name) == PtrToUlong(entry2->Name);
         else
             return FALSE;
     }
@@ -691,17 +680,12 @@ HICON PhLoadIcon(
     _In_opt_ ULONG Height
     )
 {
-    static _LoadIconMetric loadIconMetric;
-    static _LoadIconWithScaleDown loadIconWithScaleDown;
-
     PHP_ICON_ENTRY entry;
     PPHP_ICON_ENTRY actualEntry;
     HICON icon = NULL;
 
     if (PhBeginInitOnce(&SharedIconCacheInitOnce))
     {
-        loadIconMetric = (_LoadIconMetric)PhGetModuleProcAddress(L"comctl32.dll", "LoadIconMetric");
-        loadIconWithScaleDown = (_LoadIconWithScaleDown)PhGetModuleProcAddress(L"comctl32.dll", "LoadIconWithScaleDown");
         SharedIconCacheHashtable = PhCreateHashtable(sizeof(PHP_ICON_ENTRY),
             SharedIconCacheHashtableEqualFunction, SharedIconCacheHashtableHashFunction, 10);
         PhEndInitOnce(&SharedIconCacheInitOnce);
@@ -727,13 +711,13 @@ HICON PhLoadIcon(
 
     if (Flags & (PH_LOAD_ICON_SIZE_SMALL | PH_LOAD_ICON_SIZE_LARGE))
     {
-        if (loadIconMetric)
-            loadIconMetric(InstanceHandle, Name, (Flags & PH_LOAD_ICON_SIZE_SMALL) ? LIM_SMALL : LIM_LARGE, &icon);
+        if (LoadIconMetric)
+            LoadIconMetric(InstanceHandle, Name, (Flags & PH_LOAD_ICON_SIZE_SMALL) ? LIM_SMALL : LIM_LARGE, &icon);
     }
     else
     {
-        if (loadIconWithScaleDown)
-            loadIconWithScaleDown(InstanceHandle, Name, Width, Height, &icon);
+        if (LoadIconWithScaleDown)
+            LoadIconWithScaleDown(InstanceHandle, Name, Width, Height, &icon);
     }
 
     if (!icon && !(Flags & PH_LOAD_ICON_STRICT))
@@ -810,46 +794,34 @@ VOID PhGetStockApplicationIcon(
 
     if (PhBeginInitOnce(&initOnce))
     {
-        PPH_STRING systemDirectory;
-        PPH_STRING dllFileName;
-
-        // imageres,11 (Windows 10 and above), user32,0 (Vista and above) or shell32,2 (XP) contains
-        // the default application icon.
-
-        if (systemDirectory = PhGetSystemDirectory())
+        if (WindowsVersion < WINDOWS_10)
         {
-            PH_STRINGREF dllBaseName;
-            ULONG index;
+            PPH_STRING systemDirectory;
+            PPH_STRING dllFileName;
 
-            // TODO: Find a better solution.
-            if (WindowsVersion >= WINDOWS_10)
-            {
-                PhInitializeStringRef(&dllBaseName, L"\\imageres.dll");
-                index = 11;
-            }
-            else if (WindowsVersion >= WINDOWS_VISTA)
-            {
-                PhInitializeStringRef(&dllBaseName, L"\\user32.dll");
-                index = 0;
-            }
-            else
-            {
-                PhInitializeStringRef(&dllBaseName, L"\\shell32.dll");
-                index = 2;
-            }
+            // imageres,11 (Windows 10 and above), user32,0 (Vista and above) or shell32,2 (XP) contains
+            // the default application icon.
 
-            dllFileName = PhConcatStringRef2(&systemDirectory->sr, &dllBaseName);
-            PhDereferenceObject(systemDirectory);
+            if (systemDirectory = PhGetSystemDirectory())
+            {
+                dllFileName = PhConcatStringRefZ(&systemDirectory->sr, L"\\user32.dll");
 
-            ExtractIconEx(dllFileName->Buffer, index, &largeIcon, &smallIcon, 1);
-            PhDereferenceObject(dllFileName);
+                PhExtractIcon(
+                    dllFileName->Buffer,
+                    &largeIcon,
+                    &smallIcon
+                    );
+
+                PhDereferenceObject(dllFileName);
+                PhDereferenceObject(systemDirectory);
+            }
         }
 
-        // Fallback icons - this is bad, because the icon isn't scaled correctly.
+        // Fallback icons
         if (!smallIcon)
-            smallIcon = LoadIcon(NULL, IDI_APPLICATION);
+            smallIcon = PhLoadIcon(NULL, IDI_APPLICATION, PH_LOAD_ICON_SIZE_SMALL, 0, 0);
         if (!largeIcon)
-            largeIcon = LoadIcon(NULL, IDI_APPLICATION);
+            largeIcon = PhLoadIcon(NULL, IDI_APPLICATION, PH_LOAD_ICON_SIZE_LARGE, 0, 0);
 
         PhEndInitOnce(&initOnce);
     }
@@ -878,12 +850,10 @@ HICON PhGetFileShellIcon(
 
         if (FileName)
         {
-            ExtractIconEx(
+            PhExtractIcon(
                 FileName,
-                0,
                 LargeIcon ? &icon : NULL,
-                !LargeIcon ? &icon : NULL,
-                1
+                !LargeIcon ? &icon : NULL
                 );
         }
 
@@ -895,7 +865,7 @@ HICON PhGetFileShellIcon(
                 );
 
             if (icon)
-                icon = DuplicateIcon(NULL, icon);
+                icon = CopyIcon(icon);
         }
 
         return icon;
@@ -961,11 +931,11 @@ VOID PhSetClipboardString(
     HANDLE data;
     PVOID memory;
 
-    data = GlobalAlloc(GMEM_MOVEABLE, String->Length + sizeof(WCHAR));
+    data = GlobalAlloc(GMEM_MOVEABLE, String->Length + sizeof(UNICODE_NULL));
     memory = GlobalLock(data);
 
     memcpy(memory, String->Buffer, String->Length);
-    *(PWCHAR)((PCHAR)memory + String->Length) = 0;
+    *(PWCHAR)PTR_ADD_OFFSET(memory, String->Length) = UNICODE_NULL;
 
     GlobalUnlock(memory);
 
@@ -981,47 +951,30 @@ HWND PhCreateDialogFromTemplate(
     _In_ PVOID Parameter
     )
 {
-    HRSRC resourceInfo;
-    ULONG resourceSize;
-    HGLOBAL resourceHandle;
-    PDLGTEMPLATEEX dialog;
-    PDLGTEMPLATEEX dialogCopy;
+    PDLGTEMPLATEEX dialogTemplate;
     HWND dialogHandle;
 
-    resourceInfo = FindResource(Instance, Template, MAKEINTRESOURCE(RT_DIALOG));
-
-    if (!resourceInfo)
+    if (!PhLoadResource(Instance, Template, RT_DIALOG, NULL, &dialogTemplate))
         return NULL;
 
-    resourceSize = SizeofResource(Instance, resourceInfo);
-
-    if (resourceSize == 0)
-        return NULL;
-
-    resourceHandle = LoadResource(Instance, resourceInfo);
-
-    if (!resourceHandle)
-        return NULL;
-
-    dialog = LockResource(resourceHandle);
-
-    if (!dialog)
-        return NULL;
-
-    dialogCopy = PhAllocateCopy(dialog, resourceSize);
-
-    if (dialogCopy->signature == 0xffff)
+    if (dialogTemplate->signature == USHRT_MAX)
     {
-        dialogCopy->style = Style;
+        dialogTemplate->style = Style;
     }
     else
     {
-        ((DLGTEMPLATE *)dialogCopy)->style = Style;
+        ((DLGTEMPLATE *)dialogTemplate)->style = Style;
     }
 
-    dialogHandle = CreateDialogIndirectParam(Instance, (DLGTEMPLATE *)dialogCopy, Parent, DialogProc, (LPARAM)Parameter);
+    dialogHandle = CreateDialogIndirectParam(
+        Instance, 
+        (DLGTEMPLATE *)dialogTemplate, 
+        Parent, 
+        DialogProc, 
+        (LPARAM)Parameter
+        );
 
-    PhFree(dialogCopy);
+    PhFree(dialogTemplate);
 
     return dialogHandle;
 }
@@ -1050,7 +1003,7 @@ BOOLEAN PhModalPropertySheet(
     oldFocus = GetFocus();
     topLevelOwner = Header->hwndParent;
 
-    while (topLevelOwner && (GetWindowLong(topLevelOwner, GWL_STYLE) & WS_CHILD))
+    while (topLevelOwner && (GetWindowLongPtr(topLevelOwner, GWL_STYLE) & WS_CHILD))
         topLevelOwner = GetParent(topLevelOwner);
 
     if (topLevelOwner && (topLevelOwner == GetDesktopWindow() || EnableWindow(topLevelOwner, FALSE)))
@@ -1071,6 +1024,11 @@ BOOLEAN PhModalPropertySheet(
     {
         if (result == -1)
             break;
+
+        if (message.message == WM_KEYDOWN /*|| message.message == WM_KEYUP*/) // forward key messages (dmex)
+        {
+            SendMessage(hwnd, message.message, message.wParam, message.lParam);
+        }
 
         if (!PropSheet_IsDialogMessage(hwnd, &message))
         {
@@ -1371,4 +1329,409 @@ VOID PhLayoutManagerLayout(
         EndDeferWindowPos(Manager->RootItem.DeferHandle);
         Manager->RootItem.DeferHandle = NULL;
     }
+}
+
+static BOOLEAN NTAPI PhpWindowContextHashtableEqualFunction(
+    _In_ PVOID Entry1,
+    _In_ PVOID Entry2
+    )
+{
+    PPH_WINDOW_PROPERTY_CONTEXT entry1 = Entry1;
+    PPH_WINDOW_PROPERTY_CONTEXT entry2 = Entry2;
+
+    return 
+        entry1->WindowHandle == entry2->WindowHandle &&
+        entry1->PropertyHash == entry2->PropertyHash;
+}
+
+static ULONG NTAPI PhpWindowContextHashtableHashFunction(
+    _In_ PVOID Entry
+    )
+{
+    PPH_WINDOW_PROPERTY_CONTEXT entry = Entry;
+
+    return PhHashIntPtr((ULONG_PTR)entry->WindowHandle) ^ PhHashInt32(entry->PropertyHash);
+}
+
+PVOID PhGetWindowContext(
+    _In_ HWND WindowHandle,
+    _In_ ULONG PropertyHash
+    )
+{
+    PH_WINDOW_PROPERTY_CONTEXT lookupEntry;
+    PPH_WINDOW_PROPERTY_CONTEXT entry;
+
+    lookupEntry.WindowHandle = WindowHandle;
+    lookupEntry.PropertyHash = PropertyHash;
+
+    PhAcquireQueuedLockShared(&WindowContextListLock);
+    entry = PhFindEntryHashtable(WindowContextHashTable, &lookupEntry);
+    PhReleaseQueuedLockShared(&WindowContextListLock);
+
+    if (entry)
+        return entry->Context;
+    else
+        return NULL;
+}
+
+VOID PhSetWindowContext(
+    _In_ HWND WindowHandle,
+    _In_ ULONG PropertyHash,
+    _In_ PVOID Context
+    )
+{
+    PH_WINDOW_PROPERTY_CONTEXT entry;
+
+    entry.WindowHandle = WindowHandle;
+    entry.PropertyHash = PropertyHash;
+    entry.Context = Context;
+
+    PhAcquireQueuedLockExclusive(&WindowContextListLock);
+    PhAddEntryHashtable(WindowContextHashTable, &entry);
+    PhReleaseQueuedLockExclusive(&WindowContextListLock);
+}
+
+VOID PhRemoveWindowContext(
+    _In_ HWND WindowHandle,
+    _In_ ULONG PropertyHash
+    )
+{
+    PH_WINDOW_PROPERTY_CONTEXT lookupEntry;
+
+    lookupEntry.WindowHandle = WindowHandle;
+    lookupEntry.PropertyHash = PropertyHash;
+
+    PhAcquireQueuedLockExclusive(&WindowContextListLock);
+    PhRemoveEntryHashtable(WindowContextHashTable, &lookupEntry);
+    PhReleaseQueuedLockExclusive(&WindowContextListLock);
+}
+
+VOID PhEnumWindows(
+    _In_ PH_ENUM_CALLBACK Callback,
+    _In_opt_ PVOID Context
+    )
+{
+    EnumWindows((WNDENUMPROC)Callback, (LPARAM)Context);
+}
+
+VOID PhEnumChildWindows(
+    _In_opt_ HWND WindowHandle,
+    _In_ ULONG Limit,
+    _In_ PH_CHILD_ENUM_CALLBACK Callback,
+    _In_opt_ PVOID Context
+    )
+{
+    HWND childWindow = NULL;
+    ULONG i = 0;
+
+    while (i < Limit && (childWindow = FindWindowEx(WindowHandle, childWindow, NULL, NULL)))
+    {
+        if (!Callback(childWindow, Context))
+            return;
+
+        i++;
+    }
+}
+
+typedef struct _GET_PROCESS_MAIN_WINDOW_CONTEXT
+{
+    HWND Window;
+    HWND ImmersiveWindow;
+    HANDLE ProcessId;
+    BOOLEAN IsImmersive;
+    BOOLEAN SkipInvisible;
+} GET_PROCESS_MAIN_WINDOW_CONTEXT, *PGET_PROCESS_MAIN_WINDOW_CONTEXT;
+
+BOOL CALLBACK PhpGetProcessMainWindowEnumWindowsProc(
+    _In_ HWND WindowHandle,
+    _In_opt_ PVOID Context
+    )
+{
+    PGET_PROCESS_MAIN_WINDOW_CONTEXT context = (PGET_PROCESS_MAIN_WINDOW_CONTEXT)Context;
+    ULONG processId;
+    WINDOWINFO windowInfo;
+
+    if (context->SkipInvisible && !IsWindowVisible(WindowHandle))
+        return TRUE;
+
+    GetWindowThreadProcessId(WindowHandle, &processId);
+
+    //if (UlongToHandle(processId) == context->ProcessId && (context->SkipInvisible ?
+    //    !((parentWindow = GetParent(WindowHandle)) && IsWindowVisible(parentWindow)) && // skip windows with a visible parent
+    //    PhGetWindowTextEx(WindowHandle, PH_GET_WINDOW_TEXT_INTERNAL | PH_GET_WINDOW_TEXT_LENGTH_ONLY, NULL) != 0 : TRUE)) // skip windows with no title
+
+    if (UlongToHandle(processId) == context->ProcessId)
+    {
+        if (!context->ImmersiveWindow && context->IsImmersive &&
+            GetProp(WindowHandle, L"Windows.ImmersiveShell.IdentifyAsMainCoreWindow"))
+        {
+            context->ImmersiveWindow = WindowHandle;
+        }
+
+        windowInfo.cbSize = sizeof(WINDOWINFO);
+
+        if (!context->Window && GetWindowInfo(WindowHandle, &windowInfo) && (windowInfo.dwStyle & WS_DLGFRAME))
+        {
+            context->Window = WindowHandle;
+
+            // If we're not looking at an immersive process, there's no need to search any more windows.
+            if (!context->IsImmersive)
+                return FALSE;
+        }
+    }
+
+    return TRUE;
+}
+
+HWND PhGetProcessMainWindow(
+    _In_ HANDLE ProcessId,
+    _In_opt_ HANDLE ProcessHandle
+    )
+{
+    return PhGetProcessMainWindowEx(ProcessId, ProcessHandle, TRUE);
+}
+
+HWND PhGetProcessMainWindowEx(
+    _In_ HANDLE ProcessId,
+    _In_opt_ HANDLE ProcessHandle,
+    _In_ BOOLEAN SkipInvisible
+    )
+{
+    GET_PROCESS_MAIN_WINDOW_CONTEXT context;
+    HANDLE processHandle = NULL;
+
+    memset(&context, 0, sizeof(GET_PROCESS_MAIN_WINDOW_CONTEXT));
+    context.ProcessId = ProcessId;
+    context.SkipInvisible = SkipInvisible;
+
+    if (ProcessHandle)
+        processHandle = ProcessHandle;
+    else
+        PhOpenProcess(&processHandle, PROCESS_QUERY_LIMITED_INFORMATION, ProcessId);
+
+    if (processHandle && WindowsVersion >= WINDOWS_8 && IsImmersiveProcess)
+        context.IsImmersive = IsImmersiveProcess(processHandle);
+
+    PhEnumWindows(PhpGetProcessMainWindowEnumWindowsProc, &context);
+    //PhEnumChildWindows(NULL, 0x800, PhpGetProcessMainWindowEnumWindowsProc, &context);
+
+    if (!ProcessHandle && processHandle)
+        NtClose(processHandle);
+
+    return context.ImmersiveWindow ? context.ImmersiveWindow : context.Window;
+}
+
+ULONG PhGetDialogItemValue(
+    _In_ HWND WindowHandle,
+    _In_ INT ControlID
+    )
+{
+    ULONG64 controlValue = 0;
+    HWND controlHandle;
+    PPH_STRING controlText;
+
+    if (controlHandle = GetDlgItem(WindowHandle, ControlID))
+    {
+        if (controlText = PhGetWindowText(controlHandle))
+        {
+            PhStringToInteger64(&controlText->sr, 10, &controlValue);
+            PhDereferenceObject(controlText);
+        }
+    }
+
+    return (ULONG)controlValue;
+}
+
+VOID PhSetDialogItemValue(
+    _In_ HWND WindowHandle,
+    _In_ INT ControlID,
+    _In_ ULONG Value,
+    _In_ BOOLEAN Signed
+    )
+{
+    HWND controlHandle;
+    WCHAR valueString[PH_INT32_STR_LEN_1];
+
+    if (Signed)
+        PhPrintInt32(valueString, (LONG)Value);
+    else
+        PhPrintUInt32(valueString, Value);
+
+    if (controlHandle = GetDlgItem(WindowHandle, ControlID))
+    {
+        PhSetWindowText(controlHandle, valueString);
+    }
+}
+
+VOID PhSetDialogItemText(
+    _In_ HWND WindowHandle,
+    _In_ INT ControlID,
+    _In_ PCWSTR WindowText
+    )
+{
+    HWND controlHandle;
+
+    if (controlHandle = GetDlgItem(WindowHandle, ControlID))
+    {
+        PhSetWindowText(controlHandle, WindowText);
+    }
+}
+
+VOID PhSetWindowText(
+    _In_ HWND WindowHandle,
+    _In_ PCWSTR WindowText
+    )
+{
+    SendMessage(WindowHandle, WM_SETTEXT, 0, (LPARAM)WindowText); // TODO: DefWindowProc (dmex)
+}
+
+VOID PhSetWindowAlwaysOnTop(
+    _In_ HWND WindowHandle,
+    _In_ BOOLEAN AlwaysOnTop
+    )
+{
+    SetFocus(WindowHandle); // HACK - SetWindowPos doesn't work properly without this (wj32)
+    SetWindowPos(
+        WindowHandle,
+        AlwaysOnTop ? HWND_TOPMOST : HWND_NOTOPMOST, 
+        0, 0, 0, 0,
+        SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE
+        );
+}
+
+static BOOLEAN NTAPI PhpWindowCallbackHashtableEqualFunction(
+    _In_ PVOID Entry1,
+    _In_ PVOID Entry2
+    )
+{
+    return
+        (*(PPH_PLUGIN_WINDOW_CALLBACK_REGISTRATION *)Entry1)->WindowHandle ==
+        (*(PPH_PLUGIN_WINDOW_CALLBACK_REGISTRATION *)Entry2)->WindowHandle;
+}
+
+static ULONG NTAPI PhpWindowCallbackHashtableHashFunction(
+    _In_ PVOID Entry
+    )
+{
+    return PhHashIntPtr((ULONG_PTR)(*(PPH_PLUGIN_WINDOW_CALLBACK_REGISTRATION *)Entry)->WindowHandle);
+}
+
+VOID PhRegisterWindowCallback(
+    _In_ HWND WindowHandle,
+    _In_ PH_PLUGIN_WINDOW_EVENT_TYPE Type,
+    _In_opt_ PVOID Context
+    )
+{
+    PPH_PLUGIN_WINDOW_CALLBACK_REGISTRATION entry;
+
+    entry = PhAllocate(sizeof(PH_PLUGIN_WINDOW_CALLBACK_REGISTRATION));
+    entry->WindowHandle = WindowHandle;
+    entry->Type = Type;
+
+    switch (Type) // HACK
+    {
+    case PH_PLUGIN_WINDOW_EVENT_TYPE_TOPMOST:
+        if (PhGetIntegerSetting(L"MainWindowAlwaysOnTop"))
+            PhSetWindowAlwaysOnTop(WindowHandle, TRUE);
+        break;
+    }
+
+    PhAcquireQueuedLockExclusive(&WindowCallbackListLock);
+    PhAddEntryHashtable(WindowCallbackHashTable, &entry);
+    PhReleaseQueuedLockExclusive(&WindowCallbackListLock);
+}
+
+VOID PhUnregisterWindowCallback(
+    _In_ HWND WindowHandle
+    )
+{
+    PH_PLUGIN_WINDOW_CALLBACK_REGISTRATION lookupEntry;
+    PPH_PLUGIN_WINDOW_CALLBACK_REGISTRATION lookupEntryPtr = &lookupEntry;
+    PPH_PLUGIN_WINDOW_CALLBACK_REGISTRATION *entryPtr;
+    PPH_PLUGIN_WINDOW_CALLBACK_REGISTRATION entry;
+
+    lookupEntry.WindowHandle = WindowHandle;
+
+    PhAcquireQueuedLockExclusive(&WindowCallbackListLock);
+
+    entryPtr = (PPH_PLUGIN_WINDOW_CALLBACK_REGISTRATION*)PhFindEntryHashtable(
+        WindowCallbackHashTable,
+        &lookupEntryPtr
+        );
+
+    assert(entryPtr);
+
+    if (entryPtr && PhRemoveEntryHashtable(WindowCallbackHashTable, entryPtr))
+    {
+        entry = *entryPtr;
+        PhFree(entry);
+    }
+
+    PhReleaseQueuedLockExclusive(&WindowCallbackListLock);
+}
+
+VOID PhWindowNotifyTopMostEvent(
+    _In_ BOOLEAN TopMost
+    )
+{
+    PPH_PLUGIN_WINDOW_CALLBACK_REGISTRATION *entry;
+    ULONG i = 0;
+
+    PhAcquireQueuedLockExclusive(&WindowCallbackListLock);
+
+    while (PhEnumHashtable(WindowCallbackHashTable, (PVOID*)&entry, &i))
+    {
+        if ((*entry)->Type & PH_PLUGIN_WINDOW_EVENT_TYPE_TOPMOST)
+        {
+            PhSetWindowAlwaysOnTop((*entry)->WindowHandle, TopMost);
+        }
+    }
+
+    PhReleaseQueuedLockExclusive(&WindowCallbackListLock);
+}
+
+HICON PhGetInternalWindowIcon(
+    _In_ HWND WindowHandle,
+    _In_ UINT Type
+    )
+{
+    static PH_INITONCE initOnce = PH_INITONCE_INIT;
+    static HICON (WINAPI *InternalGetWindowIcon_I)(
+        _In_ HWND WindowHandle,
+        _In_ ULONG Type
+        ) = NULL;
+
+    if (PhBeginInitOnce(&initOnce))
+    {
+        PVOID shell32Handle;
+
+        if (shell32Handle = LoadLibrary(L"shell32.dll"))
+        {
+            InternalGetWindowIcon_I = PhGetDllBaseProcedureAddress(shell32Handle, "InternalGetWindowIcon", 0);
+        }
+
+        PhEndInitOnce(&initOnce);
+    }
+
+    if (!InternalGetWindowIcon_I)
+        return NULL; 
+
+    return InternalGetWindowIcon_I(WindowHandle, Type);
+}
+
+HANDLE PhGetGlobalTimerQueue(
+    VOID
+    )
+{
+    static HANDLE PhTimerQueueHandle = NULL;
+    static PH_INITONCE PhTimerQueueHandleInitOnce = PH_INITONCE_INIT;
+
+    if (PhBeginInitOnce(&PhTimerQueueHandleInitOnce))
+    {
+        RtlCreateTimerQueue(&PhTimerQueueHandle);
+
+        PhEndInitOnce(&PhTimerQueueHandleInitOnce);
+    }
+
+    return PhTimerQueueHandle;
 }

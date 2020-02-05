@@ -24,21 +24,20 @@
 #include "dn.h"
 
 PPH_PLUGIN PluginInstance;
-static PH_CALLBACK_REGISTRATION PluginLoadCallbackRegistration;
-static PH_CALLBACK_REGISTRATION PluginUnloadCallbackRegistration;
-static PH_CALLBACK_REGISTRATION PluginShowOptionsCallbackRegistration;
-static PH_CALLBACK_REGISTRATION PluginMenuItemCallbackRegistration;
-static PH_CALLBACK_REGISTRATION PluginTreeNewMessageCallbackRegistration;
-static PH_CALLBACK_REGISTRATION PluginPhSvcRequestCallbackRegistration;
-static PH_CALLBACK_REGISTRATION MainWindowShowingCallbackRegistration;
-static PH_CALLBACK_REGISTRATION ProcessPropertiesInitializingCallbackRegistration;
-static PH_CALLBACK_REGISTRATION ProcessMenuInitializingCallbackRegistration;
-static PH_CALLBACK_REGISTRATION ThreadMenuInitializingCallbackRegistration;
-static PH_CALLBACK_REGISTRATION ModuleMenuInitializingCallbackRegistration;
-static PH_CALLBACK_REGISTRATION ProcessTreeNewInitializingCallbackRegistration;
-static PH_CALLBACK_REGISTRATION ThreadTreeNewInitializingCallbackRegistration;
-static PH_CALLBACK_REGISTRATION ThreadTreeNewUninitializingCallbackRegistration;
-static PH_CALLBACK_REGISTRATION ThreadStackControlCallbackRegistration;
+PH_CALLBACK_REGISTRATION PluginLoadCallbackRegistration;
+PH_CALLBACK_REGISTRATION PluginUnloadCallbackRegistration;
+PH_CALLBACK_REGISTRATION PluginMenuItemCallbackRegistration;
+PH_CALLBACK_REGISTRATION PluginTreeNewMessageCallbackRegistration;
+PH_CALLBACK_REGISTRATION PluginPhSvcRequestCallbackRegistration;
+PH_CALLBACK_REGISTRATION MainWindowShowingCallbackRegistration;
+PH_CALLBACK_REGISTRATION ProcessPropertiesInitializingCallbackRegistration;
+PH_CALLBACK_REGISTRATION ProcessMenuInitializingCallbackRegistration;
+PH_CALLBACK_REGISTRATION ThreadMenuInitializingCallbackRegistration;
+PH_CALLBACK_REGISTRATION ModuleMenuInitializingCallbackRegistration;
+PH_CALLBACK_REGISTRATION ProcessTreeNewInitializingCallbackRegistration;
+PH_CALLBACK_REGISTRATION ThreadTreeNewInitializingCallbackRegistration;
+PH_CALLBACK_REGISTRATION ThreadTreeNewUninitializingCallbackRegistration;
+PH_CALLBACK_REGISTRATION ThreadStackControlCallbackRegistration;
 
 VOID NTAPI LoadCallback(
     _In_opt_ PVOID Parameter,
@@ -56,20 +55,15 @@ VOID NTAPI UnloadCallback(
     NOTHING;
 }
 
-VOID NTAPI ShowOptionsCallback(
-    _In_opt_ PVOID Parameter,
-    _In_opt_ PVOID Context
-    )
-{
-    NOTHING;
-}
-
 VOID NTAPI MenuItemCallback(
     _In_opt_ PVOID Parameter,
     _In_opt_ PVOID Context
     )
 {
     PPH_PLUGIN_MENU_ITEM menuItem = Parameter;
+
+    if (!menuItem)
+        return;
 
     switch (menuItem->Id)
     {
@@ -84,7 +78,8 @@ VOID NTAPI TreeNewMessageCallback(
     _In_opt_ PVOID Context
     )
 {
-    DispatchTreeNewMessage(Parameter);
+    if (Parameter)
+        DispatchTreeNewMessage(Parameter);
 }
 
 VOID NTAPI PhSvcRequestCallback(
@@ -92,7 +87,8 @@ VOID NTAPI PhSvcRequestCallback(
     _In_opt_ PVOID Context
     )
 {
-    DispatchPhSvcRequest(Parameter);
+    if (Parameter)
+        DispatchPhSvcRequest(Parameter);
 }
 
 VOID NTAPI ThreadTreeNewInitializingCallback(
@@ -100,7 +96,8 @@ VOID NTAPI ThreadTreeNewInitializingCallback(
     _In_opt_ PVOID Context
     )
 {
-    ThreadTreeNewInitializing(Parameter);
+    if (Parameter)
+        ThreadTreeNewInitializing(Parameter);
 }
 
 VOID NTAPI ThreadTreeNewUninitializingCallback(
@@ -108,7 +105,8 @@ VOID NTAPI ThreadTreeNewUninitializingCallback(
     _In_opt_ PVOID Context
     )
 {
-    ThreadTreeNewUninitializing(Parameter);
+    if (Parameter)
+        ThreadTreeNewUninitializing(Parameter);
 }
 
 VOID NTAPI ProcessPropertiesInitializingCallback(
@@ -117,14 +115,34 @@ VOID NTAPI ProcessPropertiesInitializingCallback(
     )
 {
     PPH_PLUGIN_PROCESS_PROPCONTEXT propContext = Parameter;
-    BOOLEAN isDotNet;
+    BOOLEAN isDotNet = FALSE;
+    ULONG flags = 0;
 
-    if (NT_SUCCESS(PhGetProcessIsDotNet(propContext->ProcessItem->ProcessId, &isDotNet)))
+    if (!propContext)
+        return;
+
+    if (NT_SUCCESS(PhGetProcessIsDotNetEx(
+        propContext->ProcessItem->ProcessId,
+        NULL,
+        propContext->ProcessItem->IsImmersive ? 0 : PH_CLR_USE_SECTION_CHECK,
+        &isDotNet,
+        &flags
+        )))
     {
         if (isDotNet)
         {
             AddAsmPageToPropContext(propContext);
             AddPerfPageToPropContext(propContext);
+        }
+        else if (flags & PH_CLR_JIT_PRESENT)
+        {
+            isDotNet = TRUE;
+            AddAsmPageToPropContext(propContext);
+        }
+        else if (flags & PH_CLR_CORE_3_0_ABOVE)
+        {
+            isDotNet = TRUE;
+            AddAsmPageToPropContext(propContext);
         }
 
         if (propContext->ProcessItem->IsDotNet != isDotNet)
@@ -169,6 +187,9 @@ VOID NTAPI ThreadStackControlCallback(
     _In_opt_ PVOID Context
     )
 {
+    if (!Parameter)
+        return;
+
     ProcessThreadStackControl(Parameter);
 }
 
@@ -209,9 +230,11 @@ LOGICAL DllMain(
             PH_SETTING_CREATE settings[] =
             {
                 { StringSettingType, SETTING_NAME_ASM_TREE_LIST_COLUMNS, L"" },
+                { IntegerSettingType, SETTING_NAME_ASM_TREE_LIST_FLAGS, L"0" },
                 { IntegerSettingType, SETTING_NAME_DOT_NET_CATEGORY_INDEX, L"5" },
                 { StringSettingType, SETTING_NAME_DOT_NET_COUNTERS_COLUMNS, L"" },
-                { IntegerSettingType, SETTING_NAME_DOT_NET_SHOW_BYTE_SIZE, L"1" }
+                { StringSettingType, SETTING_NAME_DOT_NET_COUNTERS_SORTCOLUMN, L"" },
+                { StringSettingType, SETTING_NAME_DOT_NET_COUNTERS_GROUPSTATES, L"" }
             };
 
             PluginInstance = PhRegisterPlugin(PLUGIN_NAME, Instance, &info);
@@ -236,12 +259,6 @@ LOGICAL DllMain(
                 UnloadCallback,
                 NULL,
                 &PluginUnloadCallbackRegistration
-                );
-            PhRegisterCallback(
-                PhGetPluginCallback(PluginInstance, PluginCallbackShowOptions),
-                ShowOptionsCallback,
-                NULL,
-                &PluginShowOptionsCallbackRegistration
                 );
             //PhRegisterCallback(
             //    PhGetPluginCallback(PluginInstance, PluginCallbackMenuItem),
@@ -326,7 +343,7 @@ LOGICAL DllMain(
                 );
             InitializeTreeNewObjectExtensions();
 
-            PhAddSettings(settings, ARRAYSIZE(settings));
+            PhAddSettings(settings, RTL_NUMBER_OF(settings));
         }
         break;
     }

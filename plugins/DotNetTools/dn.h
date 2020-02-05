@@ -2,7 +2,7 @@
  * Process Hacker .NET Tools
  *
  * Copyright (C) 2011-2015 wj32
- * Copyright (C) 2015-2016 dmex
+ * Copyright (C) 2015-2019 dmex
  *
  * This file is part of Process Hacker.
  *
@@ -23,22 +23,29 @@
 #ifndef DN_H
 #define DN_H
 
-#define CINTERFACE
-#define COBJMACROS
 #include <phdk.h>
-#include <windowsx.h>
+#include <workqueue.h>
+#include <settings.h>
 
 #include "resource.h"
 
 #define PLUGIN_NAME L"ProcessHacker.DotNetTools"
 #define SETTING_NAME_ASM_TREE_LIST_COLUMNS (PLUGIN_NAME L".AsmTreeListColumns")
+#define SETTING_NAME_ASM_TREE_LIST_FLAGS (PLUGIN_NAME L".AsmTreeListFlags")
+//#define SETTING_NAME_ASM_TREE_LIST_SORT (PLUGIN_NAME L".AsmTreeListSort")
 #define SETTING_NAME_DOT_NET_CATEGORY_INDEX (PLUGIN_NAME L".DotNetCategoryIndex")
 #define SETTING_NAME_DOT_NET_COUNTERS_COLUMNS (PLUGIN_NAME L".DotNetListColumns")
-#define SETTING_NAME_DOT_NET_SHOW_BYTE_SIZE (PLUGIN_NAME L".DotNetShowByteSizes")
+#define SETTING_NAME_DOT_NET_COUNTERS_SORTCOLUMN (PLUGIN_NAME L".DotNetListSort")
+#define SETTING_NAME_DOT_NET_COUNTERS_GROUPSTATES (PLUGIN_NAME L".DotNetListGroupStates")
 
 #define MSG_UPDATE (WM_APP + 1)
 
 extern PPH_PLUGIN PluginInstance;
+
+#define DN_ASM_MENU_HIDE_DYNAMIC_OPTION 1
+#define DN_ASM_MENU_HIGHLIGHT_DYNAMIC_OPTION 2
+#define DN_ASM_MENU_HIDE_NATIVE_OPTION 3
+#define DN_ASM_MENU_HIGHLIGHT_NATIVE_OPTION 4
 
 typedef struct _DN_THREAD_ITEM
 {
@@ -60,17 +67,17 @@ PVOID GetPerfIpcBlock_V4(
     _In_ PVOID BlockTableAddress
     );
 
+_Success_(return)
 BOOLEAN OpenDotNetPublicControlBlock_V2(
     _In_ HANDLE ProcessId,
-    _Out_ HANDLE* BlockTableHandle,
     _Out_ PVOID* BlockTableAddress
     );
 
+_Success_(return)
 BOOLEAN OpenDotNetPublicControlBlock_V4(
     _In_ BOOLEAN IsImmersive,
     _In_ HANDLE ProcessHandle,
     _In_ HANDLE ProcessId,
-    _Out_ HANDLE* BlockTableHandle,
     _Out_ PVOID* BlockTableAddress
     );
 

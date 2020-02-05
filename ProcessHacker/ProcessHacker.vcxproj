@@ -1,5 +1,5 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
-<Project DefaultTargets="Build" ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+<Project DefaultTargets="Build" ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|Win32">
       <Configuration>Debug</Configuration>
@@ -22,30 +22,44 @@
     <ProjectGuid>{0271DD27-6707-4290-8DFE-285702B7115D}</ProjectGuid>
     <RootNamespace>ProcessHacker</RootNamespace>
     <Keyword>Win32Proj</Keyword>
-    <WindowsTargetPlatformVersion>10.0.14393.0</WindowsTargetPlatformVersion>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
     <CharacterSet>Unicode</CharacterSet>
     <WholeProgramOptimization>true</WholeProgramOptimization>
-    <PlatformToolset>v140</PlatformToolset>
+    <PlatformToolset>v142</PlatformToolset>
+    <DebuggerFlavor>WindowsLocalDebugger</DebuggerFlavor>
+    <LocalDebuggerWorkingDirectory>$(SolutionDir)bin\$(Configuration)$(PlatformArchitecture)\</LocalDebuggerWorkingDirectory>
+    <SpectreMitigation>false</SpectreMitigation>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
     <CharacterSet>Unicode</CharacterSet>
-    <PlatformToolset>v140</PlatformToolset>
+    <PlatformToolset>v142</PlatformToolset>
+    <DebuggerFlavor>WindowsLocalDebugger</DebuggerFlavor>
+    <LocalDebuggerWorkingDirectory>$(SolutionDir)bin\$(Configuration)$(PlatformArchitecture)\</LocalDebuggerWorkingDirectory>
+    <SpectreMitigation>false</SpectreMitigation>
+    <UseDebugLibraries>true</UseDebugLibraries>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
     <CharacterSet>Unicode</CharacterSet>
     <WholeProgramOptimization>true</WholeProgramOptimization>
-    <PlatformToolset>v140</PlatformToolset>
+    <PlatformToolset>v142</PlatformToolset>
+    <DebuggerFlavor>WindowsLocalDebugger</DebuggerFlavor>
+    <LocalDebuggerWorkingDirectory>$(SolutionDir)bin\$(Configuration)$(PlatformArchitecture)\</LocalDebuggerWorkingDirectory>
+    <SpectreMitigation>false</SpectreMitigation>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
     <CharacterSet>Unicode</CharacterSet>
-    <PlatformToolset>v140</PlatformToolset>
+    <PlatformToolset>v142</PlatformToolset>
+    <DebuggerFlavor>WindowsLocalDebugger</DebuggerFlavor>
+    <LocalDebuggerWorkingDirectory>$(SolutionDir)bin\$(Configuration)$(PlatformArchitecture)\</LocalDebuggerWorkingDirectory>
+    <SpectreMitigation>false</SpectreMitigation>
+    <UseDebugLibraries>true</UseDebugLibraries>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <ImportGroup Label="ExtensionSettings">
@@ -66,16 +80,12 @@
   <PropertyGroup>
     <OutDir Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(SolutionDir)bin\$(Configuration)$(PlatformArchitecture)\</OutDir>
     <IntDir Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(ProjectDir)obj\$(Configuration)$(PlatformArchitecture)\</IntDir>
-    <LinkIncremental Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">false</LinkIncremental>
     <OutDir Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(SolutionDir)bin\$(Configuration)$(PlatformArchitecture)\</OutDir>
     <IntDir Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(ProjectDir)obj\$(Configuration)$(PlatformArchitecture)\</IntDir>
-    <LinkIncremental Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</LinkIncremental>
     <OutDir Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(SolutionDir)bin\$(Configuration)$(PlatformArchitecture)\</OutDir>
     <IntDir Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(ProjectDir)obj\$(Configuration)$(PlatformArchitecture)\</IntDir>
-    <LinkIncremental Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">false</LinkIncremental>
     <OutDir Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(SolutionDir)bin\$(Configuration)$(PlatformArchitecture)\</OutDir>
     <IntDir Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(ProjectDir)obj\$(Configuration)$(PlatformArchitecture)\</IntDir>
-    <LinkIncremental Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</LinkIncremental>
     <GenerateManifest Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">false</GenerateManifest>
     <GenerateManifest Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">false</GenerateManifest>
     <GenerateManifest Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</GenerateManifest>
@@ -84,8 +94,8 @@
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
       <Optimization>Disabled</Optimization>
-      <AdditionalIncludeDirectories>..\phnt\include;..\phlib\include;include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>_PHLIB_;_PHAPP_;_WINDOWS;WIN32;DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(SolutionDir)phnt\include;$(SolutionDir)phlib\include;include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>_PHLIB_;_PHAPP_;_WINDOWS;HAVE_CONFIG_H;WIN32;_DEBUG;DEBUG;%(PreprocessorDefinitions);$(ExternalCompilerOptions)</PreprocessorDefinitions>
       <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
       <WarningLevel>Level3</WarningLevel>
@@ -93,28 +103,32 @@
       <CallingConvention>StdCall</CallingConvention>
       <TreatWarningAsError>true</TreatWarningAsError>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <StringPooling>true</StringPooling>
     </ClCompile>
     <Link>
-      <AdditionalDependencies>noenv.obj;phlib.lib;ntdll.lib;winsta.lib;comctl32.lib;version.lib;uxtheme.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>aclui.lib;comctl32.lib;dnsapi.lib;iphlpapi.lib;noarg.obj;noenv.obj;ntdll.lib;phlib.lib;shlwapi.lib;userenv.lib;uxtheme.lib;version.lib;wbemuuid.lib;windowscodecs.lib;winhttp.lib;winsta.lib;ws2_32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <SubSystem>Windows</SubSystem>
       <TargetMachine>MachineX86</TargetMachine>
       <MinimumRequiredVersion>6.01</MinimumRequiredVersion>
-      <AdditionalLibraryDirectories>..\phlib\bin\$(Configuration)$(PlatformArchitecture);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>$(SolutionDir)phlib\bin\$(Configuration)$(PlatformArchitecture);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <ModuleDefinitionFile>ProcessHacker.def</ModuleDefinitionFile>
+      <DelayLoadDLLs>advapi32.dll;aclui.dll;comdlg32.dll;comctl32.dll;gdi32.dll;iphlpapi.dll;oleaut32.dll;ole32.dll;shell32.dll;shlwapi.dll;user32.dll;uxtheme.dll;version.dll;winhttp.dll;winsta.dll;ws2_32.dll;%(DelayLoadDLLs)</DelayLoadDLLs>
+      <AdditionalOptions>/DEPENDENTLOADFLAG:0xA00 %(AdditionalOptions)</AdditionalOptions>
     </Link>
-    <PreBuildEvent>
-      <Command>..\build\internal\update_rev.bat</Command>
-    </PreBuildEvent>
-    <PreBuildEvent>
-      <Message>Generating revision number...</Message>
-    </PreBuildEvent>
+    <ResourceCompile>
+      <PreprocessorDefinitions>_UNICODE;UNICODE;%(PreprocessorDefinitions);$(ExternalCompilerOptions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(SolutionDir)phnt\include;$(SolutionDir)phlib\include;include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ResourceCompile>
+    <PostBuildEvent>
+      <Command>"$(SolutionDir)build\build_sdk.cmd"</Command>
+    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
       <Optimization>Disabled</Optimization>
-      <AdditionalIncludeDirectories>..\phnt\include;..\phlib\include;include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>_PHLIB_;_PHAPP_;_WINDOWS;WIN64;DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(SolutionDir)phnt\include;$(SolutionDir)phlib\include;include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>_PHLIB_;_PHAPP_;_WINDOWS;HAVE_CONFIG_H;WIN64;_DEBUG;DEBUG;%(PreprocessorDefinitions);$(ExternalCompilerOptions)</PreprocessorDefinitions>
       <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
       <WarningLevel>Level3</WarningLevel>
@@ -122,29 +136,34 @@
       <CallingConvention>StdCall</CallingConvention>
       <TreatWarningAsError>true</TreatWarningAsError>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <StringPooling>true</StringPooling>
     </ClCompile>
     <Link>
-      <AdditionalDependencies>noenv.obj;phlib.lib;ntdll.lib;winsta.lib;comctl32.lib;version.lib;uxtheme.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>aclui.lib;comctl32.lib;dnsapi.lib;iphlpapi.lib;noarg.obj;noenv.obj;ntdll.lib;phlib.lib;shlwapi.lib;userenv.lib;uxtheme.lib;version.lib;wbemuuid.lib;windowscodecs.lib;winhttp.lib;winsta.lib;ws2_32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <SubSystem>Windows</SubSystem>
       <TargetMachine>MachineX64</TargetMachine>
       <MinimumRequiredVersion>6.01</MinimumRequiredVersion>
-      <AdditionalLibraryDirectories>..\phlib\bin\$(Configuration)$(PlatformArchitecture);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>$(SolutionDir)phlib\bin\$(Configuration)$(PlatformArchitecture);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <ModuleDefinitionFile>ProcessHacker.def</ModuleDefinitionFile>
+      <DelayLoadDLLs>advapi32.dll;aclui.dll;comdlg32.dll;comctl32.dll;gdi32.dll;iphlpapi.dll;oleaut32.dll;ole32.dll;shell32.dll;shlwapi.dll;user32.dll;uxtheme.dll;version.dll;winhttp.dll;winsta.dll;ws2_32.dll;%(DelayLoadDLLs)</DelayLoadDLLs>
+      <AdditionalOptions>/DEPENDENTLOADFLAG:0xA00 %(AdditionalOptions)</AdditionalOptions>
     </Link>
-    <PreBuildEvent>
-      <Command>..\build\internal\update_rev.bat</Command>
-    </PreBuildEvent>
-    <PreBuildEvent>
-      <Message>Generating revision number...</Message>
-    </PreBuildEvent>
+    <ResourceCompile>
+      <PreprocessorDefinitions>_UNICODE;UNICODE;%(PreprocessorDefinitions);$(ExternalCompilerOptions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(SolutionDir)phnt\include;$(SolutionDir)phlib\include;include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ResourceCompile>
+    <PreBuildEvent />
+    <PostBuildEvent>
+      <Command>"$(SolutionDir)build\build_sdk.cmd"</Command>
+    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <ClCompile>
       <Optimization>MaxSpeed</Optimization>
       <IntrinsicFunctions>true</IntrinsicFunctions>
-      <AdditionalIncludeDirectories>..\phnt\include;..\phlib\include;include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>_PHLIB_;_PHAPP_;_WINDOWS;WIN32;NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(SolutionDir)phnt\include;$(SolutionDir)phlib\include;include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>_PHLIB_;_PHAPP_;_WINDOWS;HAVE_CONFIG_H;WIN32;NDEBUG;%(PreprocessorDefinitions);$(ExternalCompilerOptions)</PreprocessorDefinitions>
       <StringPooling>true</StringPooling>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <BufferSecurityCheck>false</BufferSecurityCheck>
@@ -155,32 +174,36 @@
       <TreatWarningAsError>true</TreatWarningAsError>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <EnableEnhancedInstructionSet>StreamingSIMDExtensions</EnableEnhancedInstructionSet>
+      <ControlFlowGuard>Guard</ControlFlowGuard>
     </ClCompile>
     <Link>
-      <AdditionalDependencies>noenv.obj;phlib.lib;ntdll.lib;winsta.lib;comctl32.lib;version.lib;uxtheme.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalDependencies>aclui.lib;comctl32.lib;dnsapi.lib;iphlpapi.lib;noarg.obj;noenv.obj;ntdll.lib;phlib.lib;shlwapi.lib;userenv.lib;uxtheme.lib;version.lib;wbemuuid.lib;windowscodecs.lib;winhttp.lib;winsta.lib;ws2_32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <SubSystem>Windows</SubSystem>
       <OptimizeReferences>true</OptimizeReferences>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <TargetMachine>MachineX86</TargetMachine>
       <SetChecksum>true</SetChecksum>
       <MinimumRequiredVersion>6.01</MinimumRequiredVersion>
-      <AdditionalLibraryDirectories>..\phlib\bin\$(Configuration)$(PlatformArchitecture);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>$(SolutionDir)phlib\bin\$(Configuration)$(PlatformArchitecture);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <ModuleDefinitionFile>ProcessHacker.def</ModuleDefinitionFile>
+      <DelayLoadDLLs>advapi32.dll;aclui.dll;comdlg32.dll;comctl32.dll;gdi32.dll;iphlpapi.dll;oleaut32.dll;ole32.dll;shell32.dll;shlwapi.dll;user32.dll;uxtheme.dll;version.dll;winhttp.dll;winsta.dll;ws2_32.dll;%(DelayLoadDLLs)</DelayLoadDLLs>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalOptions>/DEPENDENTLOADFLAG:0xA00 %(AdditionalOptions)</AdditionalOptions>
     </Link>
-    <PreBuildEvent>
-      <Command>..\build\internal\update_rev.bat</Command>
-    </PreBuildEvent>
-    <PreBuildEvent>
-      <Message>Generating revision number...</Message>
-    </PreBuildEvent>
+    <ResourceCompile>
+      <PreprocessorDefinitions>_UNICODE;UNICODE;%(PreprocessorDefinitions);$(ExternalCompilerOptions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(SolutionDir)phnt\include;$(SolutionDir)phlib\include;include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ResourceCompile>
+    <PostBuildEvent>
+      <Command>"$(SolutionDir)build\build_sdk.cmd"</Command>
+    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
       <Optimization>MaxSpeed</Optimization>
       <IntrinsicFunctions>true</IntrinsicFunctions>
-      <AdditionalIncludeDirectories>..\phnt\include;..\phlib\include;include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>_PHLIB_;_PHAPP_;_WINDOWS;WIN64;NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(SolutionDir)phnt\include;$(SolutionDir)phlib\include;include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>_PHLIB_;_PHAPP_;_WINDOWS;HAVE_CONFIG_H;WIN64;NDEBUG;%(PreprocessorDefinitions);$(ExternalCompilerOptions)</PreprocessorDefinitions>
       <StringPooling>true</StringPooling>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <BufferSecurityCheck>false</BufferSecurityCheck>
@@ -190,25 +213,29 @@
       <CallingConvention>StdCall</CallingConvention>
       <TreatWarningAsError>true</TreatWarningAsError>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <ControlFlowGuard>Guard</ControlFlowGuard>
     </ClCompile>
     <Link>
-      <AdditionalDependencies>noenv.obj;phlib.lib;ntdll.lib;winsta.lib;comctl32.lib;version.lib;uxtheme.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalDependencies>aclui.lib;comctl32.lib;dnsapi.lib;iphlpapi.lib;noarg.obj;noenv.obj;ntdll.lib;phlib.lib;shlwapi.lib;userenv.lib;uxtheme.lib;version.lib;wbemuuid.lib;windowscodecs.lib;winhttp.lib;winsta.lib;ws2_32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <SubSystem>Windows</SubSystem>
       <OptimizeReferences>true</OptimizeReferences>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <TargetMachine>MachineX64</TargetMachine>
       <SetChecksum>true</SetChecksum>
       <MinimumRequiredVersion>6.01</MinimumRequiredVersion>
-      <AdditionalLibraryDirectories>..\phlib\bin\$(Configuration)$(PlatformArchitecture);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>$(SolutionDir)phlib\bin\$(Configuration)$(PlatformArchitecture);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <ModuleDefinitionFile>ProcessHacker.def</ModuleDefinitionFile>
+      <DelayLoadDLLs>advapi32.dll;aclui.dll;comdlg32.dll;comctl32.dll;gdi32.dll;iphlpapi.dll;oleaut32.dll;ole32.dll;shell32.dll;shlwapi.dll;user32.dll;uxtheme.dll;version.dll;winhttp.dll;winsta.dll;ws2_32.dll;%(DelayLoadDLLs)</DelayLoadDLLs>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalOptions>/DEPENDENTLOADFLAG:0xA00 %(AdditionalOptions)</AdditionalOptions>
     </Link>
-    <PreBuildEvent>
-      <Command>..\build\internal\update_rev.bat</Command>
-    </PreBuildEvent>
-    <PreBuildEvent>
-      <Message>Generating revision number...</Message>
-    </PreBuildEvent>
+    <ResourceCompile>
+      <PreprocessorDefinitions>_UNICODE;UNICODE;%(PreprocessorDefinitions);$(ExternalCompilerOptions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(SolutionDir)phnt\include;$(SolutionDir)phlib\include;include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ResourceCompile>
+    <PostBuildEvent>
+      <Command>"$(SolutionDir)build\build_sdk.cmd"</Command>
+    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="about.c" />
@@ -221,6 +248,7 @@
     <ClCompile Include="chproc.c" />
     <ClCompile Include="cmdmode.c" />
     <ClCompile Include="colmgr.c" />
+    <ClCompile Include="colsetmgr.c" />
     <ClCompile Include="dbgcon.c" />
     <ClCompile Include="extmgr.c" />
     <ClCompile Include="findobj.c" />
@@ -234,6 +262,7 @@
     <ClCompile Include="infodlg.c" />
     <ClCompile Include="itemtips.c" />
     <ClCompile Include="jobprp.c" />
+    <ClCompile Include="kdump.c" />
     <ClCompile Include="log.c" />
     <ClCompile Include="logwnd.c" />
     <ClCompile Include="main.c" />
@@ -266,8 +295,10 @@
     <ClCompile Include="pcre\pcre2_compile.c" />
     <ClCompile Include="pcre\pcre2_config.c" />
     <ClCompile Include="pcre\pcre2_context.c" />
+    <ClCompile Include="pcre\pcre2_convert.c" />
     <ClCompile Include="pcre\pcre2_dfa_match.c" />
     <ClCompile Include="pcre\pcre2_error.c" />
+    <ClCompile Include="pcre\pcre2_extuni.c" />
     <ClCompile Include="pcre\pcre2_find_bracket.c" />
     <ClCompile Include="pcre\pcre2_jit_compile.c" />
     <ClCompile Include="pcre\pcre2_maketables.c" />
@@ -276,6 +307,7 @@
     <ClCompile Include="pcre\pcre2_newline.c" />
     <ClCompile Include="pcre\pcre2_ord2utf.c" />
     <ClCompile Include="pcre\pcre2_pattern_info.c" />
+    <ClCompile Include="pcre\pcre2_script_run.c" />
     <ClCompile Include="pcre\pcre2_serialize.c" />
     <ClCompile Include="pcre\pcre2_string_utils.c" />
     <ClCompile Include="pcre\pcre2_study.c" />
@@ -309,7 +341,9 @@
     <ClCompile Include="prpgstat.c" />
     <ClCompile Include="prpgthrd.c" />
     <ClCompile Include="prpgtok.c" />
+    <ClCompile Include="prpgwmi.c" />
     <ClCompile Include="runas.c" />
+    <ClCompile Include="searchbox.c" />
     <ClCompile Include="sessprp.c" />
     <ClCompile Include="sessshad.c" />
     <ClCompile Include="settings.c" />
@@ -327,20 +361,12 @@
     <ClCompile Include="thrdprv.c" />
     <ClCompile Include="thrdstk.c" />
     <ClCompile Include="tokprp.c" />
-    <ClCompile Include="mxml\mxml-attr.c" />
-    <ClCompile Include="mxml\mxml-entity.c" />
-    <ClCompile Include="mxml\mxml-file.c" />
-    <ClCompile Include="mxml\mxml-index.c" />
-    <ClCompile Include="mxml\mxml-node.c" />
-    <ClCompile Include="mxml\mxml-private.c" />
-    <ClCompile Include="mxml\mxml-search.c" />
-    <ClCompile Include="mxml\mxml-set.c" />
-    <ClCompile Include="mxml\mxml-string.c" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="include\actions.h" />
     <ClInclude Include="include\appsup.h" />
     <ClInclude Include="include\colmgr.h" />
+    <ClInclude Include="include\colsetmgr.h" />
     <ClInclude Include="include\extmgr.h" />
     <ClInclude Include="include\extmgri.h" />
     <ClInclude Include="include\heapstruct.h" />
@@ -363,6 +389,7 @@
     <ClInclude Include="include\procprp.h" />
     <ClInclude Include="include\procprv.h" />
     <ClInclude Include="include\proctree.h" />
+    <ClInclude Include="include\phsettings.h" />
     <ClInclude Include="include\srvlist.h" />
     <ClInclude Include="include\srvprv.h" />
     <ClInclude Include="include\sysinfo.h" />
@@ -370,11 +397,8 @@
     <ClInclude Include="include\thrdprv.h" />
     <ClInclude Include="include\phuisup.h" />
     <ClInclude Include="include\miniinfo.h" />
-    <ClInclude Include="mxml\config.h" />
     <ClInclude Include="include\hidnproc.h" />
     <ClInclude Include="include\memsrch.h" />
-    <ClInclude Include="mxml\mxml-private.h" />
-    <ClInclude Include="mxml\mxml.h" />
     <ClInclude Include="include\phapp.h" />
     <ClInclude Include="include\phsvc.h" />
     <ClInclude Include="include\phsvcapi.h" />
@@ -391,16 +415,12 @@
     <ClInclude Include="include\procprpp.h" />
     <ClInclude Include="include\memprv.h" />
     <ClInclude Include="resource.h" />
-    <ClInclude Include="include\settings.h" />
-    <ClInclude Include="include\settingsp.h" />
     <ClInclude Include="include\sysinfop.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="ProcessHacker.def" />
     <None Include="resources\application.ico" />
-    <None Include="resources\application_go.ico" />
     <None Include="resources\cog.ico" />
-    <None Include="resources\cog_go.ico" />
     <None Include="resources\cross.bmp" />
     <None Include="ProcessHacker.ico" />
     <None Include="resources\ProcessHacker.png" />
@@ -408,7 +428,6 @@
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="ProcessHacker.rc" />
-    <ResourceCompile Include="version.rc" />
   </ItemGroup>
   <ItemGroup>
     <Manifest Include="ProcessHacker.manifest">
@@ -416,7 +435,11 @@
     </Manifest>
   </ItemGroup>
   <ItemGroup>
+    <Image Include="resources\active_search.bmp" />
+    <Image Include="resources\active_search.png" />
     <Image Include="resources\folder.ico" />
+    <Image Include="resources\inactive_search.bmp" />
+    <Image Include="resources\inactive_search.png" />
     <Image Include="resources\magnifier.ico" />
     <Image Include="resources\pencil.ico" />
     <Image Include="resources\pin.ico" />

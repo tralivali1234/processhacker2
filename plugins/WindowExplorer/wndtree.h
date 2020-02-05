@@ -5,7 +5,8 @@
 #define WEWNTLC_HANDLE 1
 #define WEWNTLC_TEXT 2
 #define WEWNTLC_THREAD 3
-#define WEWNTLC_MAXIMUM 4
+#define WEWNTLC_MODULE 4
+#define WEWNTLC_MAXIMUM 5
 
 typedef struct _WE_WINDOW_NODE
 {
@@ -20,9 +21,8 @@ typedef struct _WE_WINDOW_NODE
         struct
         {
             ULONG HasChildren : 1;
-            ULONG Opened : 1;
             ULONG WindowVisible : 1;
-            ULONG Spare : 29;
+            ULONG Spare : 30;
         };
     };
 
@@ -35,6 +35,7 @@ typedef struct _WE_WINDOW_NODE
 
     WCHAR WindowHandleString[PH_PTR_STR_LEN_1];
     PPH_STRING ThreadString;
+    PPH_STRING ModuleString;
 } WE_WINDOW_NODE, *PWE_WINDOW_NODE;
 
 typedef struct _WE_WINDOW_TREE_CONTEXT
@@ -43,6 +44,10 @@ typedef struct _WE_WINDOW_TREE_CONTEXT
     HWND TreeNewHandle;
     ULONG TreeNewSortColumn;
     PH_SORT_ORDER TreeNewSortOrder;
+
+    PPH_STRING SearchboxText;
+    PH_TN_FILTER_SUPPORT FilterSupport;
+    PPH_TN_FILTER_ENTRY TreeFilterEntry;
 
     PPH_HASHTABLE NodeHashtable;
     PPH_LIST NodeList;
@@ -85,6 +90,11 @@ VOID WeGetSelectedWindowNodes(
     _In_ PWE_WINDOW_TREE_CONTEXT Context,
     _Out_ PWE_WINDOW_NODE **Windows,
     _Out_ PULONG NumberOfWindows
+    );
+
+VOID WeExpandAllWindowNodes(
+    _In_ PWE_WINDOW_TREE_CONTEXT Context,
+    _In_ BOOLEAN Expand
     );
 
 #endif

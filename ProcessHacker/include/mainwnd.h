@@ -1,29 +1,12 @@
 #ifndef PH_MAINWND_H
 #define PH_MAINWND_H
 
-#define PH_MAINWND_CLASSNAME L"ProcessHacker" // phapppub
-
 PHAPPAPI extern HWND PhMainWndHandle; // phapppub
 extern BOOLEAN PhMainWndExiting;
 
 #define WM_PH_FIRST (WM_APP + 99)
 #define WM_PH_ACTIVATE (WM_APP + 99)
 #define PH_ACTIVATE_REPLY 0x1119
-
-#define WM_PH_PROCESS_ADDED (WM_APP + 101)
-#define WM_PH_PROCESS_MODIFIED (WM_APP + 102)
-#define WM_PH_PROCESS_REMOVED (WM_APP + 103)
-#define WM_PH_PROCESSES_UPDATED (WM_APP + 104)
-
-#define WM_PH_SERVICE_ADDED (WM_APP + 105)
-#define WM_PH_SERVICE_MODIFIED (WM_APP + 106)
-#define WM_PH_SERVICE_REMOVED (WM_APP + 107)
-#define WM_PH_SERVICES_UPDATED (WM_APP + 108)
-
-#define WM_PH_NETWORK_ITEM_ADDED (WM_APP + 109)
-#define WM_PH_NETWORK_ITEM_MODIFIED (WM_APP + 110)
-#define WM_PH_NETWORK_ITEM_REMOVED (WM_APP + 111)
-#define WM_PH_NETWORK_ITEMS_UPDATED (WM_APP + 112)
 
 // begin_phapppub
 #define WM_PH_SHOW_PROCESS_PROPERTIES (WM_APP + 120)
@@ -44,12 +27,12 @@ extern BOOLEAN PhMainWndExiting;
 #define WM_PH_SELECT_PROCESS_NODE (WM_APP + 133)
 #define WM_PH_SELECT_SERVICE_ITEM (WM_APP + 134)
 #define WM_PH_SELECT_NETWORK_ITEM (WM_APP + 135)
-// end_phapppub
 #define WM_PH_UPDATE_FONT (WM_APP + 136)
 #define WM_PH_GET_FONT (WM_APP + 137)
+// end_phapppub
 // begin_phapppub
 #define WM_PH_INVOKE (WM_APP + 138)
-#define WM_PH_ADD_MENU_ITEM (WM_APP + 139)
+// WM_PH_DEPRECATED (WM_APP + 139)
 #define WM_PH_CREATE_TAB_PAGE (WM_APP + 140)
 #define WM_PH_REFRESH (WM_APP + 141)
 #define WM_PH_GET_UPDATE_AUTOMATICALLY (WM_APP + 142)
@@ -89,8 +72,6 @@ extern BOOLEAN PhMainWndExiting;
     SendMessage(hWnd, WM_PH_SELECT_NETWORK_ITEM, 0, (LPARAM)(NetworkItem))
 #define ProcessHacker_Invoke(hWnd, Function, Parameter) \
     PostMessage(hWnd, WM_PH_INVOKE, (WPARAM)(Parameter), (LPARAM)(Function))
-#define ProcessHacker_AddMenuItem(hWnd, AddMenuItem) \
-    ((ULONG_PTR)SendMessage(hWnd, WM_PH_ADD_MENU_ITEM, 0, (LPARAM)(AddMenuItem)))
 #define ProcessHacker_CreateTabPage(hWnd, Template) \
     ((struct _PH_MAIN_TAB_PAGE *)SendMessage(hWnd, WM_PH_CREATE_TAB_PAGE, 0, (LPARAM)(Template)))
 #define ProcessHacker_Refresh(hWnd) \
@@ -105,6 +86,7 @@ extern BOOLEAN PhMainWndExiting;
 
 typedef struct _PH_SHOW_MEMORY_EDITOR
 {
+    HWND OwnerWindow;
     HANDLE ProcessId;
     PVOID BaseAddress;
     SIZE_T RegionSize;
@@ -126,17 +108,6 @@ typedef struct _PH_LAYOUT_PADDING_DATA
     RECT Padding;
 } PH_LAYOUT_PADDING_DATA, *PPH_LAYOUT_PADDING_DATA;
 // end_phapppub
-
-typedef struct _PH_ADD_MENU_ITEM
-{
-    _In_ PVOID Plugin;
-    _In_ ULONG Location;
-    _In_opt_ PWSTR InsertAfter;
-    _In_ ULONG Flags;
-    _In_ ULONG Id;
-    _In_ PWSTR Text;
-    _In_opt_ PVOID Context;
-} PH_ADD_MENU_ITEM, *PPH_ADD_MENU_ITEM;
 
 // begin_phapppub
 typedef enum _PH_MAIN_TAB_PAGE_MESSAGE
@@ -219,10 +190,6 @@ typedef struct _PH_MAIN_TAB_PAGE
 
 BOOLEAN PhMainWndInitialization(
     _In_ INT ShowCommand
-    );
-
-VOID PhLoadDbgHelpFromPath(
-    _In_ PWSTR DbgHelpPath
     );
 
 VOID PhAddMiniProcessMenuItems(

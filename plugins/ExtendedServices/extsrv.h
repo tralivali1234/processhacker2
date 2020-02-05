@@ -2,7 +2,8 @@
 #define ES_EXTSRV_H
 
 #include <phdk.h>
-#include <windowsx.h>
+#include <phappresource.h>
+#include <settings.h>
 
 #include "resource.h"
 
@@ -35,12 +36,6 @@ INT_PTR CALLBACK EspServiceDependentsDlgProc(
     _In_ UINT uMsg,
     _In_ WPARAM wParam,
     _In_ LPARAM lParam
-    );
-
-// options
-
-VOID EsShowOptionsDialog(
-    _In_ HWND ParentWindowHandle
     );
 
 // other

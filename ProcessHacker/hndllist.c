@@ -3,6 +3,7 @@
  *   handle list
  *
  * Copyright (C) 2011-2013 wj32
+ * Copyright (C) 2017-2018 dmex
  *
  * This file is part of Process Hacker.
  *
@@ -25,11 +26,12 @@
 
 #include <emenu.h>
 #include <secedit.h>
+#include <settings.h>
 
 #include <extmgri.h>
 #include <hndlprv.h>
 #include <phplug.h>
-#include <settings.h>
+#include <phsettings.h>
 
 BOOLEAN PhpHandleNodeHashtableEqualFunction(
     _In_ PVOID Entry1,
@@ -95,20 +97,22 @@ VOID PhInitializeHandleList(
     // Default columns
     PhAddTreeNewColumn(hwnd, PHHNTLC_TYPE, TRUE, L"Type", 100, PH_ALIGN_LEFT, 0, 0);
     PhAddTreeNewColumn(hwnd, PHHNTLC_NAME, TRUE, L"Name", 200, PH_ALIGN_LEFT, 1, 0);
-    PhAddTreeNewColumn(hwnd, PHHNTLC_HANDLE, TRUE, L"Handle", 80, PH_ALIGN_LEFT, 2, 0);
+    PhAddTreeNewColumn(hwnd, PHHNTLC_GRANTEDACCESSSYMBOLIC, TRUE, L"Granted access (symbolic)", 140, PH_ALIGN_LEFT, 2, 0);
 
-    PhAddTreeNewColumn(hwnd, PHHNTLC_OBJECTADDRESS, FALSE, L"Object address", 80, PH_ALIGN_LEFT, -1, 0);
-    PhAddTreeNewColumnEx(hwnd, PHHNTLC_ATTRIBUTES, FALSE, L"Attributes", 120, PH_ALIGN_LEFT, -1, 0, TRUE);
-    PhAddTreeNewColumn(hwnd, PHHNTLC_GRANTEDACCESS, FALSE, L"Granted access", 80, PH_ALIGN_LEFT, -1, 0);
-    PhAddTreeNewColumn(hwnd, PHHNTLC_GRANTEDACCESSSYMBOLIC, FALSE, L"Granted access (symbolic)", 140, PH_ALIGN_LEFT, -1, 0);
-    PhAddTreeNewColumn(hwnd, PHHNTLC_ORIGINALNAME, FALSE, L"Original name", 200, PH_ALIGN_LEFT, -1, 0);
-    PhAddTreeNewColumnEx(hwnd, PHHNTLC_FILESHAREACCESS, FALSE, L"File share access", 50, PH_ALIGN_LEFT, -1, 0, TRUE);
+    PhAddTreeNewColumn(hwnd, PHHNTLC_HANDLE, FALSE, L"Handle", 80, PH_ALIGN_LEFT, ULONG_MAX, 0);
+    PhAddTreeNewColumn(hwnd, PHHNTLC_OBJECTADDRESS, FALSE, L"Object address", 80, PH_ALIGN_LEFT, ULONG_MAX, 0);
+    PhAddTreeNewColumnEx(hwnd, PHHNTLC_ATTRIBUTES, FALSE, L"Attributes", 120, PH_ALIGN_LEFT, ULONG_MAX, 0, TRUE);
+    PhAddTreeNewColumn(hwnd, PHHNTLC_GRANTEDACCESS, FALSE, L"Granted access", 80, PH_ALIGN_LEFT, ULONG_MAX, 0);
+    PhAddTreeNewColumn(hwnd, PHHNTLC_ORIGINALNAME, FALSE, L"Original name", 200, PH_ALIGN_LEFT, ULONG_MAX, 0);
+    PhAddTreeNewColumnEx(hwnd, PHHNTLC_FILESHAREACCESS, FALSE, L"File share access", 50, PH_ALIGN_LEFT, ULONG_MAX, 0, TRUE);
 
     TreeNew_SetRedraw(hwnd, TRUE);
 
     TreeNew_SetSort(hwnd, 0, AscendingSortOrder);
 
     PhCmInitializeManager(&Context->Cm, hwnd, PHHNTLC_MAXIMUM, PhpHandleTreeNewPostSortFunction);
+
+    PhInitializeTreeNewFilterSupport(&Context->TreeFilterSupport, hwnd, Context->NodeList);
 }
 
 VOID PhDeleteHandleList(
@@ -116,6 +120,8 @@ VOID PhDeleteHandleList(
     )
 {
     ULONG i;
+
+    PhDeleteTreeNewFilterSupport(&Context->TreeFilterSupport);
 
     PhCmDeleteManager(&Context->Cm);
 
@@ -153,7 +159,10 @@ VOID PhLoadSettingsHandleList(
 
     settings = PhGetStringSetting(L"HandleTreeListColumns");
     sortSettings = PhGetStringSetting(L"HandleTreeListSort");
+    Context->Flags = PhGetIntegerSetting(L"HandleTreeListFlags");
+
     PhCmLoadSettingsEx(Context->TreeNewHandle, &Context->Cm, 0, &settings->sr, &sortSettings->sr);
+
     PhDereferenceObject(settings);
     PhDereferenceObject(sortSettings);
 }
@@ -166,50 +175,28 @@ VOID PhSaveSettingsHandleList(
     PPH_STRING sortSettings;
 
     settings = PhCmSaveSettingsEx(Context->TreeNewHandle, &Context->Cm, 0, &sortSettings);
+
+    PhSetIntegerSetting(L"HandleTreeListFlags", Context->Flags);
     PhSetStringSetting2(L"HandleTreeListColumns", &settings->sr);
     PhSetStringSetting2(L"HandleTreeListSort", &sortSettings->sr);
+
     PhDereferenceObject(settings);
     PhDereferenceObject(sortSettings);
 }
 
 VOID PhSetOptionsHandleList(
     _Inout_ PPH_HANDLE_LIST_CONTEXT Context,
-    _In_ BOOLEAN HideUnnamedHandles
+    _In_ ULONG Options
     )
 {
-    ULONG i;
-    BOOLEAN modified;
-
-    if (Context->HideUnnamedHandles != HideUnnamedHandles)
+    switch (Options)
     {
-        Context->HideUnnamedHandles = HideUnnamedHandles;
-
-        modified = FALSE;
-
-        for (i = 0; i < Context->NodeList->Count; i++)
-        {
-            PPH_HANDLE_NODE node = Context->NodeList->Items[i];
-            BOOLEAN visible;
-
-            visible = TRUE;
-
-            if (HideUnnamedHandles && PhIsNullOrEmptyString(node->HandleItem->BestObjectName))
-                visible = FALSE;
-
-            if (node->Node.Visible != visible)
-            {
-                node->Node.Visible = visible;
-                modified = TRUE;
-
-                if (!visible)
-                    node->Node.Selected = FALSE;
-            }
-        }
-
-        if (modified)
-        {
-            TreeNew_NodesStructured(Context->TreeNewHandle);
-        }
+    case PH_HANDLE_TREE_MENUITEM_HIDEUNNAMEDHANDLES:
+        Context->HideUnnamedHandles = !Context->HideUnnamedHandles;
+        break;
+    case PH_HANDLE_TREE_MENUITEM_HIDEETWHANDLES:
+        Context->HideEtwHandles = !Context->HideEtwHandles;
+        break;
     }
 }
 
@@ -248,8 +235,8 @@ PPH_HANDLE_NODE PhAddHandleNode(
     PhAddEntryHashtable(Context->NodeHashtable, &handleNode);
     PhAddItemList(Context->NodeList, handleNode);
 
-    if (Context->HideUnnamedHandles && PhIsNullOrEmptyString(HandleItem->BestObjectName))
-        handleNode->Node.Visible = FALSE;
+    if (Context->TreeFilterSupport.FilterList)
+        handleNode->Node.Visible = PhApplyTreeNewFiltersToNode(&Context->TreeFilterSupport, &handleNode->Node);
 
     PhEmCallObjectOperation(EmHandleNodeType, handleNode, EmObjectCreate);
 
@@ -327,7 +314,7 @@ VOID PhpRemoveHandleNode(
 
     // Remove from list and cleanup.
 
-    if ((index = PhFindItemList(Context->NodeList, HandleNode)) != -1)
+    if ((index = PhFindItemList(Context->NodeList, HandleNode)) != ULONG_MAX)
         PhRemoveItemList(Context->NodeList, index);
 
     PhpDestroyHandleNode(HandleNode);
@@ -344,6 +331,29 @@ VOID PhUpdateHandleNode(
 
     PhInvalidateTreeNewNode(&HandleNode->Node, TN_CACHE_COLOR);
     TreeNew_NodesStructured(Context->TreeNewHandle);
+}
+
+VOID PhExpandAllHandleNodes(
+    _In_ PPH_HANDLE_LIST_CONTEXT Context,
+    _In_ BOOLEAN Expand
+    )
+{
+    ULONG i;
+    BOOLEAN needsRestructure = FALSE;
+
+    for (i = 0; i < Context->NodeList->Count; i++)
+    {
+        PPH_HANDLE_NODE node = Context->NodeList->Items[i];
+
+        if (node->Node.Expanded != Expand)
+        {
+            node->Node.Expanded = Expand;
+            needsRestructure = TRUE;
+        }
+    }
+
+    if (needsRestructure)
+        TreeNew_NodesStructured(Context->TreeNewHandle);
 }
 
 VOID PhTickHandleNodes(
@@ -390,13 +400,13 @@ LONG PhpHandleTreeNewPostSortFunction(
 
 BEGIN_SORT_FUNCTION(Type)
 {
-    sortResult = PhCompareString(handleItem1->TypeName, handleItem2->TypeName, TRUE);
+    sortResult = PhCompareStringWithNullSortOrder(handleItem1->TypeName, handleItem2->TypeName, context->TreeNewSortOrder, TRUE);
 }
 END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(Name)
 {
-    sortResult = PhCompareStringWithNull(handleItem1->BestObjectName, handleItem2->BestObjectName, TRUE);
+    sortResult = PhCompareStringWithNullSortOrder(handleItem1->BestObjectName, handleItem2->BestObjectName, context->TreeNewSortOrder, TRUE);
 }
 END_SORT_FUNCTION
 
@@ -435,7 +445,7 @@ BEGIN_SORT_FUNCTION(FileShareAccess)
     sortResult = uintcmp(handleItem1->FileFlags & (PH_HANDLE_FILE_SHARED_MASK), handleItem2->FileFlags & (PH_HANDLE_FILE_SHARED_MASK));
 
     // Make sure all file handles get grouped together regardless of share access.
-    if (sortResult == 0)
+    if (sortResult == 0 && !PhIsNullOrEmptyString(handleItem1->TypeName))
         sortResult = intcmp(PhEqualString2(handleItem1->TypeName, L"File", TRUE), PhEqualString2(handleItem2->TypeName, L"File", TRUE));
 }
 END_SORT_FUNCTION
@@ -524,16 +534,22 @@ BOOLEAN NTAPI PhpHandleTreeNewCallback(
             switch (getCellText->Id)
             {
             case PHHNTLC_TYPE:
-                getCellText->Text = handleItem->TypeName->sr;
+                getCellText->Text = PhGetStringRef(handleItem->TypeName);
                 break;
             case PHHNTLC_NAME:
                 getCellText->Text = PhGetStringRef(handleItem->BestObjectName);
                 break;
             case PHHNTLC_HANDLE:
+                PhPrintPointer(handleItem->HandleString, (PVOID)handleItem->Handle);
                 PhInitializeStringRefLongHint(&getCellText->Text, handleItem->HandleString);
                 break;
             case PHHNTLC_OBJECTADDRESS:
-                PhInitializeStringRefLongHint(&getCellText->Text, handleItem->ObjectString);
+                {
+                    if (handleItem->Object)
+                        PhPrintPointer(node->ObjectString, handleItem->Object);
+
+                    PhInitializeStringRefLongHint(&getCellText->Text, node->ObjectString);
+                }
                 break;
             case PHHNTLC_ATTRIBUTES:
                 switch (handleItem->Attributes & (OBJ_PROTECT_CLOSE | OBJ_INHERIT))
@@ -550,6 +566,7 @@ BOOLEAN NTAPI PhpHandleTreeNewCallback(
                 }
                 break;
             case PHHNTLC_GRANTEDACCESS:
+                PhPrintPointer(handleItem->GrantedAccessString, UlongToPtr(handleItem->GrantedAccess));
                 PhInitializeStringRefLongHint(&getCellText->Text, handleItem->GrantedAccessString);
                 break;
             case PHHNTLC_GRANTEDACCESSSYMBOLIC:
@@ -560,21 +577,14 @@ BOOLEAN NTAPI PhpHandleTreeNewCallback(
                         PPH_ACCESS_ENTRY accessEntries;
                         ULONG numberOfAccessEntries;
 
-                        if (PhGetAccessEntries(handleItem->TypeName->Buffer, &accessEntries, &numberOfAccessEntries))
+                        if (PhGetAccessEntries(PhGetStringOrEmpty(handleItem->TypeName), &accessEntries, &numberOfAccessEntries))
                         {
                             node->GrantedAccessSymbolicText = PhGetAccessString(handleItem->GrantedAccess, accessEntries, numberOfAccessEntries);
                             PhFree(accessEntries);
                         }
-                        else
-                        {
-                            node->GrantedAccessSymbolicText = PhReferenceEmptyString();
-                        }
                     }
 
-                    if (node->GrantedAccessSymbolicText->Length != 0)
-                        getCellText->Text = node->GrantedAccessSymbolicText->sr;
-                    else
-                        PhInitializeStringRefLongHint(&getCellText->Text, handleItem->GrantedAccessString);
+                    getCellText->Text = PhGetStringRef(node->GrantedAccessSymbolicText);
                 }
                 break;
             case PHHNTLC_ORIGINALNAME:
@@ -586,7 +596,7 @@ BOOLEAN NTAPI PhpHandleTreeNewCallback(
                     node->FileShareAccessText[0] = '-';
                     node->FileShareAccessText[1] = '-';
                     node->FileShareAccessText[2] = '-';
-                    node->FileShareAccessText[3] = 0;
+                    node->FileShareAccessText[3] = UNICODE_NULL;
 
                     if (handleItem->FileFlags & PH_HANDLE_FILE_SHARED_READ)
                         node->FileShareAccessText[0] = 'R';

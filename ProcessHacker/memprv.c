@@ -3,6 +3,7 @@
  *   memory provider
  *
  * Copyright (C) 2010-2015 wj32
+ * Copyright (C) 2017-2018 dmex
  *
  * This file is part of Process Hacker.
  *
@@ -33,16 +34,7 @@ VOID PhpMemoryItemDeleteProcedure(
     _In_ ULONG Flags
     );
 
-PPH_OBJECT_TYPE PhMemoryItemType;
-
-BOOLEAN PhMemoryProviderInitialization(
-    VOID
-    )
-{
-    PhMemoryItemType = PhCreateObjectType(L"MemoryItem", 0, PhpMemoryItemDeleteProcedure);
-
-    return TRUE;
-}
+PPH_OBJECT_TYPE PhMemoryItemType = NULL;
 
 VOID PhGetMemoryProtectionString(
     _In_ ULONG Protection,
@@ -54,7 +46,7 @@ VOID PhGetMemoryProtectionString(
 
     if (!Protection)
     {
-        String[0] = 0;
+        String[0] = UNICODE_NULL;
         return;
     }
 
@@ -84,19 +76,19 @@ VOID PhGetMemoryProtectionString(
 
     if (Protection & PAGE_GUARD)
     {
-        memcpy(string, L"+G", 2 * 2);
+        memcpy(string, L"+G", 2 * sizeof(WCHAR));
         string += 2;
     }
 
     if (Protection & PAGE_NOCACHE)
     {
-        memcpy(string, L"+NC", 3 * 2);
+        memcpy(string, L"+NC", 3 * sizeof(WCHAR));
         string += 3;
     }
 
     if (Protection & PAGE_WRITECOMBINE)
     {
-        memcpy(string, L"+WCM", 4 * 2);
+        memcpy(string, L"+WCM", 4 * sizeof(WCHAR));
         string += 4;
     }
 
@@ -135,7 +127,14 @@ PPH_MEMORY_ITEM PhCreateMemoryItem(
     VOID
     )
 {
+    static PH_INITONCE initOnce = PH_INITONCE_INIT;
     PPH_MEMORY_ITEM memoryItem;
+
+    if (PhBeginInitOnce(&initOnce))
+    {
+        PhMemoryItemType = PhCreateObjectType(L"MemoryItem", 0, PhpMemoryItemDeleteProcedure);
+        PhEndInitOnce(&initOnce);
+    }
 
     memoryItem = PhCreateObject(sizeof(PH_MEMORY_ITEM), PhMemoryItemType);
     memset(memoryItem, 0, sizeof(PH_MEMORY_ITEM));
@@ -269,22 +268,54 @@ NTSTATUS PhpUpdateMemoryRegionTypes(
     // USER_SHARED_DATA
     PhpSetMemoryRegionType(List, USER_SHARED_DATA, TRUE, UserSharedDataRegion);
 
+    // HYPERVISOR_SHARED_DATA
+    if (WindowsVersion >= WINDOWS_10_RS4)
+    {
+        static PVOID HypervisorSharedDataVa = NULL;
+        static PH_INITONCE HypervisorSharedDataInitOnce = PH_INITONCE_INIT;
+
+        if (PhBeginInitOnce(&HypervisorSharedDataInitOnce))
+        {
+            SYSTEM_HYPERVISOR_SHARED_PAGE_INFORMATION hypervSharedPageInfo;
+
+            if (NT_SUCCESS(NtQuerySystemInformation(
+                SystemHypervisorSharedPageInformation,
+                &hypervSharedPageInfo,
+                sizeof(SYSTEM_HYPERVISOR_SHARED_PAGE_INFORMATION),
+                NULL
+                )))
+            {
+                HypervisorSharedDataVa = hypervSharedPageInfo.HypervisorSharedUserVa;
+            }
+
+            PhEndInitOnce(&HypervisorSharedDataInitOnce);
+        }
+
+        if (HypervisorSharedDataVa)
+        {
+            PhpSetMemoryRegionType(List, HypervisorSharedDataVa, TRUE, HypervisorSharedDataRegion);
+        }
+    }
+
     // PEB, heap
     {
         PROCESS_BASIC_INFORMATION basicInfo;
         ULONG numberOfHeaps;
         PVOID processHeapsPtr;
         PVOID *processHeaps;
+        PVOID apiSetMap;
         ULONG i;
 #ifdef _WIN64
         PVOID peb32;
         ULONG processHeapsPtr32;
         ULONG *processHeaps32;
+        ULONG apiSetMap32;
 #endif
 
-        if (NT_SUCCESS(PhGetProcessBasicInformation(ProcessHandle, &basicInfo)))
+        if (NT_SUCCESS(PhGetProcessBasicInformation(ProcessHandle, &basicInfo)) && basicInfo.PebBaseAddress != 0)
         {
-            PhpSetMemoryRegionType(List, basicInfo.PebBaseAddress, TRUE, PebRegion);
+            // HACK: Windows 10 RS2 and above 'added TEB/PEB sub-VAD segments' and we need to tag individual sections. (dmex)
+            PhpSetMemoryRegionType(List, basicInfo.PebBaseAddress, WindowsVersion < WINDOWS_10_RS2 ? TRUE : FALSE, PebRegion);
 
             if (NT_SUCCESS(NtReadVirtualMemory(ProcessHandle,
                 PTR_ADD_OFFSET(basicInfo.PebBaseAddress, FIELD_OFFSET(PEB, NumberOfHeaps)),
@@ -307,6 +338,18 @@ NTSTATUS PhpUpdateMemoryRegionTypes(
                 }
 
                 PhFree(processHeaps);
+            }
+
+            // ApiSet schema map
+            if (NT_SUCCESS(NtReadVirtualMemory(
+                ProcessHandle,
+                PTR_ADD_OFFSET(basicInfo.PebBaseAddress, FIELD_OFFSET(PEB, ApiSetMap)),
+                &apiSetMap,
+                sizeof(PVOID),
+                NULL
+                )))
+            {
+                PhpSetMemoryRegionType(List, apiSetMap, TRUE, ApiSetMapRegion);
             }
         }
 #ifdef _WIN64
@@ -338,6 +381,18 @@ NTSTATUS PhpUpdateMemoryRegionTypes(
 
                 PhFree(processHeaps32);
             }
+
+            // ApiSet schema map
+            if (NT_SUCCESS(NtReadVirtualMemory(
+                ProcessHandle,
+                PTR_ADD_OFFSET(peb32, FIELD_OFFSET(PEB32, ApiSetMap)),
+                &apiSetMap32,
+                sizeof(ULONG),
+                NULL
+                )))
+            {
+                PhpSetMemoryRegionType(List, UlongToPtr(apiSetMap32), TRUE, ApiSetMapRegion);
+            }
         }
 #endif
     }
@@ -347,26 +402,13 @@ NTSTATUS PhpUpdateMemoryRegionTypes(
     {
         PSYSTEM_EXTENDED_THREAD_INFORMATION thread = (PSYSTEM_EXTENDED_THREAD_INFORMATION)process->Threads + i;
 
-        if (WindowsVersion < WINDOWS_VISTA)
-        {
-            HANDLE threadHandle;
-            THREAD_BASIC_INFORMATION basicInfo;
-
-            if (NT_SUCCESS(PhOpenThread(&threadHandle, ThreadQueryAccess, thread->ThreadInfo.ClientId.UniqueThread)))
-            {
-                if (NT_SUCCESS(PhGetThreadBasicInformation(threadHandle, &basicInfo)))
-                    thread->TebBase = basicInfo.TebBaseAddress;
-
-                NtClose(threadHandle);
-            }
-        }
-
         if (thread->TebBase)
         {
             NT_TIB ntTib;
             SIZE_T bytesRead;
 
-            if (memoryItem = PhpSetMemoryRegionType(List, thread->TebBase, TRUE, TebRegion))
+            // HACK: Windows 10 RS2 and above 'added TEB/PEB sub-VAD segments' and we need to tag individual sections.
+            if (memoryItem = PhpSetMemoryRegionType(List, thread->TebBase, WindowsVersion < WINDOWS_10_RS2 ? TRUE : FALSE, TebRegion))
                 memoryItem->u.Teb.ThreadId = thread->ThreadInfo.ClientId.UniqueThread;
 
             if (NT_SUCCESS(NtReadVirtualMemory(ProcessHandle, thread->TebBase, &ntTib, sizeof(NT_TIB), &bytesRead)) &&
@@ -427,37 +469,22 @@ NTSTATUS PhpUpdateMemoryRegionTypes(
             }
         }
 
-        if (memoryItem->State & MEM_COMMIT)
+        if (memoryItem->State & MEM_COMMIT && memoryItem->Valid && !memoryItem->Bad)
         {
             UCHAR buffer[HEAP_SEGMENT_MAX_SIZE];
 
-            if (NT_SUCCESS(NtReadVirtualMemory(ProcessHandle, memoryItem->BaseAddress,
-                buffer, sizeof(buffer), NULL)))
+            if (NT_SUCCESS(NtReadVirtualMemory(ProcessHandle, memoryItem->BaseAddress, buffer, sizeof(buffer), NULL)))
             {
                 PVOID candidateHeap = NULL;
                 ULONG candidateHeap32 = 0;
                 PPH_MEMORY_ITEM heapMemoryItem;
+                PHEAP_SEGMENT heapSegment = (PHEAP_SEGMENT)buffer;
+                PHEAP_SEGMENT32 heapSegment32 = (PHEAP_SEGMENT32)buffer;
 
-                if (WindowsVersion >= WINDOWS_VISTA)
-                {
-                    PHEAP_SEGMENT heapSegment = (PHEAP_SEGMENT)buffer;
-                    PHEAP_SEGMENT32 heapSegment32 = (PHEAP_SEGMENT32)buffer;
-
-                    if (heapSegment->SegmentSignature == HEAP_SEGMENT_SIGNATURE)
-                        candidateHeap = heapSegment->Heap;
-                    if (heapSegment32->SegmentSignature == HEAP_SEGMENT_SIGNATURE)
-                        candidateHeap32 = heapSegment32->Heap;
-                }
-                else
-                {
-                    PHEAP_SEGMENT_OLD heapSegment = (PHEAP_SEGMENT_OLD)buffer;
-                    PHEAP_SEGMENT_OLD32 heapSegment32 = (PHEAP_SEGMENT_OLD32)buffer;
-
-                    if (heapSegment->Signature == HEAP_SEGMENT_SIGNATURE)
-                        candidateHeap = heapSegment->Heap;
-                    if (heapSegment32->Signature == HEAP_SEGMENT_SIGNATURE)
-                        candidateHeap32 = heapSegment32->Heap;
-                }
+                if (heapSegment->SegmentSignature == HEAP_SEGMENT_SIGNATURE)
+                    candidateHeap = heapSegment->Heap;
+                if (heapSegment32->SegmentSignature == HEAP_SEGMENT_SIGNATURE)
+                    candidateHeap32 = heapSegment32->Heap;
 
                 if (candidateHeap)
                 {
@@ -486,6 +513,84 @@ NTSTATUS PhpUpdateMemoryRegionTypes(
             }
         }
     }
+
+#ifdef _WIN64
+
+    PS_SYSTEM_DLL_INIT_BLOCK ldrInitBlock = { 0 };
+    PVOID ldrInitBlockBaseAddress = NULL;
+    PPH_MEMORY_ITEM cfgBitmapMemoryItem;
+    PH_STRINGREF systemRootString;
+    PPH_STRING ntdllFileName;
+
+    PhGetSystemRoot(&systemRootString);
+    ntdllFileName = PhConcatStringRefZ(&systemRootString, L"\\System32\\ntdll.dll");
+
+    status = PhGetProcedureAddressRemote(
+        ProcessHandle,
+        ntdllFileName->Buffer,
+        "LdrSystemDllInitBlock",
+        0,
+        &ldrInitBlockBaseAddress,
+        NULL
+        );
+
+    if (NT_SUCCESS(status) && ldrInitBlockBaseAddress)
+    {
+        status = NtReadVirtualMemory(
+            ProcessHandle,
+            ldrInitBlockBaseAddress,
+            &ldrInitBlock,
+            sizeof(PS_SYSTEM_DLL_INIT_BLOCK),
+            NULL
+            );
+    }
+
+    PhDereferenceObject(ntdllFileName);
+
+    if (NT_SUCCESS(status) && ldrInitBlock.Size != 0)
+    {
+        PVOID cfgBitmapAddress = NULL;
+        PVOID cfgBitmapWow64Address = NULL;
+
+        if (RTL_CONTAINS_FIELD(&ldrInitBlock, ldrInitBlock.Size, Wow64CfgBitMap))
+        {
+            cfgBitmapAddress = (PVOID)ldrInitBlock.CfgBitMap;
+            cfgBitmapWow64Address = (PVOID)ldrInitBlock.Wow64CfgBitMap;
+        }
+
+        if (cfgBitmapAddress && (cfgBitmapMemoryItem = PhLookupMemoryItemList(List, cfgBitmapAddress)))
+        {
+            PLIST_ENTRY listEntry = &cfgBitmapMemoryItem->ListEntry;
+            PPH_MEMORY_ITEM memoryItem = CONTAINING_RECORD(listEntry, PH_MEMORY_ITEM, ListEntry);
+
+            while (memoryItem->AllocationBaseItem == cfgBitmapMemoryItem)
+            {
+                // lucasg: We could do a finer tagging since each MEM_COMMIT memory
+                // map is the CFG bitmap of a loaded module. However that might be
+                // brittle to changes made by Windows dev teams.
+                memoryItem->RegionType = CfgBitmapRegion;
+
+                listEntry = listEntry->Flink;
+                memoryItem = CONTAINING_RECORD(listEntry, PH_MEMORY_ITEM, ListEntry);
+            }
+        }
+
+        // Note: Wow64 processes on 64bit also have CfgBitmap regions.
+        if (isWow64 && cfgBitmapWow64Address && (cfgBitmapMemoryItem = PhLookupMemoryItemList(List, cfgBitmapWow64Address)))
+        {
+            PLIST_ENTRY listEntry = &cfgBitmapMemoryItem->ListEntry;
+            PPH_MEMORY_ITEM memoryItem = CONTAINING_RECORD(listEntry, PH_MEMORY_ITEM, ListEntry);
+
+            while (memoryItem->AllocationBaseItem == cfgBitmapMemoryItem)
+            {
+                memoryItem->RegionType = CfgBitmap32Region;
+
+                listEntry = listEntry->Flink;
+                memoryItem = CONTAINING_RECORD(listEntry, PH_MEMORY_ITEM, ListEntry);
+            }
+        }
+    }
+#endif
 
     PhFree(processes);
 
@@ -655,6 +760,7 @@ NTSTATUS PhQueryMemoryItemList(
         )))
     {
         PPH_MEMORY_ITEM memoryItem;
+        MEMORY_WORKING_SET_EX_INFORMATION info;
 
         if (basicInfo.State & MEM_FREE)
         {
@@ -678,6 +784,24 @@ NTSTATUS PhQueryMemoryItemList(
 
             if (basicInfo.Type & MEM_PRIVATE)
                 memoryItem->PrivateSize = memoryItem->RegionSize;
+        }
+
+        // Query the region attributes (dmex)
+        info.VirtualAddress = baseAddress;
+
+        if (NT_SUCCESS(NtQueryVirtualMemory(
+            processHandle,
+            NULL,
+            MemoryWorkingSetExInformation,
+            &info,
+            sizeof(MEMORY_WORKING_SET_EX_INFORMATION),
+            NULL
+            )))
+        {
+            PMEMORY_WORKING_SET_EX_BLOCK block = &info.u1.VirtualAttributes;
+
+            memoryItem->Valid = !!block->Valid;
+            memoryItem->Bad = !!block->Bad;
         }
 
         PhAddElementAvlTree(&List->Set, &memoryItem->Links);
@@ -733,12 +857,7 @@ ContinueLoop:
         PhpUpdateMemoryRegionTypes(List, processHandle);
 
     if (Flags & PH_QUERY_MEMORY_WS_COUNTERS)
-    {
-        if (WindowsVersion >= WINDOWS_SERVER_2003)
-            PhpUpdateMemoryWsCounters(List, processHandle);
-        else
-            PhpUpdateMemoryWsCountersOld(List, processHandle);
-    }
+        PhpUpdateMemoryWsCounters(List, processHandle);
 
     NtClose(processHandle);
 

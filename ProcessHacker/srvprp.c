@@ -3,6 +3,7 @@
  *   service properties
  *
  * Copyright (C) 2010-2015 wj32
+ * Copyright (C) 2017-2018 dmex
  *
  * This file is part of Process Hacker.
  *
@@ -22,14 +23,15 @@
 
 #include <phapp.h>
 
-#include <windowsx.h>
-
 #include <secedit.h>
 #include <svcsup.h>
+#include <mainwnd.h>
+#include <settings.h>
 
 #include <actions.h>
 #include <phplug.h>
 #include <phsvccl.h>
+#include <phsettings.h>
 #include <srvprv.h>
 
 typedef struct _SERVICE_PROPERTIES_CONTEXT
@@ -55,14 +57,34 @@ static NTSTATUS PhpOpenService(
     )
 {
     SC_HANDLE serviceHandle;
+    PPH_SERVICE_ITEM serviceItem;
 
-    if (!(serviceHandle = PhOpenService(
-        ((PPH_SERVICE_ITEM)Context)->Name->Buffer,
+    if (!(serviceItem = ((PPH_SERVICE_ITEM)Context)))
+        return STATUS_UNSUCCESSFUL;
+
+    if (serviceHandle = PhOpenService(
+        serviceItem->Name->Buffer,
         DesiredAccess
-        )))
-        return PhGetLastWin32ErrorAsNtStatus();
+        ))
+    {
+        *Handle = serviceHandle;
+        return STATUS_SUCCESS;
+    }
 
-    *Handle = serviceHandle;
+    *Handle = NULL;
+    return PhGetLastWin32ErrorAsNtStatus();
+}
+
+NTSTATUS PhpCloseServiceCallback(
+    _In_opt_ PVOID Context
+    )
+{
+    PPH_SERVICE_ITEM serviceItem;
+
+    if (!(serviceItem = ((PPH_SERVICE_ITEM)Context)))
+        return STATUS_UNSUCCESSFUL;
+
+    PhDereferenceObject(serviceItem);
 
     return STATUS_SUCCESS;
 }
@@ -76,7 +98,8 @@ static _Callback_ NTSTATUS PhpSetServiceSecurity(
     NTSTATUS status;
     PPH_STD_OBJECT_SECURITY stdObjectSecurity;
 
-    stdObjectSecurity = (PPH_STD_OBJECT_SECURITY)Context;
+    if (!(stdObjectSecurity = (PPH_STD_OBJECT_SECURITY)Context))
+        return STATUS_UNSUCCESSFUL;
 
     status = PhStdSetObjectSecurity(SecurityDescriptor, SecurityInformation, Context);
 
@@ -97,67 +120,69 @@ static _Callback_ NTSTATUS PhpSetServiceSecurity(
     return status;
 }
 
-VOID PhShowServiceProperties(
-    _In_ HWND ParentWindowHandle,
-    _In_ PPH_SERVICE_ITEM ServiceItem
+NTSTATUS PhpShowServicePropertiesThread(
+    _In_opt_ PVOID Context
     )
 {
     PROPSHEETHEADER propSheetHeader = { sizeof(propSheetHeader) };
     PROPSHEETPAGE propSheetPage;
     HPROPSHEETPAGE pages[32];
     SERVICE_PROPERTIES_CONTEXT context;
-    PH_STD_OBJECT_SECURITY stdObjectSecurity;
-    PPH_ACCESS_ENTRY accessEntries;
-    ULONG numberOfAccessEntries;
+    PPH_SERVICE_ITEM serviceItem;
+
+    if (!(serviceItem = ((PPH_SERVICE_ITEM)Context)))
+        return STATUS_UNSUCCESSFUL;
 
     propSheetHeader.dwFlags =
+        PSH_MODELESS |
         PSH_NOAPPLYNOW |
         PSH_NOCONTEXTHELP |
-        PSH_PROPTITLE;
-    propSheetHeader.hwndParent = ParentWindowHandle;
-    propSheetHeader.pszCaption = ServiceItem->Name->Buffer;
+        PSH_PROPTITLE |
+        //PSH_USECALLBACK |
+        PSH_USEHICON;
+    propSheetHeader.hInstance = PhInstanceHandle;
+    //propSheetHeader.hwndParent = ParentWindowHandle;
+    propSheetHeader.pszCaption = PhGetString(serviceItem->Name);
     propSheetHeader.nPages = 0;
     propSheetHeader.nStartPage = 0;
     propSheetHeader.phpage = pages;
+ 
+    {
+        if (serviceItem->SmallIcon)
+            propSheetHeader.hIcon = serviceItem->SmallIcon;
+        else
+        {
+            if (serviceItem->Type == SERVICE_KERNEL_DRIVER || serviceItem->Type == SERVICE_FILE_SYSTEM_DRIVER)
+                propSheetHeader.hIcon = PH_LOAD_SHARED_ICON_SMALL(PhInstanceHandle, MAKEINTRESOURCE(IDI_COG));
+            else
+            {
+                HICON iconSmall;
+                PhGetStockApplicationIcon(&iconSmall, NULL);
+                propSheetHeader.hIcon = iconSmall;
+            }
+        }
+    }
 
     // General
 
     memset(&context, 0, sizeof(SERVICE_PROPERTIES_CONTEXT));
-    context.ServiceItem = ServiceItem;
+    context.ServiceItem = serviceItem;
     context.Ready = FALSE;
     context.Dirty = FALSE;
 
     memset(&propSheetPage, 0, sizeof(PROPSHEETPAGE));
     propSheetPage.dwSize = sizeof(PROPSHEETPAGE);
     propSheetPage.pszTemplate = MAKEINTRESOURCE(IDD_SRVGENERAL);
+    propSheetPage.hInstance = PhInstanceHandle;
     propSheetPage.pfnDlgProc = PhpServiceGeneralDlgProc;
     propSheetPage.lParam = (LPARAM)&context;
     pages[propSheetHeader.nPages++] = CreatePropertySheetPage(&propSheetPage);
-
-    // Security
-
-    stdObjectSecurity.OpenObject = PhpOpenService;
-    stdObjectSecurity.ObjectType = L"Service";
-    stdObjectSecurity.Context = ServiceItem;
-
-    if (PhGetAccessEntries(L"Service", &accessEntries, &numberOfAccessEntries))
-    {
-        pages[propSheetHeader.nPages++] = PhCreateSecurityPage(
-            ServiceItem->Name->Buffer,
-            PhStdGetObjectSecurity,
-            PhpSetServiceSecurity,
-            &stdObjectSecurity,
-            accessEntries,
-            numberOfAccessEntries
-            );
-        PhFree(accessEntries);
-    }
 
     if (PhPluginsEnabled)
     {
         PH_PLUGIN_OBJECT_PROPERTIES objectProperties;
 
-        objectProperties.Parameter = ServiceItem;
+        objectProperties.Parameter = serviceItem;
         objectProperties.NumberOfPages = propSheetHeader.nPages;
         objectProperties.MaximumNumberOfPages = sizeof(pages) / sizeof(HPROPSHEETPAGE);
         objectProperties.Pages = pages;
@@ -168,22 +193,48 @@ VOID PhShowServiceProperties(
     }
 
     PhModalPropertySheet(&propSheetHeader);
+
+    PhDereferenceObject(serviceItem);
+
+    return STATUS_SUCCESS;
+}
+
+VOID PhShowServiceProperties(
+    _In_ HWND ParentWindowHandle,
+    _In_ PPH_SERVICE_ITEM ServiceItem
+    )
+{
+    PhReferenceObject(ServiceItem);
+    PhCreateThread2(PhpShowServicePropertiesThread, ServiceItem);
 }
 
 static VOID PhpRefreshControls(
     _In_ HWND hwndDlg
     )
 {
-    if (
-        WindowsVersion >= WINDOWS_VISTA &&
-        PhEqualString2(PhaGetDlgItemText(hwndDlg, IDC_STARTTYPE), L"Auto start", FALSE)
-        )
+    if (PhEqualString2(PhaGetDlgItemText(hwndDlg, IDC_STARTTYPE), L"Auto start", FALSE))
     {
         EnableWindow(GetDlgItem(hwndDlg, IDC_DELAYEDSTART), TRUE);
     }
     else
     {
         EnableWindow(GetDlgItem(hwndDlg, IDC_DELAYEDSTART), FALSE);
+    }
+
+    if (PhEqualString2(PhaGetDlgItemText(hwndDlg, IDC_TYPE), L"Driver", FALSE) ||
+        PhEqualString2(PhaGetDlgItemText(hwndDlg, IDC_TYPE), L"FS driver", FALSE))
+    {
+        EnableWindow(GetDlgItem(hwndDlg, IDC_USERACCOUNT), FALSE);
+        EnableWindow(GetDlgItem(hwndDlg, IDC_PASSWORD), FALSE);
+        EnableWindow(GetDlgItem(hwndDlg, IDC_PASSWORDCHECK), FALSE);
+        EnableWindow(GetDlgItem(hwndDlg, IDC_SERVICEDLL), FALSE);
+    }
+    else
+    {
+        EnableWindow(GetDlgItem(hwndDlg, IDC_DELAYEDSTART), TRUE);
+        EnableWindow(GetDlgItem(hwndDlg, IDC_PASSWORD), TRUE);
+        EnableWindow(GetDlgItem(hwndDlg, IDC_PASSWORDCHECK), TRUE);
+        EnableWindow(GetDlgItem(hwndDlg, IDC_SERVICEDLL), TRUE);
     }
 }
 
@@ -194,12 +245,27 @@ INT_PTR CALLBACK PhpServiceGeneralDlgProc(
     _In_ LPARAM lParam
     )
 {
+    PSERVICE_PROPERTIES_CONTEXT context;
+
+    if (uMsg == WM_INITDIALOG)
+    {
+        LPPROPSHEETPAGE propSheetPage = (LPPROPSHEETPAGE)lParam;
+        context = (PSERVICE_PROPERTIES_CONTEXT)propSheetPage->lParam;
+
+        PhSetWindowContext(hwndDlg, PH_WINDOW_CONTEXT_DEFAULT, context);
+    }
+    else
+    {
+        context = PhGetWindowContext(hwndDlg, PH_WINDOW_CONTEXT_DEFAULT);
+    }
+
+    if (!context)
+        return FALSE;
+
     switch (uMsg)
     {
     case WM_INITDIALOG:
         {
-            LPPROPSHEETPAGE propSheetPage = (LPPROPSHEETPAGE)lParam;
-            PSERVICE_PROPERTIES_CONTEXT context = (PSERVICE_PROPERTIES_CONTEXT)propSheetPage->lParam;
             PPH_SERVICE_ITEM serviceItem = context->ServiceItem;
             SC_HANDLE serviceHandle;
             ULONG startType;
@@ -207,20 +273,17 @@ INT_PTR CALLBACK PhpServiceGeneralDlgProc(
             PPH_STRING serviceDll;
 
             // HACK
-            PhCenterWindow(GetParent(hwndDlg), GetParent(GetParent(hwndDlg)));
+            if (PhGetIntegerPairSetting(L"ServiceWindowPosition").X == 0)
+                PhCenterWindow(GetParent(hwndDlg), PhMainWndHandle);
+            else
+                PhLoadWindowPlacementFromSetting(L"ServiceWindowPosition", NULL, GetParent(hwndDlg));
 
-            SetProp(hwndDlg, PhMakeContextAtom(), (HANDLE)context);
+            PhAddComboBoxStrings(GetDlgItem(hwndDlg, IDC_TYPE), PhServiceTypeStrings, RTL_NUMBER_OF(PhServiceTypeStrings));
+            PhAddComboBoxStrings(GetDlgItem(hwndDlg, IDC_STARTTYPE), PhServiceStartTypeStrings, RTL_NUMBER_OF(PhServiceStartTypeStrings));
+            PhAddComboBoxStrings(GetDlgItem(hwndDlg, IDC_ERRORCONTROL), PhServiceErrorControlStrings, RTL_NUMBER_OF(PhServiceErrorControlStrings));
 
-            PhAddComboBoxStrings(GetDlgItem(hwndDlg, IDC_TYPE), PhServiceTypeStrings,
-                sizeof(PhServiceTypeStrings) / sizeof(WCHAR *));
-            PhAddComboBoxStrings(GetDlgItem(hwndDlg, IDC_STARTTYPE), PhServiceStartTypeStrings,
-                sizeof(PhServiceStartTypeStrings) / sizeof(WCHAR *));
-            PhAddComboBoxStrings(GetDlgItem(hwndDlg, IDC_ERRORCONTROL), PhServiceErrorControlStrings,
-                sizeof(PhServiceErrorControlStrings) / sizeof(WCHAR *));
-
-            SetDlgItemText(hwndDlg, IDC_DESCRIPTION, serviceItem->DisplayName->Buffer);
-            PhSelectComboBoxString(GetDlgItem(hwndDlg, IDC_TYPE),
-                PhGetServiceTypeString(serviceItem->Type), FALSE);
+            PhSetDialogItemText(hwndDlg, IDC_DESCRIPTION, PhGetStringOrEmpty(serviceItem->DisplayName));
+            PhSelectComboBoxString(GetDlgItem(hwndDlg, IDC_TYPE), PhGetServiceTypeString(serviceItem->Type), FALSE);
 
             startType = serviceItem->StartType;
             errorControl = serviceItem->ErrorControl;
@@ -234,9 +297,9 @@ INT_PTR CALLBACK PhpServiceGeneralDlgProc(
 
                 if (config = PhGetServiceConfig(serviceHandle))
                 {
-                    SetDlgItemText(hwndDlg, IDC_GROUP, config->lpLoadOrderGroup);
-                    SetDlgItemText(hwndDlg, IDC_BINARYPATH, config->lpBinaryPathName);
-                    SetDlgItemText(hwndDlg, IDC_USERACCOUNT, config->lpServiceStartName);
+                    PhSetDialogItemText(hwndDlg, IDC_GROUP, config->lpLoadOrderGroup);
+                    PhSetDialogItemText(hwndDlg, IDC_BINARYPATH, config->lpBinaryPathName);
+                    PhSetDialogItemText(hwndDlg, IDC_USERACCOUNT, config->lpServiceStartName);
 
                     if (startType != config->dwStartType || errorControl != config->dwErrorControl)
                     {
@@ -250,14 +313,11 @@ INT_PTR CALLBACK PhpServiceGeneralDlgProc(
 
                 if (description = PhGetServiceDescription(serviceHandle))
                 {
-                    SetDlgItemText(hwndDlg, IDC_DESCRIPTION, description->Buffer);
+                    PhSetDialogItemText(hwndDlg, IDC_DESCRIPTION, description->Buffer);
                     PhDereferenceObject(description);
                 }
 
-                if (
-                    WindowsVersion >= WINDOWS_VISTA &&
-                    PhGetServiceDelayedAutoStart(serviceHandle, &delayedStart)
-                    )
+                if (PhGetServiceDelayedAutoStart(serviceHandle, &delayedStart))
                 {
                     context->OldDelayedStart = delayedStart;
 
@@ -268,45 +328,45 @@ INT_PTR CALLBACK PhpServiceGeneralDlgProc(
                 CloseServiceHandle(serviceHandle);
             }
 
-            PhSelectComboBoxString(GetDlgItem(hwndDlg, IDC_STARTTYPE),
-                PhGetServiceStartTypeString(startType), FALSE);
-            PhSelectComboBoxString(GetDlgItem(hwndDlg, IDC_ERRORCONTROL),
-                PhGetServiceErrorControlString(errorControl), FALSE);
+            PhSelectComboBoxString(GetDlgItem(hwndDlg, IDC_STARTTYPE), PhGetServiceStartTypeString(startType), FALSE);
+            PhSelectComboBoxString(GetDlgItem(hwndDlg, IDC_ERRORCONTROL), PhGetServiceErrorControlString(errorControl), FALSE);
 
-            SetDlgItemText(hwndDlg, IDC_PASSWORD, L"password");
+            PhSetDialogItemText(hwndDlg, IDC_PASSWORD, L"password");
             Button_SetCheck(GetDlgItem(hwndDlg, IDC_PASSWORDCHECK), BST_UNCHECKED);
 
-            if (NT_SUCCESS(PhGetServiceDllParameter(&serviceItem->Name->sr, &serviceDll)))
+            if (NT_SUCCESS(PhGetServiceDllParameter(serviceItem->Type, &serviceItem->Name->sr, &serviceDll)))
             {
-                SetDlgItemText(hwndDlg, IDC_SERVICEDLL, serviceDll->Buffer);
+                PhSetDialogItemText(hwndDlg, IDC_SERVICEDLL, serviceDll->Buffer);
                 PhDereferenceObject(serviceDll);
             }
             else
             {
-                SetDlgItemText(hwndDlg, IDC_SERVICEDLL, L"N/A");
+                PhSetDialogItemText(hwndDlg, IDC_SERVICEDLL, L"N/A");
             }
 
             PhpRefreshControls(hwndDlg);
 
             context->Ready = TRUE;
+
+            if (PhEnableThemeSupport) // TODO: Required for compat (dmex)
+                PhInitializeWindowTheme(GetParent(hwndDlg), PhEnableThemeSupport);  // HACK (GetParent)
+            else
+                PhInitializeWindowTheme(hwndDlg, FALSE);
         }
         break;
     case WM_DESTROY:
         {
-            RemoveProp(hwndDlg, PhMakeContextAtom());
+            PhSaveWindowPlacementToSetting(L"ServiceWindowPosition", NULL, GetParent(hwndDlg));
+            PhRemoveWindowContext(hwndDlg, PH_WINDOW_CONTEXT_DEFAULT);
         }
         break;
     case WM_COMMAND:
         {
-            PSERVICE_PROPERTIES_CONTEXT context =
-                (PSERVICE_PROPERTIES_CONTEXT)GetProp(hwndDlg, PhMakeContextAtom());
-
-            switch (LOWORD(wParam))
+            switch (GET_WM_COMMAND_ID(wParam, lParam))
             {
             case IDCANCEL:
                 {
                     // Workaround for property sheet + multiline edit: http://support.microsoft.com/kb/130765
-
                     SendMessage(GetParent(hwndDlg), uMsg, wParam, lParam);
                 }
                 break;
@@ -361,16 +421,30 @@ INT_PTR CALLBACK PhpServiceGeneralDlgProc(
                     if (PhShowFileDialog(hwndDlg, fileDialog))
                     {
                         fileName = PhGetFileDialogFileName(fileDialog);
-                        SetDlgItemText(hwndDlg, IDC_BINARYPATH, fileName->Buffer);
+                        PhSetDialogItemText(hwndDlg, IDC_BINARYPATH, fileName->Buffer);
                         PhDereferenceObject(fileName);
                     }
 
                     PhFreeFileDialog(fileDialog);
                 }
                 break;
+            case IDC_PERMISSIONS:
+                {
+                    PhReferenceObject(context->ServiceItem);
+
+                    PhEditSecurity(
+                        PhCsForceNoParent ? NULL : hwndDlg,
+                        PhGetStringOrEmpty(context->ServiceItem->DisplayName),
+                        L"Service",
+                        PhpOpenService,
+                        PhpCloseServiceCallback,
+                        context->ServiceItem
+                        );
+                }
+                break;
             }
 
-            switch (HIWORD(wParam))
+            switch (GET_WM_COMMAND_CMD(wParam, lParam))
             {
             case EN_CHANGE:
             case CBN_SELCHANGE:
@@ -395,16 +469,14 @@ INT_PTR CALLBACK PhpServiceGeneralDlgProc(
                     SetWindowLongPtr(hwndDlg, DWLP_MSGRESULT, (LONG_PTR)GetDlgItem(hwndDlg, IDC_STARTTYPE));
                 }
                 return TRUE;
-            case PSN_KILLACTIVE:
-                {
-                    SetWindowLongPtr(hwndDlg, DWLP_MSGRESULT, FALSE);
-                }
-                return TRUE;
+            //case PSN_KILLACTIVE:
+            //    {
+            //        SetWindowLongPtr(hwndDlg, DWLP_MSGRESULT, FALSE);
+            //    }
+            //    return TRUE;
             case PSN_APPLY:
                 {
                     NTSTATUS status;
-                    PSERVICE_PROPERTIES_CONTEXT context =
-                        (PSERVICE_PROPERTIES_CONTEXT)GetProp(hwndDlg, PhMakeContextAtom());
                     PPH_SERVICE_ITEM serviceItem = context->ServiceItem;
                     SC_HANDLE serviceHandle;
                     PPH_STRING newServiceTypeString;
@@ -413,10 +485,10 @@ INT_PTR CALLBACK PhpServiceGeneralDlgProc(
                     ULONG newServiceType;
                     ULONG newServiceStartType;
                     ULONG newServiceErrorControl;
-                    PPH_STRING newServiceGroup;
-                    PPH_STRING newServiceBinaryPath;
-                    PPH_STRING newServiceUserAccount;
-                    PPH_STRING newServicePassword;
+                    PPH_STRING newServiceGroup = NULL;
+                    PPH_STRING newServiceBinaryPath = NULL;
+                    PPH_STRING newServiceUserAccount = NULL;
+                    PPH_STRING newServicePassword = NULL;
 
                     SetWindowLongPtr(hwndDlg, DWLP_MSGRESULT, PSNRET_NOERROR);
 
@@ -432,23 +504,15 @@ INT_PTR CALLBACK PhpServiceGeneralDlgProc(
                     newServiceStartType = PhGetServiceStartTypeInteger(newServiceStartTypeString->Buffer);
                     newServiceErrorControl = PhGetServiceErrorControlInteger(newServiceErrorControlString->Buffer);
 
-                    newServiceGroup = PH_AUTO(PhGetWindowText(GetDlgItem(hwndDlg, IDC_GROUP)));
-                    newServiceBinaryPath = PH_AUTO(PhGetWindowText(GetDlgItem(hwndDlg, IDC_BINARYPATH)));
-                    newServiceUserAccount = PH_AUTO(PhGetWindowText(GetDlgItem(hwndDlg, IDC_USERACCOUNT)));
-
+                    if (PhGetWindowTextLength(GetDlgItem(hwndDlg, IDC_GROUP)))
+                        newServiceGroup = PH_AUTO(PhGetWindowText(GetDlgItem(hwndDlg, IDC_GROUP)));
+                    if (PhGetWindowTextLength(GetDlgItem(hwndDlg, IDC_BINARYPATH)))
+                        newServiceBinaryPath = PH_AUTO(PhGetWindowText(GetDlgItem(hwndDlg, IDC_BINARYPATH)));
+                    if (PhGetWindowTextLength(GetDlgItem(hwndDlg, IDC_USERACCOUNT)))
+                        newServiceUserAccount = PH_AUTO(PhGetWindowText(GetDlgItem(hwndDlg, IDC_USERACCOUNT)));
+                    
                     if (Button_GetCheck(GetDlgItem(hwndDlg, IDC_PASSWORDCHECK)) == BST_CHECKED)
-                    {
                         newServicePassword = PhGetWindowText(GetDlgItem(hwndDlg, IDC_PASSWORD));
-                    }
-                    else
-                    {
-                        newServicePassword = NULL;
-                    }
-
-                    if (newServiceType == SERVICE_KERNEL_DRIVER && newServiceUserAccount->Length == 0)
-                    {
-                        newServiceUserAccount = NULL;
-                    }
 
                     serviceHandle = PhOpenService(serviceItem->Name->Buffer, SERVICE_CHANGE_CONFIG);
 
@@ -459,8 +523,8 @@ INT_PTR CALLBACK PhpServiceGeneralDlgProc(
                             newServiceType,
                             newServiceStartType,
                             newServiceErrorControl,
-                            newServiceBinaryPath->Buffer,
-                            newServiceGroup->Buffer,
+                            PhGetString(newServiceBinaryPath),
+                            PhGetString(newServiceGroup),
                             NULL,
                             NULL,
                             PhGetString(newServiceUserAccount),
@@ -468,16 +532,13 @@ INT_PTR CALLBACK PhpServiceGeneralDlgProc(
                             NULL
                             ))
                         {
-                            if (WindowsVersion >= WINDOWS_VISTA)
+                            BOOLEAN newDelayedStart;
+
+                            newDelayedStart = Button_GetCheck(GetDlgItem(hwndDlg, IDC_DELAYEDSTART)) == BST_CHECKED;
+
+                            if (newDelayedStart != context->OldDelayedStart)
                             {
-                                BOOLEAN newDelayedStart;
-
-                                newDelayedStart = Button_GetCheck(GetDlgItem(hwndDlg, IDC_DELAYEDSTART)) == BST_CHECKED;
-
-                                if (newDelayedStart != context->OldDelayedStart)
-                                {
-                                    PhSetServiceDelayedAutoStart(serviceHandle, newDelayedStart);
-                                }
+                                PhSetServiceDelayedAutoStart(serviceHandle, newDelayedStart);
                             }
 
                             PhMarkNeedsConfigUpdateServiceItem(serviceItem);
@@ -502,8 +563,8 @@ INT_PTR CALLBACK PhpServiceGeneralDlgProc(
                                     newServiceType,
                                     newServiceStartType,
                                     newServiceErrorControl,
-                                    newServiceBinaryPath->Buffer,
-                                    newServiceGroup->Buffer,
+                                    PhGetString(newServiceBinaryPath),
+                                    PhGetString(newServiceGroup),
                                     NULL,
                                     NULL,
                                     PhGetString(newServiceUserAccount),
@@ -511,23 +572,20 @@ INT_PTR CALLBACK PhpServiceGeneralDlgProc(
                                     NULL
                                     )))
                                 {
-                                    if (WindowsVersion >= WINDOWS_VISTA)
+                                    BOOLEAN newDelayedStart;
+
+                                    newDelayedStart = Button_GetCheck(GetDlgItem(hwndDlg, IDC_DELAYEDSTART)) == BST_CHECKED;
+
+                                    if (newDelayedStart != context->OldDelayedStart)
                                     {
-                                        BOOLEAN newDelayedStart;
+                                        SERVICE_DELAYED_AUTO_START_INFO info;
 
-                                        newDelayedStart = Button_GetCheck(GetDlgItem(hwndDlg, IDC_DELAYEDSTART)) == BST_CHECKED;
-
-                                        if (newDelayedStart != context->OldDelayedStart)
-                                        {
-                                            SERVICE_DELAYED_AUTO_START_INFO info;
-
-                                            info.fDelayedAutostart = newDelayedStart;
-                                            PhSvcCallChangeServiceConfig2(
-                                                serviceItem->Name->Buffer,
-                                                SERVICE_CONFIG_DELAYED_AUTO_START_INFO,
-                                                &info
-                                                );
-                                        }
+                                        info.fDelayedAutostart = newDelayedStart;
+                                        PhSvcCallChangeServiceConfig2(
+                                            serviceItem->Name->Buffer,
+                                            SERVICE_CONFIG_DELAYED_AUTO_START_INFO,
+                                            &info
+                                            );
                                     }
 
                                     PhMarkNeedsConfigUpdateServiceItem(serviceItem);
@@ -555,15 +613,9 @@ INT_PTR CALLBACK PhpServiceGeneralDlgProc(
 
                     goto Cleanup;
 ErrorCase:
-                    if (PhShowMessage(
-                        hwndDlg,
-                        MB_ICONERROR | MB_RETRYCANCEL,
-                        L"Unable to change service configuration: %s",
-                        PH_AUTO_T(PH_STRING, PhGetWin32Message(GetLastError()))->Buffer
-                        ) == IDRETRY)
-                    {
-                        SetWindowLongPtr(hwndDlg, DWLP_MSGRESULT, PSNRET_INVALID);
-                    }
+
+                    PhShowStatus(hwndDlg, L"Unable to change service configuration.", 0, GetLastError());
+                    SetWindowLongPtr(hwndDlg, DWLP_MSGRESULT, PSNRET_INVALID);
 
 Cleanup:
                     if (newServicePassword)

@@ -2,7 +2,7 @@
  * Process Hacker Plugins -
  *   Hardware Devices Plugin
  *
- * Copyright (C) 2015-2016 dmex
+ * Copyright (C) 2015-2018 dmex
  *
  * This file is part of Process Hacker.
  *
@@ -21,10 +21,7 @@
  */
 
 #include "devices.h"
-#include <cfgmgr32.h>
-
-#define ITEM_CHECKED (INDEXTOSTATEIMAGEMASK(2))
-#define ITEM_UNCHECKED (INDEXTOSTATEIMAGEMASK(1))
+#include <devguid.h>
 
 typedef struct _DISK_ENUM_ENTRY
 {
@@ -201,7 +198,7 @@ VOID AddDiskDriveToListView(
         PhMoveReference(&newId->DevicePath, DiskPath);
     }
 
-    lvItemIndex = AddListViewItemGroupId(
+    lvItemIndex = PhAddListViewGroupItem(
         Context->ListViewHandle,
         DiskPresent ? 0 : 1,
         MAXINT,
@@ -210,7 +207,7 @@ VOID AddDiskDriveToListView(
         );
 
     if (found)
-        ListView_SetItemState(Context->ListViewHandle, lvItemIndex, ITEM_CHECKED, LVIS_STATEIMAGEMASK);
+        ListView_SetCheckState(Context->ListViewHandle, lvItemIndex, TRUE);
 
     DeleteDiskId(&adapterId);
 }
@@ -219,13 +216,13 @@ VOID FreeListViewDiskDriveEntries(
     _In_ PDV_DISK_OPTIONS_CONTEXT Context
     )
 {
-    ULONG index = -1;
+    ULONG index = ULONG_MAX;
 
     while ((index = PhFindListViewItemByFlags(
         Context->ListViewHandle,
         index,
         LVNI_ALL
-        )) != -1)
+        )) != ULONG_MAX)
     {
         PDV_DISK_ID param;
 
@@ -275,7 +272,7 @@ BOOLEAN QueryDiskDeviceInterfaceDescription(
     bufferSize = 0x40;
     deviceDescription = PhCreateStringEx(NULL, bufferSize);
 
-    if ((result = CM_Get_DevNode_Property( // CM_Get_DevNode_Registry_Property with CM_DRP_DEVICEDESC??
+    if ((result = CM_Get_DevNode_Property(
         deviceInstanceHandle,
         &DEVPKEY_Device_FriendlyName,
         &devicePropertyType,
@@ -364,7 +361,15 @@ VOID FindDiskDrives(
         diskEntry->DeviceName = PhCreateString2(&deviceDescription->sr);
         diskEntry->DevicePath = PhCreateString(deviceInterface);
 
-        if (NT_SUCCESS(DiskDriveCreateHandle(&deviceHandle, diskEntry->DevicePath)))
+        if (NT_SUCCESS(PhCreateFileWin32(
+            &deviceHandle,
+            PhGetString(diskEntry->DevicePath),
+            FILE_READ_ATTRIBUTES | SYNCHRONIZE,
+            FILE_ATTRIBUTE_NORMAL,
+            FILE_SHARE_READ | FILE_SHARE_WRITE,
+            FILE_OPEN,
+            FILE_NON_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT
+            )))
         {
             ULONG diskIndex = ULONG_MAX; // Note: Do not initialize to zero
 
@@ -408,6 +413,9 @@ VOID FindDiskDrives(
         PhDereferenceObject(deviceDescription);
     }
 
+    // Cleanup.
+    PhFree(deviceInterfaceList);
+
     // Sort the entries
     qsort(deviceList->Items, deviceList->Count, sizeof(PVOID), DiskEntryCompareFunction);
 
@@ -437,7 +445,7 @@ VOID FindDiskDrives(
     PhAcquireQueuedLockShared(&DiskDrivesListLock);
     for (ULONG i = 0; i < DiskDrivesList->Count; i++)
     {
-        ULONG index = -1;
+        ULONG index = ULONG_MAX;
         BOOLEAN found = FALSE;
         PDV_DISK_ENTRY entry = PhReferenceObjectSafe(DiskDrivesList->Items[i]);
 
@@ -448,7 +456,7 @@ VOID FindDiskDrives(
             Context->ListViewHandle,
             index,
             LVNI_ALL
-            )) != -1)
+            )) != ULONG_MAX)
         {
             PDV_DISK_ID param;
 
@@ -542,47 +550,72 @@ PPH_STRING FindDiskDeviceInstance(
         }
     }
 
+    PhFree(deviceInterfaceList);
+
     return deviceInstanceString;
 }
 
-//VOID LoadDiskDriveImages(
-//    _In_ PDV_DISK_OPTIONS_CONTEXT Context
-//    )
-//{
-//    HICON smallIcon = NULL;
-//
-//    Context->ImageList = ImageList_Create(
-//        GetSystemMetrics(SM_CXSMICON),
-//        GetSystemMetrics(SM_CYSMICON),
-//        ILC_COLOR32,
-//        1,
-//        1
-//        );
-//
-//    // We could use SetupDiLoadClassIcon but this works.
-//    // Copied from HKEY_LOCAL_MACHINE\SYSTEM\ControlSet001\Control\Class\{4d36e967-e325-11ce-bfc1-08002be10318}\\IconPath
-//    // The index is only valid on Vista and above.
-//    ExtractIconEx(
-//        L"%SystemRoot%\\system32\\imageres.dll",
-//        -32,
-//        NULL,
-//        &smallIcon,
-//        1
-//        );
-//
-//    if (smallIcon)
-//    {
-//        ImageList_AddIcon(Context->ImageList, smallIcon);
-//        DestroyIcon(smallIcon);
-//
-//        // Set the imagelist only if the image was loaded.
-//        ListView_SetImageList(
-//            Context->ListViewHandle,
-//            Context->ImageList,
-//            LVSIL_SMALL
-//            );
-//    }
-//}
+VOID LoadDiskDriveImages(
+    _In_ PDV_DISK_OPTIONS_CONTEXT Context
+    )
+{
+    HICON smallIcon;
+    CONFIGRET result;
+    ULONG bufferSize;
+    PPH_STRING deviceDescription;
+    PH_STRINGREF dllPartSr;
+    PH_STRINGREF indexPartSr;
+    ULONG64 index;
+    DEVPROPTYPE devicePropertyType;
+    ULONG deviceInstanceIdLength = MAX_DEVICE_ID_LEN;
+    WCHAR deviceInstanceId[MAX_DEVICE_ID_LEN + 1] = L"";
+
+    bufferSize = 0x40;
+    deviceDescription = PhCreateStringEx(NULL, bufferSize);
+
+    if ((result = CM_Get_Class_Property(
+        &GUID_DEVCLASS_DISKDRIVE,
+        &DEVPKEY_DeviceClass_IconPath,
+        &devicePropertyType,
+        (PBYTE)deviceDescription->Buffer,
+        &bufferSize,
+        0
+        )) != CR_SUCCESS)
+    {
+        PhDereferenceObject(deviceDescription);
+        deviceDescription = PhCreateStringEx(NULL, bufferSize);
+
+        result = CM_Get_Class_Property(
+            &GUID_DEVCLASS_DISKDRIVE,
+            &DEVPKEY_DeviceClass_IconPath,
+            &devicePropertyType,
+            (PBYTE)deviceDescription->Buffer,
+            &bufferSize,
+            0
+            );
+    }
+
+    // %SystemRoot%\System32\setupapi.dll,-53
+    PhSplitStringRefAtChar(&deviceDescription->sr, ',', &dllPartSr, &indexPartSr);
+    PhStringToInteger64(&indexPartSr, 10, &index);
+    PhMoveReference(&deviceDescription, PhExpandEnvironmentStrings(&dllPartSr));
+
+    if (PhExtractIconEx(deviceDescription->Buffer, (INT)index, &smallIcon, NULL))
+    {
+        Context->ImageList = ImageList_Create(
+            GetSystemMetrics(SM_CXICON),
+            GetSystemMetrics(SM_CYICON),
+            ILC_COLOR32,
+            1,
+            1
+            );
+
+        ImageList_AddIcon(Context->ImageList, smallIcon);
+        DestroyIcon(smallIcon);
+
+        ListView_SetImageList(Context->ListViewHandle, Context->ImageList, LVSIL_SMALL);
+    }
+}
 
 INT_PTR CALLBACK DiskDriveOptionsDlgProc(
     _In_ HWND hwndDlg,
@@ -598,22 +631,11 @@ INT_PTR CALLBACK DiskDriveOptionsDlgProc(
         context = (PDV_DISK_OPTIONS_CONTEXT)PhAllocate(sizeof(DV_DISK_OPTIONS_CONTEXT));
         memset(context, 0, sizeof(DV_DISK_OPTIONS_CONTEXT));
 
-        SetProp(hwndDlg, L"Context", (HANDLE)context);
+        PhSetWindowContext(hwndDlg, PH_WINDOW_CONTEXT_DEFAULT, context);
     }
     else
     {
-        context = (PDV_DISK_OPTIONS_CONTEXT)GetProp(hwndDlg, L"Context");
-
-        if (uMsg == WM_DESTROY)
-        {
-            if (context->OptionsChanged)
-                DiskDrivesSaveList();
-
-            FreeListViewDiskDriveEntries(context);
-
-            RemoveProp(hwndDlg, L"Context");
-            PhFree(context);
-        }
+        context = PhGetWindowContext(hwndDlg, PH_WINDOW_CONTEXT_DEFAULT);
     }
 
     if (context == NULL)
@@ -623,29 +645,44 @@ INT_PTR CALLBACK DiskDriveOptionsDlgProc(
     {
     case WM_INITDIALOG:
         {
-            // Center the property sheet.
-            PhCenterWindow(GetParent(hwndDlg), GetParent(GetParent(hwndDlg)));
-            // Hide the OK button.
-            ShowWindow(GetDlgItem(GetParent(hwndDlg), IDOK), SW_HIDE);
-            // Set the Cancel button text.
-            Button_SetText(GetDlgItem(GetParent(hwndDlg), IDCANCEL), L"Close");
-
             context->ListViewHandle = GetDlgItem(hwndDlg, IDC_DISKDRIVE_LISTVIEW);
             PhSetListViewStyle(context->ListViewHandle, FALSE, TRUE);
             ListView_SetExtendedListViewStyleEx(context->ListViewHandle, LVS_EX_CHECKBOXES, LVS_EX_CHECKBOXES);
             PhSetControlTheme(context->ListViewHandle, L"explorer");
             PhAddListViewColumn(context->ListViewHandle, 0, 0, 0, LVCFMT_LEFT, 350, L"Disk Drives");
             PhSetExtendedListView(context->ListViewHandle);
+            LoadDiskDriveImages(context);
 
             ListView_EnableGroupView(context->ListViewHandle, TRUE);
-            AddListViewGroup(context->ListViewHandle, 0, L"Connected");
-            AddListViewGroup(context->ListViewHandle, 1, L"Disconnected");
+            PhAddListViewGroup(context->ListViewHandle, 0, L"Connected");
+            PhAddListViewGroup(context->ListViewHandle, 1, L"Disconnected");
 
-            EnableThemeDialogTexture(hwndDlg, ETDT_ENABLETAB);
+            PhInitializeLayoutManager(&context->LayoutManager, hwndDlg);
+            PhAddLayoutItem(&context->LayoutManager, context->ListViewHandle, NULL, PH_ANCHOR_ALL);
 
             FindDiskDrives(context);
 
             context->OptionsChanged = FALSE;
+        }
+        break;
+    case WM_DESTROY:
+        {
+            PhDeleteLayoutManager(&context->LayoutManager);
+
+            if (context->OptionsChanged)
+                DiskDrivesSaveList();
+
+            FreeListViewDiskDriveEntries(context);
+
+            PhRemoveWindowContext(hwndDlg, PH_WINDOW_CONTEXT_DEFAULT);
+            PhFree(context);
+        }
+        break;
+    case WM_SIZE:
+        {
+            PhLayoutManagerLayout(&context->LayoutManager);
+
+            ExtendedListView_SetColumnWidth(context->ListViewHandle, 0, ELVSCW_AUTOSIZE_REMAININGSPACE);
         }
         break;
     case WM_NOTIFY:
@@ -663,7 +700,7 @@ INT_PTR CALLBACK DiskDriveOptionsDlgProc(
                 {
                     switch (listView->uNewState & LVIS_STATEIMAGEMASK)
                     {
-                    case 0x2000: // checked
+                    case INDEXTOSTATEIMAGEMASK(2): // checked
                         {
                             PDV_DISK_ID param = (PDV_DISK_ID)listView->lParam;
 
@@ -678,7 +715,7 @@ INT_PTR CALLBACK DiskDriveOptionsDlgProc(
                             context->OptionsChanged = TRUE;
                         }
                         break;
-                    case 0x1000: // unchecked
+                    case INDEXTOSTATEIMAGEMASK(1): // unchecked
                         {
                             PDV_DISK_ID param = (PDV_DISK_ID)listView->lParam;
 

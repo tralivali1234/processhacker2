@@ -28,6 +28,16 @@ PhOpenService(
     );
 
 PHLIBAPI
+NTSTATUS
+NTAPI
+PhOpenServiceEx(
+    _In_ PWSTR ServiceName,
+    _In_ ACCESS_MASK DesiredAccess,
+    _In_ SC_HANDLE ScManagerHandle,
+    _Out_ SC_HANDLE* ServiceHandle
+    );
+
+PHLIBAPI
 PVOID
 NTAPI
 PhGetServiceConfig(
@@ -123,6 +133,14 @@ PhGetServiceNameFromTag(
     );
 
 PHLIBAPI
+PPH_STRING
+NTAPI
+PhGetServiceNameForModuleReference(
+    _In_ HANDLE ProcessId,
+    _In_ PWSTR ModuleName
+    );
+
+PHLIBAPI
 NTSTATUS
 NTAPI
 PhGetThreadServiceTag(
@@ -135,6 +153,7 @@ PHLIBAPI
 NTSTATUS
 NTAPI
 PhGetServiceDllParameter(
+    _In_ ULONG ServiceType,
     _In_ PPH_STRINGREF ServiceName,
     _Out_ PPH_STRING *ServiceDll
     );

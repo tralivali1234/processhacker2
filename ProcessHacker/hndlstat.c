@@ -21,9 +21,7 @@
  */
 
 #include <phapp.h>
-
 #include <hndlinfo.h>
-
 #include <hndlprv.h>
 
 typedef struct _HANDLE_STATISTICS_ENTRY
@@ -58,6 +56,7 @@ VOID PhShowHandleStatisticsDialog(
     BOOLEAN filterNeeded;
     ULONG i;
 
+    memset(&context, 0, sizeof(HANDLE_STATISTICS_CONTEXT));
     context.ProcessId = ProcessId;
 
     if (!NT_SUCCESS(status = PhOpenProcess(
@@ -192,7 +191,7 @@ INT_PTR CALLBACK PhpHandleStatisticsDlgProc(
                 unknownType = NULL;
 
                 if (!entry->Name)
-                    unknownType = PhFormatString(L"(unknown: %u)", i);
+                    unknownType = PhFormatString(L"(unknown: %lu)", i);
 
                 countString = PhFormatUInt64(entry->Count, TRUE);
 
@@ -220,7 +219,7 @@ INT_PTR CALLBACK PhpHandleStatisticsDlgProc(
         break;
     case WM_COMMAND:
         {
-            switch (LOWORD(wParam))
+            switch (GET_WM_COMMAND_ID(wParam, lParam))
             {
             case IDCANCEL:
             case IDOK:

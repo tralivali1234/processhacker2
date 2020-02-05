@@ -79,6 +79,9 @@ BOOLEAN EtpGpuSysInfoSectionCallback(
         {
             PPH_SYSINFO_CREATE_DIALOG createDialog = Parameter1;
 
+            if (!createDialog)
+                break;
+
             createDialog->Instance = PluginInstance->DllBase;
             createDialog->Template = MAKEINTRESOURCE(IDD_SYSINFO_GPU);
             createDialog->DialogProc = EtpGpuDialogProc;
@@ -87,6 +90,9 @@ BOOLEAN EtpGpuSysInfoSectionCallback(
     case SysInfoGraphGetDrawInfo:
         {
             PPH_GRAPH_DRAW_INFO drawInfo = Parameter1;
+
+            if (!drawInfo)
+                break;
 
             drawInfo->Flags = PH_GRAPH_USE_GRID_X | PH_GRAPH_USE_GRID_Y;
             Section->Parameters->ColorSetupFunction(drawInfo, PhGetIntegerSetting(L"ColorCpuKernel"), 0);
@@ -104,6 +110,9 @@ BOOLEAN EtpGpuSysInfoSectionCallback(
             PPH_SYSINFO_GRAPH_GET_TOOLTIP_TEXT getTooltipText = Parameter1;
             FLOAT gpu;
 
+            if (!getTooltipText)
+                break;
+
             gpu = PhGetItemCircularBuffer_FLOAT(&EtGpuNodeHistory, getTooltipText->Index);
 
             PhMoveReference(&Section->GraphState.TooltipText, PhFormatString(
@@ -119,8 +128,32 @@ BOOLEAN EtpGpuSysInfoSectionCallback(
         {
             PPH_SYSINFO_DRAW_PANEL drawPanel = Parameter1;
 
+            if (!drawPanel)
+                break;
+
             drawPanel->Title = PhCreateString(L"GPU");
-            drawPanel->SubTitle = PhFormatString(L"%.2f%%", EtGpuNodeUsage * 100);
+
+            if (EtGpuDedicatedUsage && EtGpuDedicatedLimit) // Required for Intel IGP devices -dmex
+            {
+                drawPanel->SubTitle = PhFormatString(
+                    L"%.2f%%\n%s / %s",
+                    EtGpuNodeUsage * 100,
+                    PhaFormatSize(EtGpuDedicatedUsage, ULONG_MAX)->Buffer,
+                    PhaFormatSize(EtGpuDedicatedLimit, ULONG_MAX)->Buffer
+                    );
+                drawPanel->SubTitleOverflow = PhFormatString(
+                    L"%.2f%%\n%s",
+                    EtGpuNodeUsage * 100,
+                    PhaFormatSize(EtGpuDedicatedUsage, ULONG_MAX)->Buffer
+                    );
+            }
+            else
+            {
+                drawPanel->SubTitle = PhFormatString(
+                    L"%.2f%%\n",
+                    EtGpuNodeUsage * 100
+                    );
+            }
         }
         return TRUE;
     }
@@ -177,10 +210,10 @@ INT_PTR CALLBACK EtpGpuDialogProc(
             GpuGraphMargin = graphItem->Margin;
             panelItem = PhAddLayoutItem(&GpuLayoutManager, GetDlgItem(hwndDlg, IDC_PANEL_LAYOUT), NULL, PH_ANCHOR_LEFT | PH_ANCHOR_RIGHT | PH_ANCHOR_BOTTOM);
 
-            SendMessage(GetDlgItem(hwndDlg, IDC_TITLE), WM_SETFONT, (WPARAM)GpuSection->Parameters->LargeFont, FALSE);
-            SendMessage(GetDlgItem(hwndDlg, IDC_GPUNAME), WM_SETFONT, (WPARAM)GpuSection->Parameters->MediumFont, FALSE);
+            SetWindowFont(GetDlgItem(hwndDlg, IDC_TITLE), GpuSection->Parameters->LargeFont, FALSE);
+            SetWindowFont(GetDlgItem(hwndDlg, IDC_GPUNAME), GpuSection->Parameters->MediumFont, FALSE);
 
-            SetDlgItemText(hwndDlg, IDC_GPUNAME, ((PPH_STRING)PH_AUTO(EtpGetGpuNameString()))->Buffer);
+            PhSetDialogItemText(hwndDlg, IDC_GPUNAME, ((PPH_STRING)PH_AUTO(EtpGetGpuNameString()))->Buffer);
 
             GpuPanel = CreateDialog(PluginInstance->DllBase, MAKEINTRESOURCE(IDD_SYSINFO_GPUPANEL), hwndDlg, EtpGpuPanelDialogProc);
             ShowWindow(GpuPanel, SW_SHOW);
@@ -236,10 +269,13 @@ INT_PTR CALLBACK EtpGpuPanelDialogProc(
     {
     case WM_COMMAND:
         {
-            switch (LOWORD(wParam))
+            switch (GET_WM_COMMAND_ID(wParam, lParam))
             {
             case IDC_NODES:
-                EtShowGpuNodesDialog(GpuDialog, GpuSection->Parameters);
+                EtShowGpuNodesDialog(GpuDialog);
+                break;
+            case IDC_DETAILS:
+                EtShowGpuDetailsDialog(GpuDialog);
                 break;
             }
         }
@@ -490,8 +526,7 @@ VOID EtpNotifyDedicatedGraph(
             {
                 for (i = 0; i < drawInfo->LineDataCount; i++)
                 {
-                    DedicatedGraphState.Data1[i] =
-                        (FLOAT)PhGetItemCircularBuffer_ULONG(&EtGpuDedicatedHistory, i);
+                    DedicatedGraphState.Data1[i] = (FLOAT)PhGetItemCircularBuffer_ULONG64(&EtGpuDedicatedHistory, i);
                 }
 
                 if (EtGpuDedicatedLimit != 0)
@@ -499,7 +534,7 @@ VOID EtpNotifyDedicatedGraph(
                     // Scale the data.
                     PhDivideSinglesBySingle(
                         DedicatedGraphState.Data1,
-                        (FLOAT)EtGpuDedicatedLimit / PAGE_SIZE,
+                        (FLOAT)EtGpuDedicatedLimit,
                         drawInfo->LineDataCount
                         );
                 }
@@ -516,13 +551,13 @@ VOID EtpNotifyDedicatedGraph(
             {
                 if (DedicatedGraphState.TooltipIndex != getTooltipText->Index)
                 {
-                    ULONG usedPages;
+                    ULONG64 usedPages;
 
-                    usedPages = PhGetItemCircularBuffer_ULONG(&EtGpuDedicatedHistory, getTooltipText->Index);
+                    usedPages = PhGetItemCircularBuffer_ULONG64(&EtGpuDedicatedHistory, getTooltipText->Index);
 
                     PhMoveReference(&DedicatedGraphState.TooltipText, PhFormatString(
                         L"Dedicated Memory: %s\n%s",
-                        PhaFormatSize(UInt32x32To64(usedPages, PAGE_SIZE), -1)->Buffer,
+                        PhaFormatSize(usedPages, ULONG_MAX)->Buffer,
                         ((PPH_STRING)PH_AUTO(PhGetStatisticsTimeString(NULL, getTooltipText->Index)))->Buffer
                         ));
                 }
@@ -559,8 +594,7 @@ VOID EtpNotifySharedGraph(
             {
                 for (i = 0; i < drawInfo->LineDataCount; i++)
                 {
-                    SharedGraphState.Data1[i] =
-                        (FLOAT)PhGetItemCircularBuffer_ULONG(&EtGpuSharedHistory, i);
+                    SharedGraphState.Data1[i] = (FLOAT)PhGetItemCircularBuffer_ULONG64(&EtGpuSharedHistory, i);
                 }
 
                 if (EtGpuSharedLimit != 0)
@@ -568,7 +602,7 @@ VOID EtpNotifySharedGraph(
                     // Scale the data.
                     PhDivideSinglesBySingle(
                         SharedGraphState.Data1,
-                        (FLOAT)EtGpuSharedLimit / PAGE_SIZE,
+                        (FLOAT)EtGpuSharedLimit,
                         drawInfo->LineDataCount
                         );
                 }
@@ -585,13 +619,13 @@ VOID EtpNotifySharedGraph(
             {
                 if (SharedGraphState.TooltipIndex != getTooltipText->Index)
                 {
-                    ULONG usedPages;
+                    ULONG64 usedPages;
 
-                    usedPages = PhGetItemCircularBuffer_ULONG(&EtGpuSharedHistory, getTooltipText->Index);
+                    usedPages = PhGetItemCircularBuffer_ULONG64(&EtGpuSharedHistory, getTooltipText->Index);
 
                     PhMoveReference(&SharedGraphState.TooltipText, PhFormatString(
                         L"Shared Memory: %s\n%s",
-                        PhaFormatSize(UInt32x32To64(usedPages, PAGE_SIZE), -1)->Buffer,
+                        PhaFormatSize(usedPages, ULONG_MAX)->Buffer,
                         ((PPH_STRING)PH_AUTO(PhGetStatisticsTimeString(NULL, getTooltipText->Index)))->Buffer
                         ));
                 }
@@ -608,21 +642,21 @@ VOID EtpUpdateGpuGraphs(
     )
 {
     GpuGraphState.Valid = FALSE;
-    GpuGraphState.TooltipIndex = -1;
+    GpuGraphState.TooltipIndex = ULONG_MAX;
     Graph_MoveGrid(GpuGraphHandle, 1);
     Graph_Draw(GpuGraphHandle);
     Graph_UpdateTooltip(GpuGraphHandle);
     InvalidateRect(GpuGraphHandle, NULL, FALSE);
 
     DedicatedGraphState.Valid = FALSE;
-    DedicatedGraphState.TooltipIndex = -1;
+    DedicatedGraphState.TooltipIndex = ULONG_MAX;
     Graph_MoveGrid(DedicatedGraphHandle, 1);
     Graph_Draw(DedicatedGraphHandle);
     Graph_UpdateTooltip(DedicatedGraphHandle);
     InvalidateRect(DedicatedGraphHandle, NULL, FALSE);
 
     SharedGraphState.Valid = FALSE;
-    SharedGraphState.TooltipIndex = -1;
+    SharedGraphState.TooltipIndex = ULONG_MAX;
     Graph_MoveGrid(SharedGraphHandle, 1);
     Graph_Draw(SharedGraphHandle);
     Graph_UpdateTooltip(SharedGraphHandle);
@@ -633,11 +667,10 @@ VOID EtpUpdateGpuPanel(
     VOID
     )
 {
-    SetDlgItemText(GpuPanel, IDC_ZDEDICATEDCURRENT_V, PhaFormatSize(EtGpuDedicatedUsage, -1)->Buffer);
-    SetDlgItemText(GpuPanel, IDC_ZDEDICATEDLIMIT_V, PhaFormatSize(EtGpuDedicatedLimit, -1)->Buffer);
-
-    SetDlgItemText(GpuPanel, IDC_ZSHAREDCURRENT_V, PhaFormatSize(EtGpuSharedUsage, -1)->Buffer);
-    SetDlgItemText(GpuPanel, IDC_ZSHAREDLIMIT_V, PhaFormatSize(EtGpuSharedLimit, -1)->Buffer);
+    PhSetDialogItemText(GpuPanel, IDC_ZDEDICATEDCURRENT_V, PhaFormatSize(EtGpuDedicatedUsage, ULONG_MAX)->Buffer);
+    PhSetDialogItemText(GpuPanel, IDC_ZDEDICATEDLIMIT_V, PhaFormatSize(EtGpuDedicatedLimit, ULONG_MAX)->Buffer);
+    PhSetDialogItemText(GpuPanel, IDC_ZSHAREDCURRENT_V, PhaFormatSize(EtGpuSharedUsage, ULONG_MAX)->Buffer);
+    PhSetDialogItemText(GpuPanel, IDC_ZSHAREDLIMIT_V, PhaFormatSize(EtGpuSharedLimit, ULONG_MAX)->Buffer);
 }
 
 PPH_PROCESS_RECORD EtpReferenceMaxNodeRecord(

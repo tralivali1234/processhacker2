@@ -23,39 +23,6 @@
 #include "devices.h"
 #include <ntdddisk.h>
 
-// NOTE: Functions in this file can be used on disks, volumes, and partitions,
-// even if they appear to only support one type, they can be used to query different
-// information from other types.
-// TODO: Come up with a better naming scheme to identify these multi-purpose functions.
-
-NTSTATUS DiskDriveCreateHandle(
-    _Out_ PHANDLE DeviceHandle,
-    _In_ PPH_STRING DevicePath
-    )
-{
-    // Some examples of paths that can be used to open the disk device for statistics:
-    // \PhysicalDrive1
-    // \X:
-    // X:\
-    // \HarddiskVolume1
-    // \Harddisk1Partition1
-    // \Harddisk1\Partition1
-    // \Volume{a978c827-cf64-44b4-b09a-57a55ef7f49f}
-    // IOCTL_MOUNTMGR_QUERY_POINTS (used by FindFirstVolume and FindFirstVolumeMountPoint)
-    // HKEY_LOCAL_MACHINE\\SYSTEM\\MountedDevices (contains the DosDevice and path used by the SetupAPI with DetailData->DevicePath)
-    // Other methods??
-
-    return PhCreateFileWin32(
-        DeviceHandle,
-        DevicePath->Buffer,
-        FILE_READ_ATTRIBUTES | SYNCHRONIZE,
-        FILE_ATTRIBUTE_NORMAL,
-        FILE_SHARE_READ | FILE_SHARE_WRITE,
-        FILE_OPEN,
-        FILE_NON_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT // FILE_RANDOM_ACCESS
-        );
-}
-
 ULONG DiskDriveQueryDeviceMap(
     VOID
     )
@@ -68,20 +35,15 @@ ULONG DiskDriveQueryDeviceMap(
 
     memset(&deviceMapInfo, 0, sizeof(deviceMapInfo));
 
-    if (NT_SUCCESS(NtQueryInformationProcess(
+    NtQueryInformationProcess(
         NtCurrentProcess(),
         ProcessDeviceMap,
         &deviceMapInfo,
         sizeof(deviceMapInfo),
         NULL
-        )))
-    {
-        return deviceMapInfo.Query.DriveMap;
-    }
-    else
-    {
-        return GetLogicalDrives();
-    }
+        );
+    
+    return deviceMapInfo.Query.DriveMap;
 }
 
 PPH_STRING DiskDriveQueryDosMountPoints(
@@ -92,7 +54,7 @@ PPH_STRING DiskDriveQueryDosMountPoints(
     WCHAR deviceNameBuffer[7] = L"\\\\.\\?:";
     PH_STRING_BUILDER stringBuilder;
 
-    PhInitializeStringBuilder(&stringBuilder, MAX_PATH);
+    PhInitializeStringBuilder(&stringBuilder, DOS_MAX_PATH_LENGTH);
 
     driveMask = DiskDriveQueryDeviceMap();
 
@@ -156,10 +118,9 @@ PPH_LIST DiskDriveQueryMountPointHandles(
     driveMask = DiskDriveQueryDeviceMap();
     deviceList = PhCreateList(2);
 
-    // NOTE: This isn't the best way of doing this but it works.
-    for (INT i = 0; i < 0x1A; i++)
+    for (INT i = 0; i < 26; i++)
     {
-        if (driveMask & (0x1 << i))
+        if (driveMask & (1 << i))
         {
             HANDLE deviceHandle;
 
@@ -186,11 +147,13 @@ PPH_LIST DiskDriveQueryMountPointHandles(
                 {
                     // BUG: Device numbers are re-used on seperate device controllers and this
                     // causes drive letters to be assigned to disks at those same indexes.
-                    // For now, just filter CD_ROM devices but we may need to be a lot more strict and
+                    // For now, just filter CD_ROM devices but we may need to be a lot more strict and 
                     // only allow devices of type FILE_DEVICE_DISK to be scanned for mount points.
                     if (deviceNumber == DeviceNumber && deviceType != FILE_DEVICE_CD_ROM)
                     {
-                        PDISK_HANDLE_ENTRY entry = PhAllocate(sizeof(DISK_HANDLE_ENTRY));
+                        PDISK_HANDLE_ENTRY entry;
+                        
+                        entry = PhAllocate(sizeof(DISK_HANDLE_ENTRY));
                         memset(entry, 0, sizeof(DISK_HANDLE_ENTRY));
 
                         entry->DeviceLetter = deviceNameBuffer[4];
@@ -205,7 +168,6 @@ PPH_LIST DiskDriveQueryMountPointHandles(
 
     return deviceList;
 }
-
 
 BOOLEAN DiskDriveQueryAdapterInformation(
     _In_ HANDLE DeviceHandle
@@ -463,6 +425,7 @@ BOOLEAN DiskDriveQueryTemperature(
     return TRUE;
 }
 
+_Success_(return)
 BOOLEAN DiskDriveQueryDeviceInformation(
     _In_ HANDLE DeviceHandle,
     _Out_opt_ PPH_STRING* DiskVendor,
@@ -532,7 +495,7 @@ BOOLEAN DiskDriveQueryDeviceInformation(
     {
         PPH_STRING diskVendor;
 
-        diskVendor = PH_AUTO(PhConvertMultiByteToUtf16((PBYTE)deviceDescriptor + deviceDescriptor->VendorIdOffset));
+        diskVendor = PH_AUTO(PhConvertMultiByteToUtf16(PTR_ADD_OFFSET(deviceDescriptor, deviceDescriptor->VendorIdOffset)));
 
         *DiskVendor = TrimString(diskVendor);
     }
@@ -541,7 +504,7 @@ BOOLEAN DiskDriveQueryDeviceInformation(
     {
         PPH_STRING diskModel;
 
-        diskModel = PH_AUTO(PhConvertMultiByteToUtf16((PBYTE)deviceDescriptor + deviceDescriptor->ProductIdOffset));
+        diskModel = PH_AUTO(PhConvertMultiByteToUtf16(PTR_ADD_OFFSET(deviceDescriptor, deviceDescriptor->ProductIdOffset)));
 
         *DiskModel = TrimString(diskModel);
     }
@@ -550,7 +513,7 @@ BOOLEAN DiskDriveQueryDeviceInformation(
     {
         PPH_STRING diskRevision;
 
-        diskRevision = PH_AUTO(PhConvertMultiByteToUtf16((PBYTE)deviceDescriptor + deviceDescriptor->ProductRevisionOffset));
+        diskRevision = PH_AUTO(PhConvertMultiByteToUtf16(PTR_ADD_OFFSET(deviceDescriptor, deviceDescriptor->ProductRevisionOffset)));
 
         *DiskRevision = TrimString(diskRevision);
     }
@@ -559,7 +522,7 @@ BOOLEAN DiskDriveQueryDeviceInformation(
     {
         PPH_STRING diskSerial;
 
-        diskSerial = PH_AUTO(PhConvertMultiByteToUtf16((PBYTE)deviceDescriptor + deviceDescriptor->SerialNumberOffset));
+        diskSerial = PH_AUTO(PhConvertMultiByteToUtf16(PTR_ADD_OFFSET(deviceDescriptor, deviceDescriptor->SerialNumberOffset)));
 
         *DiskSerial = TrimString(diskSerial);
     }
@@ -590,7 +553,7 @@ NTSTATUS DiskDriveQueryDeviceTypeAndNumber(
         NULL,
         NULL,
         &isb,
-        IOCTL_STORAGE_GET_DEVICE_NUMBER, // https://msdn.microsoft.com/en-us/library/bb968800.aspx
+        IOCTL_STORAGE_GET_DEVICE_NUMBER,
         NULL,
         0,
         &result,
@@ -631,7 +594,7 @@ NTSTATUS DiskDriveQueryStatistics(
         NULL,
         NULL,
         &isb,
-        IOCTL_DISK_PERFORMANCE, // https://msdn.microsoft.com/en-us/library/aa365183.aspx
+        IOCTL_DISK_PERFORMANCE,
         NULL,
         0,
         &result,
@@ -663,7 +626,7 @@ PPH_STRING DiskDriveQueryGeometry(
         NULL,
         NULL,
         &isb,
-        IOCTL_DISK_GET_DRIVE_GEOMETRY, // https://msdn.microsoft.com/en-us/library/aa365169.aspx
+        IOCTL_DISK_GET_DRIVE_GEOMETRY,
         NULL,
         0,
         &result,
@@ -671,17 +634,18 @@ PPH_STRING DiskDriveQueryGeometry(
         )))
     {
         // TODO: This doesn't return total capacity like Task Manager.
-        return PhFormatSize(result.Cylinders.QuadPart * result.TracksPerCylinder * result.SectorsPerTrack * result.BytesPerSector, -1);
+        return PhFormatSize(result.Cylinders.QuadPart * result.TracksPerCylinder * result.SectorsPerTrack * result.BytesPerSector, ULONG_MAX);
     }
 
     return PhReferenceEmptyString();
 }
 
-BOOLEAN DiskDriveQueryImminentFailure(
+NTSTATUS DiskDriveQueryImminentFailure(
     _In_ HANDLE DeviceHandle,
     _Out_ PPH_LIST* DiskSmartAttributes
     )
 {
+    NTSTATUS status;
     IO_STATUS_BLOCK isb;
     STORAGE_PREDICT_FAILURE storagePredictFailure;
 
@@ -692,13 +656,13 @@ BOOLEAN DiskDriveQueryImminentFailure(
     // * This works without admin rights but doesn't support other features like logs and self-tests.
     // * It works for (S)ATA devices but not for USB.
 
-    if (NT_SUCCESS(NtDeviceIoControlFile(
+    if (NT_SUCCESS(status = NtDeviceIoControlFile(
         DeviceHandle,
         NULL,
         NULL,
         NULL,
         &isb,
-        IOCTL_STORAGE_PREDICT_FAILURE, // https://msdn.microsoft.com/en-us/library/ff560587.aspx
+        IOCTL_STORAGE_PREDICT_FAILURE,
         NULL,
         0,
         &storagePredictFailure,
@@ -735,7 +699,7 @@ BOOLEAN DiskDriveQueryImminentFailure(
 
         for (UCHAR i = 0; i < 30; ++i)
         {
-            PSMART_ATTRIBUTE attribute = (PSMART_ATTRIBUTE)(storagePredictFailure.VendorSpecific + i * sizeof(SMART_ATTRIBUTE) + SMART_HEADER_SIZE);
+            PSMART_ATTRIBUTE attribute = (PSMART_ATTRIBUTE)PTR_ADD_OFFSET(storagePredictFailure.VendorSpecific, i * sizeof(SMART_ATTRIBUTE) + SMART_HEADER_SIZE);
 
             // Attribute values 0x00, 0xFE, 0xFF are invalid.
             // There is no requirement that attributes be in any particular order.
@@ -745,9 +709,9 @@ BOOLEAN DiskDriveQueryImminentFailure(
                 attribute->Id != 0xFF
                 )
             {
-                PSMART_ATTRIBUTES info = PhAllocate(sizeof(SMART_ATTRIBUTES));
-                memset(info, 0, sizeof(SMART_ATTRIBUTES));
+                PSMART_ATTRIBUTES info;
 
+                info = PhAllocateZero(sizeof(SMART_ATTRIBUTES));
                 info->AttributeId = attribute->Id;
                 info->CurrentValue = attribute->CurrentValue;
                 info->WorstValue = attribute->WorstValue;
@@ -772,11 +736,9 @@ BOOLEAN DiskDriveQueryImminentFailure(
         }
 
         *DiskSmartAttributes = diskAttributeList;
-
-        return TRUE;
     }
 
-    return FALSE;
+    return status;
 }
 
 // requires admin
@@ -834,6 +796,7 @@ BOOLEAN DiskDriveQueryAttributes(
     return FALSE;
 }
 
+_Success_(return)
 BOOLEAN DiskDriveQueryLength(
     _In_ HANDLE DeviceHandle,
     _Out_ ULONG64* Length
@@ -904,7 +867,7 @@ BOOLEAN DiskDriveQueryBcProperties(
     return TRUE;
 }
 
-
+_Success_(return)
 BOOLEAN DiskDriveQueryFileSystemInfo(
     _In_ HANDLE DosDeviceHandle,
     _Out_ USHORT* FileSystemType,
@@ -984,6 +947,7 @@ BOOLEAN DiskDriveQueryFileSystemInfo(
     return FALSE;
 }
 
+_Success_(return)
 BOOLEAN DiskDriveQueryNtfsVolumeInfo(
     _In_ HANDLE DosDeviceHandle,
     _Out_ PNTFS_VOLUME_INFO VolumeInfo
@@ -1014,6 +978,7 @@ BOOLEAN DiskDriveQueryNtfsVolumeInfo(
     return FALSE;
 }
 
+_Success_(return)
 BOOLEAN DiskDriveQueryRefsVolumeInfo(
     _In_ HANDLE DosDeviceHandle,
     _Out_ PREFS_VOLUME_DATA_BUFFER VolumeInfo
@@ -1098,7 +1063,7 @@ BOOLEAN DiskDriveQueryTxfsVolumeInfo(
 
     for (ULONG i = 0; i < buffer->NumberOfTransactions; i++)
     {
-        PTXFS_LIST_TRANSACTIONS_ENTRY entry = (PTXFS_LIST_TRANSACTIONS_ENTRY)(buffer + i * sizeof(TXFS_LIST_TRANSACTIONS));
+        //PTXFS_LIST_TRANSACTIONS_ENTRY entry = (PTXFS_LIST_TRANSACTIONS_ENTRY)(buffer + i * sizeof(TXFS_LIST_TRANSACTIONS));
         //PPH_STRING txGuid = PhFormatGuid(&entry->TransactionId);
         //entry->TransactionState;
         //Resource Manager Identifier :     17DC1CDD-9C6C-11E5-BBC2-F5C37BC15998
@@ -1216,6 +1181,7 @@ BOOLEAN DiskDriveQueryBootSectorFsCount(
     return FALSE;
 }
 
+_Success_(return)
 BOOLEAN DiskDriveQueryVolumeDirty(
     _In_ HANDLE DosDeviceHandle,
     _Out_ PBOOLEAN IsDirty
@@ -1350,6 +1316,7 @@ NTSTATUS DiskDriveQueryVolumeAttributes(
     return status;
 }
 
+_Success_(return)
 BOOLEAN DiskDriveQueryVolumeFreeSpace(
     _In_ HANDLE DosDeviceHandle,
     _Out_ ULONG64* TotalLength,
@@ -1404,8 +1371,6 @@ PWSTR SmartAttributeGetText(
     _In_ SMART_ATTRIBUTE_ID AttributeId
     )
 {
-    // from https://en.wikipedia.org/wiki/S.M.A.R.T
-
     switch (AttributeId)
     {
     case SMART_ATTRIBUTE_ID_READ_ERROR_RATE: // Critical
@@ -1514,7 +1479,7 @@ PWSTR SmartAttributeGetText(
         return L"GMR Head Amplitude";
     case SMART_ATTRIBUTE_ID_DRIVE_TEMPERATURE:
         return L"Temperature";
-    case SMART_ATTRIBUTE_ID_HEAD_FLYING_HOURS: // Transfer Error Rate (Fujitsu)
+    case SMART_ATTRIBUTE_ID_HEAD_FLYING_HOURS:
         return L"Head Flying Hours";
     case SMART_ATTRIBUTE_ID_TOTAL_LBA_WRITTEN:
         return L"Total LBAs Written";
@@ -1524,137 +1489,29 @@ PWSTR SmartAttributeGetText(
         return L"Read Error Retry Rate";
     case SMART_ATTRIBUTE_ID_FREE_FALL_PROTECTION:
         return L"Free Fall Protection";
+    case SMART_ATTRIBUTE_ID_SSD_PROGRAM_FAIL_COUNT:
+        return L"SSD Program Fail Count";
+    case SMART_ATTRIBUTE_ID_SSD_ERASE_FAIL_COUNT:
+        return L"SSD Erase Fail Count";
+    case SMART_ATTRIBUTE_ID_SSD_WEAR_LEVELING_COUNT:
+        return L"SSD Wear Leveling Count";
+    case SMART_ATTRIBUTE_ID_UNEXPECTED_POWER_LOSS:
+        return L"Unexpected power loss count";
+    case SMART_ATTRIBUTE_ID_WEAR_RANGE_DELTA:
+        return L"Wear Range Delta";
+    case SMART_ATTRIBUTE_ID_SSD_PROGRAM_FAIL_COUNT_TOTAL:
+        return L"Program Fail Count Total";
+    case SMART_ATTRIBUTE_ID_ERASE_FAIL_COUNT:
+        return L"Erase Fail Count";
+    case SMART_ATTRIBUTE_ID_SSD_MEDIA_WEAROUT_HOURS:
+        return L"Media Wearout Indicator";
+    case SMART_ATTRIBUTE_ID_SSD_ERASE_COUNT:
+        return L"Erase count";
+    case SMART_ATTRIBUTE_ID_MIN_SPARES_REMAINING:
+        return L"Minimum Spares Remaining";
+    case SMART_ATTRIBUTE_ID_NEWLY_ADDED_BAD_FLASH_BLOCK:
+        return L"Newly Added Bad Flash Block";
     }
 
     return L"BUG BUG BUG";
-}
-
-PWSTR SmartAttributeGetDescription(
-    _In_ SMART_ATTRIBUTE_ID AttributeId
-    )
-{
-    // from https://en.wikipedia.org/wiki/S.M.A.R.T
-    switch (AttributeId)
-    {
-    case SMART_ATTRIBUTE_ID_READ_ERROR_RATE:
-        return L"Lower raw value is better.\r\nVendor specific raw value. Stores data related to the rate of hardware read errors that occurred when reading data from a disk surface. The raw value has different structure for different vendors and is often not meaningful as a decimal number.";
-    case SMART_ATTRIBUTE_ID_THROUGHPUT_PERFORMANCE:
-        return L"Higher raw value is better.\r\nOverall (general) throughput performance of a hard disk drive. If the value of this attribute is decreasing there is a high probability that there is a problem with the disk.";
-    case SMART_ATTRIBUTE_ID_SPIN_UP_TIME:
-        return L"Lower raw value is better.\r\nAverage time of spindle spin up (from zero RPM to fully operational [milliseconds]).";
-    case SMART_ATTRIBUTE_ID_START_STOP_COUNT:
-        return L"A tally of spindle start/stop cycles.\r\nThe spindle turns on, and hence the count is increased, both when the hard disk is turned on after having before been turned entirely off (disconnected from power source) and when the hard disk returns from having previously been put to sleep mode.";
-    case SMART_ATTRIBUTE_ID_REALLOCATED_SECTORS_COUNT:
-        return L"Lower raw value is better.\r\nCount of reallocated sectors. When the hard drive finds a read/write/verification error, it marks that sector as \"reallocated\" and transfers data to a special reserved area (spare area). This process is also known as remapping, and reallocated sectors are called \"remaps\". The raw value normally represents a count of the bad sectors that have been found and remapped. Thus, the higher the attribute value, the more sectors the drive has had to reallocate. This allows a drive with bad sectors to continue operation; however, a drive which has had any reallocations at all is significantly more likely to fail in the near future. While primarily used as a metric of the life expectancy of the drive, this number also affects performance. As the count of reallocated sectors increases, the read/write speed tends to become worse because the drive head is forced to seek to the reserved area whenever a remap is accessed. If sequential access speed is critical, the remapped sectors can be manually marked as bad blocks in the file system in order to prevent their use.";
-    case SMART_ATTRIBUTE_ID_READ_CHANNEL_MARGIN:
-        return L"Margin of a channel while reading data.\r\nThe function of this attribute is not specified.";
-    case SMART_ATTRIBUTE_ID_SEEK_ERROR_RATE:
-        return L"Vendor specific raw value.\r\nRate of seek errors of the magnetic heads. If there is a partial failure in the mechanical positioning system, then seek errors will arise. Such a failure may be due to numerous factors, such as damage to a servo, or thermal widening of the hard disk. The raw value has different structure for different vendors and is often not meaningful as a decimal number.";
-    case SMART_ATTRIBUTE_ID_SEEK_TIME_PERFORMANCE:
-        return L"Average performance of seek operations of the magnetic heads.\r\nIf this attribute is decreasing, it is a sign of problems in the mechanical subsystem.";
-    case SMART_ATTRIBUTE_ID_POWER_ON_HOURS:
-        return L"Count of hours in power-on state.\r\nThe raw value of this attribute shows total count of hours (or minutes, or seconds, depending on manufacturer) in power-on state.\r\nBy default, the total expected lifetime of a hard disk in perfect condition is defined as 5 years(running every day and night on all days).This is equal to 1825 days in 24 / 7 mode or 43800 hours.\r\nOn some pre-2005 drives, this raw value may advance erratically and/or \"wrap around\" (reset to zero periodically).";
-    case SMART_ATTRIBUTE_ID_SPIN_RETRY_COUNT:
-        return L"Count of retry of spin start attempts.\r\nThis attribute stores a total count of the spin start attempts to reach the fully operational speed (under the condition that the first attempt was unsuccessful). An increase of this attribute value is a sign of problems in the hard disk mechanical subsystem.";
-    case SMART_ATTRIBUTE_ID_CALIBRATION_RETRY_COUNT:
-        return L"This attribute indicates the count that recalibration was requested (under the condition that the first attempt was unsuccessful). An increase of this attribute value is a sign of problems in the hard disk mechanical subsystem.";
-    case SMART_ATTRIBUTE_ID_POWER_CYCLE_COUNT:
-        return L"This attribute indicates the count of full hard disk power on/off cycles.";
-    case SMART_ATTRIBUTE_ID_SOFT_READ_ERROR_RATE:
-        return L"Uncorrected read errors reported to the operating system.";
-    case SMART_ATTRIBUTE_ID_SATA_DOWNSHIFT_ERROR_COUNT:
-        break;
-    case SMART_ATTRIBUTE_ID_END_TO_END_ERROR:
-        break;
-    case SMART_ATTRIBUTE_ID_HEAD_STABILITY:
-        break;
-    case SMART_ATTRIBUTE_ID_INDUCED_OP_VIBRATION_DETECTION:
-        break;
-    case SMART_ATTRIBUTE_ID_REPORTED_UNCORRECTABLE_ERRORS:
-        break;
-    case SMART_ATTRIBUTE_ID_COMMAND_TIMEOUT:
-        break;
-    case SMART_ATTRIBUTE_ID_HIGH_FLY_WRITES:
-        break;
-    case SMART_ATTRIBUTE_ID_TEMPERATURE_DIFFERENCE_FROM_100:
-        break;
-    case SMART_ATTRIBUTE_ID_GSENSE_ERROR_RATE:
-        break;
-    case SMART_ATTRIBUTE_ID_POWER_OFF_RETRACT_COUNT:
-        break;
-    case SMART_ATTRIBUTE_ID_LOAD_CYCLE_COUNT:
-        break;
-    case SMART_ATTRIBUTE_ID_TEMPERATURE:
-        break;
-    case SMART_ATTRIBUTE_ID_HARDWARE_ECC_RECOVERED:
-        break;
-    case SMART_ATTRIBUTE_ID_REALLOCATION_EVENT_COUNT:
-        break;
-    case SMART_ATTRIBUTE_ID_CURRENT_PENDING_SECTOR_COUNT:
-        break;
-    case SMART_ATTRIBUTE_ID_UNCORRECTABLE_SECTOR_COUNT:
-        break;
-    case SMART_ATTRIBUTE_ID_ULTRADMA_CRC_ERROR_COUNT:
-        break;
-    case SMART_ATTRIBUTE_ID_MULTI_ZONE_ERROR_RATE:
-        break;
-    case SMART_ATTRIBUTE_ID_OFFTRACK_SOFT_READ_ERROR_RATE:
-        break;
-    case SMART_ATTRIBUTE_ID_DATA_ADDRESS_MARK_ERRORS:
-        break;
-    case SMART_ATTRIBUTE_ID_RUN_OUT_CANCEL:
-        break;
-    case SMART_ATTRIBUTE_ID_SOFT_ECC_CORRECTION:
-        break;
-    case SMART_ATTRIBUTE_ID_THERMAL_ASPERITY_RATE_TAR:
-        break;
-    case SMART_ATTRIBUTE_ID_FLYING_HEIGHT:
-        break;
-    case SMART_ATTRIBUTE_ID_SPIN_HIGH_CURRENT:
-        break;
-    case SMART_ATTRIBUTE_ID_SPIN_BUZZ:
-        break;
-    case SMART_ATTRIBUTE_ID_OFFLINE_SEEK_PERFORMANCE:
-        break;
-    case SMART_ATTRIBUTE_ID_VIBRATION_DURING_WRITE:
-        break;
-    case SMART_ATTRIBUTE_ID_SHOCK_DURING_WRITE:
-        break;
-    case SMART_ATTRIBUTE_ID_DISK_SHIFT:
-        break;
-    case SMART_ATTRIBUTE_ID_GSENSE_ERROR_RATE_ALT:
-        break;
-    case SMART_ATTRIBUTE_ID_LOADED_HOURS:
-        break;
-    case SMART_ATTRIBUTE_ID_LOAD_UNLOAD_RETRY_COUNT:
-        break;
-    case SMART_ATTRIBUTE_ID_LOAD_FRICTION:
-        break;
-    case SMART_ATTRIBUTE_ID_LOAD_UNLOAD_CYCLE_COUNT:
-        break;
-    case SMART_ATTRIBUTE_ID_LOAD_IN_TIME:
-        break;
-    case SMART_ATTRIBUTE_ID_TORQUE_AMPLIFICATION_COUNT:
-        break;
-    case SMART_ATTRIBUTE_ID_POWER_OFF_RETTRACT_CYCLE:
-        break;
-    case SMART_ATTRIBUTE_ID_GMR_HEAD_AMPLITUDE:
-        break;
-    case SMART_ATTRIBUTE_ID_DRIVE_TEMPERATURE:
-        break;
-    case SMART_ATTRIBUTE_ID_HEAD_FLYING_HOURS:
-        break;
-    case SMART_ATTRIBUTE_ID_TOTAL_LBA_WRITTEN:
-        break;
-    case SMART_ATTRIBUTE_ID_TOTAL_LBA_READ:
-        break;
-    case SMART_ATTRIBUTE_ID_READ_ERROR_RETY_RATE:
-        break;
-    case SMART_ATTRIBUTE_ID_FREE_FALL_PROTECTION:
-        break;
-    }
-
-    //TODO: Include more descriptions..
-
-    return L"";
 }

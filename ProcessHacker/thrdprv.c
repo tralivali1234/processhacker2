@@ -27,6 +27,8 @@
  */
 
 #include <phapp.h>
+#include <phplug.h>
+#include <phsettings.h>
 #include <thrdprv.h>
 
 #include <kphuser.h>
@@ -45,6 +47,7 @@ typedef struct _PH_THREAD_QUERY_DATA
     ULONG64 RunId;
 
     PPH_STRING StartAddressString;
+    PPH_STRING StartAddressFileName;
     PH_SYMBOL_RESOLVE_LEVEL StartAddressResolveLevel;
 
     PPH_STRING ServiceName;
@@ -86,24 +89,13 @@ VOID PhpThreadProviderUpdate(
     _In_ PVOID ProcessInformation
     );
 
-PPH_OBJECT_TYPE PhThreadProviderType;
-PPH_OBJECT_TYPE PhThreadItemType;
-
+PPH_OBJECT_TYPE PhThreadProviderType = NULL;
+PPH_OBJECT_TYPE PhThreadItemType = NULL;
 PH_WORK_QUEUE PhThreadProviderWorkQueue;
 PH_INITONCE PhThreadProviderWorkQueueInitOnce = PH_INITONCE_INIT;
 
-BOOLEAN PhThreadProviderInitialization(
-    VOID
-    )
-{
-    PhThreadProviderType = PhCreateObjectType(L"ThreadProvider", 0, PhpThreadProviderDeleteProcedure);
-    PhThreadItemType = PhCreateObjectType(L"ThreadItem", 0, PhpThreadItemDeleteProcedure);
-
-    return TRUE;
-}
-
 VOID PhpQueueThreadWorkQueueItem(
-    _In_ PTHREAD_START_ROUTINE Function,
+    _In_ PUSER_THREAD_START_ROUTINE Function,
     _In_opt_ PVOID Context
     )
 {
@@ -120,7 +112,15 @@ PPH_THREAD_PROVIDER PhCreateThreadProvider(
     _In_ HANDLE ProcessId
     )
 {
+    static PH_INITONCE initOnce = PH_INITONCE_INIT;
     PPH_THREAD_PROVIDER threadProvider;
+
+    if (PhBeginInitOnce(&initOnce))
+    {
+        PhThreadProviderType = PhCreateObjectType(L"ThreadProvider", 0, PhpThreadProviderDeleteProcedure);
+        PhThreadItemType = PhCreateObjectType(L"ThreadItem", 0, PhpThreadItemDeleteProcedure);
+        PhEndInitOnce(&initOnce);
+    }
 
     threadProvider = PhCreateObject(
         PhEmGetObjectSize(EmThreadProviderType, sizeof(PH_THREAD_PROVIDER)),
@@ -212,7 +212,7 @@ VOID PhRegisterThreadProvider(
     )
 {
     PhReferenceObject(ThreadProvider);
-    PhRegisterCallback(&PhProcessesUpdatedEvent, PhpThreadProviderCallbackHandler, ThreadProvider, CallbackRegistration);
+    PhRegisterCallback(PhGetGeneralCallback(GeneralCallbackProcessProviderUpdatedEvent), PhpThreadProviderCallbackHandler, ThreadProvider, CallbackRegistration);
 }
 
 VOID PhUnregisterThreadProvider(
@@ -220,7 +220,7 @@ VOID PhUnregisterThreadProvider(
     _In_ PPH_CALLBACK_REGISTRATION CallbackRegistration
     )
 {
-    PhUnregisterCallback(&PhProcessesUpdatedEvent, CallbackRegistration);
+    PhUnregisterCallback(PhGetGeneralCallback(GeneralCallbackProcessProviderUpdatedEvent), CallbackRegistration);
     PhDereferenceObject(ThreadProvider);
 }
 
@@ -237,8 +237,9 @@ static BOOLEAN LoadSymbolsEnumGenericModulesCallback(
     )
 {
     PPH_THREAD_SYMBOL_LOAD_CONTEXT context = Context;
-    PPH_SYMBOL_PROVIDER symbolProvider = context->SymbolProvider;
 
+    if (!context)
+        return FALSE;
     if (context->ThreadProvider->Terminating)
         return FALSE;
 
@@ -252,7 +253,7 @@ static BOOLEAN LoadSymbolsEnumGenericModulesCallback(
     }
 
     PhLoadModuleSymbolProvider(
-        symbolProvider,
+        context->SymbolProvider,
         Module->FileName->Buffer,
         (ULONG64)Module->BaseAddress,
         Module->Size
@@ -267,8 +268,9 @@ static BOOLEAN LoadBasicSymbolsEnumGenericModulesCallback(
     )
 {
     PPH_THREAD_SYMBOL_LOAD_CONTEXT context = Context;
-    PPH_SYMBOL_PROVIDER symbolProvider = context->SymbolProvider;
 
+    if (!context)
+        return FALSE;
     if (context->ThreadProvider->Terminating)
         return FALSE;
 
@@ -276,7 +278,7 @@ static BOOLEAN LoadBasicSymbolsEnumGenericModulesCallback(
         PhEqualString2(Module->Name, L"kernel32.dll", TRUE))
     {
         PhLoadModuleSymbolProvider(
-            symbolProvider,
+            context->SymbolProvider,
             Module->FileName->Buffer,
             (ULONG64)Module->BaseAddress,
             Module->Size
@@ -387,7 +389,6 @@ PPH_THREAD_ITEM PhCreateThreadItem(
         );
     memset(threadItem, 0, sizeof(PH_THREAD_ITEM));
     threadItem->ThreadId = ThreadId;
-    PhPrintUInt32(threadItem->ThreadIdString, HandleToUlong(ThreadId));
 
     PhEmCallObjectOperation(EmThreadItemType, threadItem, EmObjectCreate);
 
@@ -508,7 +509,7 @@ NTSTATUS PhpThreadQueryWorker(
         data->ThreadProvider->SymbolProvider,
         data->ThreadItem->StartAddress,
         &data->StartAddressResolveLevel,
-        &data->ThreadItem->StartAddressFileName,
+        &data->StartAddressFileName,
         NULL,
         NULL
         );
@@ -520,12 +521,12 @@ NTSTATUS PhpThreadQueryWorker(
         PhLoadSymbolsThreadProvider(data->ThreadProvider);
 
         PhClearReference(&data->StartAddressString);
-        PhClearReference(&data->ThreadItem->StartAddressFileName);
+        PhClearReference(&data->StartAddressFileName);
         data->StartAddressString = PhGetSymbolFromAddress(
             data->ThreadProvider->SymbolProvider,
             data->ThreadItem->StartAddress,
             &data->StartAddressResolveLevel,
-            &data->ThreadItem->StartAddressFileName,
+            &data->StartAddressFileName,
             NULL,
             NULL
             );
@@ -538,7 +539,7 @@ NTSTATUS PhpThreadQueryWorker(
 
     // Check if the process has services - we'll need to know before getting service tag/name
     // information.
-    if (WINDOWS_HAS_SERVICE_TAGS && !data->ThreadProvider->HasServicesKnown)
+    if (!data->ThreadProvider->HasServicesKnown)
     {
         PPH_PROCESS_ITEM processItem;
 
@@ -552,9 +553,10 @@ NTSTATUS PhpThreadQueryWorker(
     }
 
     // Get the service tag, and the service name.
-    if (WINDOWS_HAS_SERVICE_TAGS &&
+    if (
         data->ThreadProvider->SymbolProvider->IsRealHandle &&
-        data->ThreadItem->ThreadHandle)
+        data->ThreadItem->ThreadHandle
+        )
     {
         PVOID serviceTag;
 
@@ -615,7 +617,7 @@ PPH_STRING PhpGetThreadBasicStartAddress(
     {
         *ResolveLevel = PhsrlAddress;
 
-        symbol = PhCreateStringEx(NULL, PH_PTR_STR_LEN * 2);
+        symbol = PhCreateStringEx(NULL, PH_PTR_STR_LEN * sizeof(WCHAR));
         PhPrintPointer(symbol->Buffer, (PVOID)Address);
         PhTrimToNullTerminatorString(symbol);
     }
@@ -688,7 +690,7 @@ PPH_STRING PhGetBasePriorityIncrementString(
     case THREAD_PRIORITY_ERROR_RETURN:
         return NULL;
     default:
-        return PhFormatString(L"%d", Increment);
+        return PhFormatString(L"%ld", Increment);
     }
 }
 
@@ -710,7 +712,7 @@ VOID PhpThreadProviderCallbackHandler(
     _In_opt_ PVOID Context
     )
 {
-    if (PhProcessInformation)
+    if (Context && PhProcessInformation)
     {
         PhpThreadProviderUpdate((PPH_THREAD_PROVIDER)Context, PhProcessInformation);
     }
@@ -816,6 +818,7 @@ VOID PhpThreadProviderUpdate(
             if (data->StartAddressResolveLevel == PhsrlFunction && data->StartAddressString)
             {
                 PhSwapReference(&data->ThreadItem->StartAddressString, data->StartAddressString);
+                PhSwapReference(&data->ThreadItem->StartAddressFileName, data->StartAddressFileName);
                 data->ThreadItem->StartAddressResolveLevel = data->StartAddressResolveLevel;
             }
 
@@ -824,6 +827,7 @@ VOID PhpThreadProviderUpdate(
             data->ThreadItem->JustResolved = TRUE;
 
             if (data->StartAddressString) PhDereferenceObject(data->StartAddressString);
+            if (data->StartAddressFileName) PhDereferenceObject(data->StartAddressFileName);
             PhDereferenceObject(data->ThreadItem);
             PhFree(data);
         }
@@ -863,13 +867,12 @@ VOID PhpThreadProviderUpdate(
             {
                 PhOpenThread(
                     &threadItem->ThreadHandle,
-                    ThreadQueryAccess,
+                    THREAD_QUERY_LIMITED_INFORMATION,
                     threadItem->ThreadId
                     );
             }
 
             // Get the cycle count.
-            if (WINDOWS_HAS_CYCLE_TIME)
             {
                 ULONG64 cycles;
 
@@ -891,13 +894,7 @@ VOID PhpThreadProviderUpdate(
 
             if (threadItem->ThreadHandle)
             {
-                NtQueryInformationThread(
-                    threadItem->ThreadHandle,
-                    ThreadQuerySetWin32StartAddress,
-                    &startAddress,
-                    sizeof(PVOID),
-                    NULL
-                    );
+                PhGetThreadStartAddress(threadItem->ThreadHandle, &startAddress);
             }
 
             if (!startAddress)
@@ -930,7 +927,7 @@ VOID PhpThreadProviderUpdate(
             if (!threadItem->StartAddressString)
             {
                 threadItem->StartAddressResolveLevel = PhsrlAddress;
-                threadItem->StartAddressString = PhCreateStringEx(NULL, PH_PTR_STR_LEN * 2);
+                threadItem->StartAddressString = PhCreateStringEx(NULL, PH_PTR_STR_LEN * sizeof(WCHAR));
                 PhPrintPointer(
                     threadItem->StartAddressString->Buffer,
                     (PVOID)threadItem->StartAddress
@@ -938,14 +935,14 @@ VOID PhpThreadProviderUpdate(
                 PhTrimToNullTerminatorString(threadItem->StartAddressString);
             }
 
-            PhpQueueThreadQuery(threadProvider, threadItem);
-
             // Is it a GUI thread?
             {
                 GUITHREADINFO info = { sizeof(GUITHREADINFO) };
 
                 threadItem->IsGuiThread = !!GetGUIThreadInfo(HandleToUlong(threadItem->ThreadId), &info);
             }
+
+            PhpQueueThreadQuery(threadProvider, threadItem);
 
             // Add the thread item to the hashtable.
             PhAcquireFastLockExclusive(&threadProvider->ThreadHashtableLock);
@@ -1027,7 +1024,6 @@ VOID PhpThreadProviderUpdate(
             }
 
             // Update the cycle count.
-            if (WINDOWS_HAS_CYCLE_TIME)
             {
                 ULONG64 cycles;
                 ULONG64 oldDelta;
@@ -1055,7 +1051,7 @@ VOID PhpThreadProviderUpdate(
 
             // Update the CPU usage.
             // If the cycle time isn't available, we'll fall back to using the CPU time.
-            if (WINDOWS_HAS_CYCLE_TIME && PhEnableCycleCpuUsage && (threadProvider->ProcessId == SYSTEM_IDLE_PROCESS_ID || threadItem->ThreadHandle))
+            if (PhEnableCycleCpuUsage && (threadProvider->ProcessId == SYSTEM_IDLE_PROCESS_ID || threadItem->ThreadHandle))
             {
                 threadItem->CpuUsage = (FLOAT)threadItem->CyclesDelta.Delta / PhCpuTotalCycleDelta;
             }

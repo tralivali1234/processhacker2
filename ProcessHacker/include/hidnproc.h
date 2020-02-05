@@ -4,7 +4,10 @@
 typedef enum _PH_HIDDEN_PROCESS_METHOD
 {
     BruteForceScanMethod,
-    CsrHandlesScanMethod
+    CsrHandlesScanMethod,
+    ProcessHandleScanMethod,
+    RegistryScanMethod,
+    EtwGuidScanMethod,
 } PH_HIDDEN_PROCESS_METHOD;
 
 typedef enum _PH_HIDDEN_PROCESS_TYPE

@@ -3,6 +3,7 @@
  *   Process properties: Performance page
  *
  * Copyright (C) 2009-2016 wj32
+ * Copyright (C) 2019 dmex
  *
  * This file is part of Process Hacker.
  *
@@ -21,14 +22,17 @@
  */
 
 #include <phapp.h>
+#include <phplug.h>
 #include <procprp.h>
 #include <procprpp.h>
 
 #include <graph.h>
+#include <settings.h>
 
 #include <procprv.h>
 #include <settings.h>
 #include <sysinfo.h>
+#include <phsettings.h>
 
 static VOID NTAPI PerformanceUpdateHandler(
     _In_opt_ PVOID Parameter,
@@ -37,7 +41,8 @@ static VOID NTAPI PerformanceUpdateHandler(
 {
     PPH_PERFORMANCE_CONTEXT performanceContext = (PPH_PERFORMANCE_CONTEXT)Context;
 
-    PostMessage(performanceContext->WindowHandle, WM_PH_PERFORMANCE_UPDATE, 0, 0);
+    if (performanceContext && performanceContext->Enabled)
+        PostMessage(performanceContext->WindowHandle, WM_PH_PERFORMANCE_UPDATE, 0, 0);
 }
 
 INT_PTR CALLBACK PhpProcessPerformanceDlgProc(
@@ -52,8 +57,7 @@ INT_PTR CALLBACK PhpProcessPerformanceDlgProc(
     PPH_PROCESS_ITEM processItem;
     PPH_PERFORMANCE_CONTEXT performanceContext;
 
-    if (PhpPropPageDlgProcHeader(hwndDlg, uMsg, lParam,
-        &propSheetPage, &propPageContext, &processItem))
+    if (PhPropPageDlgProcHeader(hwndDlg, uMsg, lParam, &propSheetPage, &propPageContext, &processItem))
     {
         performanceContext = (PPH_PERFORMANCE_CONTEXT)propPageContext->Context;
     }
@@ -66,13 +70,12 @@ INT_PTR CALLBACK PhpProcessPerformanceDlgProc(
     {
     case WM_INITDIALOG:
         {
-            performanceContext = propPageContext->Context =
-                PhAllocate(sizeof(PH_PERFORMANCE_CONTEXT));
-
+            performanceContext = propPageContext->Context = PhAllocateZero(sizeof(PH_PERFORMANCE_CONTEXT));
             performanceContext->WindowHandle = hwndDlg;
+            performanceContext->Enabled = TRUE;
 
             PhRegisterCallback(
-                &PhProcessesUpdatedEvent,
+                PhGetGeneralCallback(GeneralCallbackProcessProviderUpdatedEvent),
                 PerformanceUpdateHandler,
                 performanceContext,
                 &performanceContext->ProcessesUpdatedRegistration
@@ -102,6 +105,8 @@ INT_PTR CALLBACK PhpProcessPerformanceDlgProc(
             PhSetWindowStyle(performanceContext->IoGraphHandle, WS_BORDER, WS_BORDER);
             Graph_SetTooltip(performanceContext->IoGraphHandle, TRUE);
             BringWindowToTop(performanceContext->IoGraphHandle);
+
+            PhInitializeWindowTheme(hwndDlg, PhEnableThemeSupport);
         }
         break;
     case WM_DESTROY:
@@ -111,26 +116,19 @@ INT_PTR CALLBACK PhpProcessPerformanceDlgProc(
             PhDeleteGraphState(&performanceContext->IoGraphState);
 
             PhUnregisterCallback(
-                &PhProcessesUpdatedEvent,
+                PhGetGeneralCallback(GeneralCallbackProcessProviderUpdatedEvent),
                 &performanceContext->ProcessesUpdatedRegistration
                 );
             PhFree(performanceContext);
-
-            PhpPropPageDlgProcDestroy(hwndDlg);
         }
         break;
     case WM_SHOWWINDOW:
         {
-            if (!propPageContext->LayoutInitialized)
+            PPH_LAYOUT_ITEM dialogItem;
+
+            if (dialogItem = PhBeginPropPageLayout(hwndDlg, propPageContext))
             {
-                PPH_LAYOUT_ITEM dialogItem;
-
-                dialogItem = PhAddPropPageLayoutItem(hwndDlg, hwndDlg,
-                    PH_PROP_PAGE_TAB_CONTROL_PARENT, PH_ANCHOR_ALL);
-
-                PhDoPropPageLayout(hwndDlg);
-
-                propPageContext->LayoutInitialized = TRUE;
+                PhEndPropPageLayout(hwndDlg, propPageContext);
             }
         }
         break;
@@ -140,6 +138,12 @@ INT_PTR CALLBACK PhpProcessPerformanceDlgProc(
 
             switch (header->code)
             {
+            case PSN_SETACTIVE:
+                performanceContext->Enabled = TRUE;
+                break;
+            case PSN_KILLACTIVE:
+                performanceContext->Enabled = FALSE;
+                break;
             case GCN_GETDRAWINFO:
                 {
                     PPH_GRAPH_GETDRAWINFO getDrawInfo = (PPH_GRAPH_GETDRAWINFO)header;
@@ -171,7 +175,7 @@ INT_PTR CALLBACK PhpProcessPerformanceDlgProc(
 
                             PhMoveReference(&performanceContext->CpuGraphState.Text,
                                 PhFormatString(L"%.2f%%",
-                                (processItem->CpuKernelUsage + processItem->CpuUserUsage) * 100
+                                ((DOUBLE)processItem->CpuKernelUsage + processItem->CpuUserUsage) * 100
                                 ));
 
                             hdc = Graph_GetBufferedContext(performanceContext->CpuGraphHandle);
@@ -224,7 +228,7 @@ INT_PTR CALLBACK PhpProcessPerformanceDlgProc(
                             PhMoveReference(&performanceContext->PrivateGraphState.Text,
                                 PhConcatStrings2(
                                 L"Private bytes: ",
-                                PhaFormatSize(processItem->VmCounters.PagefileUsage, -1)->Buffer
+                                PhaFormatSize(processItem->VmCounters.PagefileUsage, ULONG_MAX)->Buffer
                                 ));
 
                             hdc = Graph_GetBufferedContext(performanceContext->PrivateGraphHandle);
@@ -296,8 +300,8 @@ INT_PTR CALLBACK PhpProcessPerformanceDlgProc(
                             PhMoveReference(&performanceContext->IoGraphState.Text,
                                 PhFormatString(
                                 L"R+O: %s, W: %s",
-                                PhaFormatSize(processItem->IoReadDelta.Delta + processItem->IoOtherDelta.Delta, -1)->Buffer,
-                                PhaFormatSize(processItem->IoWriteDelta.Delta, -1)->Buffer
+                                PhaFormatSize(processItem->IoReadDelta.Delta + processItem->IoOtherDelta.Delta, ULONG_MAX)->Buffer,
+                                PhaFormatSize(processItem->IoWriteDelta.Delta, ULONG_MAX)->Buffer
                                 ));
 
                             hdc = Graph_GetBufferedContext(performanceContext->IoGraphHandle);
@@ -330,7 +334,7 @@ INT_PTR CALLBACK PhpProcessPerformanceDlgProc(
 
                             PhMoveReference(&performanceContext->CpuGraphState.TooltipText, PhFormatString(
                                 L"%.2f%%\n%s",
-                                (cpuKernel + cpuUser) * 100,
+                                ((DOUBLE)cpuKernel + cpuUser) * 100,
                                 PH_AUTO_T(PH_STRING, PhGetStatisticsTimeString(processItem, getTooltipText->Index))->Buffer
                                 ));
                         }
@@ -350,7 +354,7 @@ INT_PTR CALLBACK PhpProcessPerformanceDlgProc(
 
                             PhMoveReference(&performanceContext->PrivateGraphState.TooltipText, PhFormatString(
                                 L"Private bytes: %s\n%s",
-                                PhaFormatSize(privateBytes, -1)->Buffer,
+                                PhaFormatSize(privateBytes, ULONG_MAX)->Buffer,
                                 PH_AUTO_T(PH_STRING, PhGetStatisticsTimeString(processItem, getTooltipText->Index))->Buffer
                                 ));
                         }
@@ -374,9 +378,9 @@ INT_PTR CALLBACK PhpProcessPerformanceDlgProc(
 
                             PhMoveReference(&performanceContext->IoGraphState.TooltipText, PhFormatString(
                                 L"R: %s\nW: %s\nO: %s\n%s",
-                                PhaFormatSize(ioRead, -1)->Buffer,
-                                PhaFormatSize(ioWrite, -1)->Buffer,
-                                PhaFormatSize(ioOther, -1)->Buffer,
+                                PhaFormatSize(ioRead, ULONG_MAX)->Buffer,
+                                PhaFormatSize(ioWrite, ULONG_MAX)->Buffer,
+                                PhaFormatSize(ioOther, ULONG_MAX)->Buffer,
                                 PH_AUTO_T(PH_STRING, PhGetStatisticsTimeString(processItem, getTooltipText->Index))->Buffer
                                 ));
                         }
@@ -402,11 +406,11 @@ INT_PTR CALLBACK PhpProcessPerformanceDlgProc(
             LONG height;
 
             performanceContext->CpuGraphState.Valid = FALSE;
-            performanceContext->CpuGraphState.TooltipIndex = -1;
+            performanceContext->CpuGraphState.TooltipIndex = ULONG_MAX;
             performanceContext->PrivateGraphState.Valid = FALSE;
-            performanceContext->PrivateGraphState.TooltipIndex = -1;
+            performanceContext->PrivateGraphState.TooltipIndex = ULONG_MAX;
             performanceContext->IoGraphState.Valid = FALSE;
-            performanceContext->IoGraphState.TooltipIndex = -1;
+            performanceContext->IoGraphState.TooltipIndex = ULONG_MAX;
 
             GetClientRect(hwndDlg, &clientRect);
             width = clientRect.right - margin.left - margin.right;

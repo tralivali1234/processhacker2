@@ -2,7 +2,7 @@
  * Process Hacker Plugins -
  *   Update Checker Plugin
  *
- * Copyright (C) 2016 dmex
+ * Copyright (C) 2016-2019 dmex
  *
  * This file is part of Process Hacker.
  *
@@ -40,30 +40,21 @@ HRESULT CALLBACK ShowAvailableCallbackProc(
     switch (uMsg)
     {
     case TDN_NAVIGATED:
-        {
-            // Taskdialog is now initialized (Required if the background startup check starts here)
-            PhSetEvent(&InitializedEvent);
-        }
+        PhSetEvent(&InitializedEvent);
         break;
     case TDN_BUTTON_CLICKED:
         {
             if ((INT)wParam == IDOK)
             {
-                if (UpdaterInstalledUsingSetup())
-                {
-                    ShowProgressDialog(context);
-                    return S_FALSE;
-                }
-                else
-                {
-                    PhShellExecute(hwndDlg, L"https://wj32.org/processhacker/downloads.php", NULL);
-                }
+                ShowProgressDialog(context);
+                return S_FALSE;
             }
         }
         break;
     case TDN_HYPERLINK_CLICKED:
         {
             TaskDialogLinkClicked(context);
+            return S_FALSE;
         }
         break;
     }
@@ -79,26 +70,21 @@ VOID ShowAvailableDialog(
 
     memset(&config, 0, sizeof(TASKDIALOGCONFIG));
     config.cbSize = sizeof(TASKDIALOGCONFIG);
-    config.dwFlags = TDF_USE_HICON_MAIN | TDF_ALLOW_DIALOG_CANCELLATION | TDF_CAN_BE_MINIMIZED | TDF_EXPAND_FOOTER_AREA | TDF_ENABLE_HYPERLINKS | TDF_SHOW_PROGRESS_BAR;
+    config.dwFlags = TDF_USE_HICON_MAIN | TDF_ALLOW_DIALOG_CANCELLATION | TDF_CAN_BE_MINIMIZED | TDF_ENABLE_HYPERLINKS;
     config.dwCommonButtons = TDCBF_CANCEL_BUTTON;
     config.hMainIcon = Context->IconLargeHandle;
-
-    config.pszWindowTitle = L"Process Hacker - Updater";
-    config.pszMainInstruction = L"An update for Process Hacker is available";
-    config.pszContent = PhaFormatString(L"Version: %lu.%lu.%lu\r\nDownload size: %s",
-        Context->MajorVersion,
-        Context->MinorVersion,
-        Context->RevisionVersion,
-        Context->Size->Buffer
-        )->Buffer;
-    config.pszExpandedInformation = L"<A HREF=\"executablestring\">View Changelog</A>";
-
     config.cxWidth = 200;
     config.pButtons = TaskDialogButtonArray;
-    config.cButtons = ARRAYSIZE(TaskDialogButtonArray);
-
+    config.cButtons = RTL_NUMBER_OF(TaskDialogButtonArray);
     config.lpCallbackData = (LONG_PTR)Context;
     config.pfCallback = ShowAvailableCallbackProc;
 
-    SendMessage(Context->DialogHandle, TDM_NAVIGATE_PAGE, 0, (LPARAM)&config);
+    config.pszWindowTitle = L"Process Hacker - Updater";
+    config.pszMainInstruction = L"A newer build of Process Hacker is available.";
+    config.pszContent = PhaFormatString(L"Version: %s\r\nDownload size: %s\r\n\r\n<A HREF=\"changelog.txt\">View Changelog</A>",
+        PhGetStringOrEmpty(Context->Version),
+        PhGetStringOrEmpty(Context->SetupFileLength)
+        )->Buffer;
+
+    TaskDialogNavigatePage(Context->DialogHandle, &config);
 }

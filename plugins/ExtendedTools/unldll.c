@@ -24,8 +24,10 @@
 
 typedef struct _UNLOADED_DLLS_CONTEXT
 {
-    PPH_PROCESS_ITEM ProcessItem;
+    BOOLEAN IsWow64;
     HWND ListViewHandle;
+    PPH_PROCESS_ITEM ProcessItem;
+    PH_LAYOUT_MANAGER LayoutManager;
     PVOID CapturedEventTrace;
 } UNLOADED_DLLS_CONTEXT, *PUNLOADED_DLLS_CONTEXT;
 
@@ -37,181 +39,199 @@ INT_PTR CALLBACK EtpUnloadedDllsDlgProc(
     );
 
 VOID EtShowUnloadedDllsDialog(
-    _In_ HWND ParentWindowHandle,
     _In_ PPH_PROCESS_ITEM ProcessItem
     )
 {
-    UNLOADED_DLLS_CONTEXT context;
-
-    context.ProcessItem = ProcessItem;
-    context.CapturedEventTrace = NULL;
+    PhReferenceObject(ProcessItem);
 
     DialogBoxParam(
         PluginInstance->DllBase,
         MAKEINTRESOURCE(IDD_UNLOADEDDLLS),
-        ParentWindowHandle,
+        NULL,
         EtpUnloadedDllsDlgProc,
-        (LPARAM)&context
+        (LPARAM)ProcessItem
         );
-
-    if (context.CapturedEventTrace)
-        PhFree(context.CapturedEventTrace);
 }
 
-BOOLEAN EtpRefreshUnloadedDlls(
+NTSTATUS EtpRefreshUnloadedDlls(
     _In_ HWND hwndDlg,
     _In_ PUNLOADED_DLLS_CONTEXT Context
     )
 {
     NTSTATUS status;
-    PULONG elementSize;
-    PULONG elementCount;
-    PVOID eventTrace;
-    HANDLE processHandle = NULL;
-    ULONG eventTraceSize;
+#ifdef _WIN64
+    BOOLEAN isWow64;
+#endif
     ULONG capturedElementSize;
     ULONG capturedElementCount;
-    PVOID capturedEventTracePointer;
     PVOID capturedEventTrace = NULL;
     ULONG i;
     PVOID currentEvent;
-    HWND lvHandle;
 
-    lvHandle = GetDlgItem(hwndDlg, IDC_LIST);
-    ListView_DeleteAllItems(lvHandle);
+#ifdef _WIN64
+    if (!Context->ProcessItem->QueryHandle)
+        return STATUS_FAIL_CHECK;
 
-    RtlGetUnloadEventTraceEx(&elementSize, &elementCount, &eventTrace);
+    if (!NT_SUCCESS(status = PhGetProcessIsWow64(Context->ProcessItem->QueryHandle, &isWow64)))
+        return status;
 
-    if (!NT_SUCCESS(status = PhOpenProcess(&processHandle, PROCESS_VM_READ, Context->ProcessItem->ProcessId)))
-        goto CleanupExit;
+    Context->IsWow64 = isWow64;
 
-    // We have the pointers for the unload event trace information.
-    // Since ntdll is loaded at the same base address across all processes,
-    // we can read the information in.
-
-    if (!NT_SUCCESS(status = NtReadVirtualMemory(
-        processHandle,
-        elementSize,
-        &capturedElementSize,
-        sizeof(ULONG),
-        NULL
-        )))
-        goto CleanupExit;
-
-    if (!NT_SUCCESS(status = NtReadVirtualMemory(
-        processHandle,
-        elementCount,
-        &capturedElementCount,
-        sizeof(ULONG),
-        NULL
-        )))
-        goto CleanupExit;
-
-    if (!NT_SUCCESS(status = NtReadVirtualMemory(
-        processHandle,
-        eventTrace,
-        &capturedEventTracePointer,
-        sizeof(PVOID),
-        NULL
-        )))
-        goto CleanupExit;
-
-    if (!capturedEventTracePointer)
-        goto CleanupExit; // no events
-
-    if (capturedElementCount > 0x4000)
-        capturedElementCount = 0x4000;
-
-    eventTraceSize = capturedElementSize * capturedElementCount;
-
-    capturedEventTrace = PhAllocateSafe(eventTraceSize);
-
-    if (!capturedEventTrace)
+    if (isWow64)
     {
-        status = STATUS_NO_MEMORY;
-        goto CleanupExit;
-    }
+        PPH_STRING eventTraceString;
 
-    if (!NT_SUCCESS(status = NtReadVirtualMemory(
-        processHandle,
-        capturedEventTracePointer,
-        capturedEventTrace,
-        eventTraceSize,
-        NULL
-        )))
-        goto CleanupExit;
+        if (!PhUiConnectToPhSvcEx(hwndDlg, Wow64PhSvcMode, FALSE))
+            return STATUS_FAIL_CHECK;
 
-    currentEvent = capturedEventTrace;
-
-    ExtendedListView_SetRedraw(lvHandle, FALSE);
-
-    for (i = 0; i < capturedElementCount; i++)
-    {
-        PRTL_UNLOAD_EVENT_TRACE rtlEvent = currentEvent;
-        INT lvItemIndex;
-        WCHAR buffer[128];
-        PPH_STRING string;
-        LARGE_INTEGER time;
-        SYSTEMTIME systemTime;
-
-        if (!rtlEvent->BaseAddress)
-            break;
-
-        PhPrintUInt32(buffer, rtlEvent->Sequence);
-        lvItemIndex = PhAddListViewItem(lvHandle, MAXINT, buffer, rtlEvent);
-
-        // Name
-        if (PhCopyStringZ(rtlEvent->ImageName, sizeof(rtlEvent->ImageName) / sizeof(WCHAR),
-            buffer, sizeof(buffer) / sizeof(WCHAR), NULL))
+        if (!NT_SUCCESS(status = CallGetProcessUnloadedDlls(Context->ProcessItem->ProcessId, &eventTraceString)))
         {
-            PhSetListViewSubItem(lvHandle, lvItemIndex, 1, buffer);
+            PhUiDisconnectFromPhSvc();
+            return status;
         }
 
-        // Base Address
-        PhPrintPointer(buffer, rtlEvent->BaseAddress);
-        PhSetListViewSubItem(lvHandle, lvItemIndex, 2, buffer);
+        capturedEventTrace = PhAllocate(sizeof(RTL_UNLOAD_EVENT_TRACE32) * RTL_UNLOAD_EVENT_TRACE_NUMBER);
+        memset(capturedEventTrace, 0, sizeof(RTL_UNLOAD_EVENT_TRACE32) * RTL_UNLOAD_EVENT_TRACE_NUMBER);
 
-        // Size
-        string = PhFormatSize(rtlEvent->SizeOfImage, -1);
-        PhSetListViewSubItem(lvHandle, lvItemIndex, 3, string->Buffer);
-        PhDereferenceObject(string);
+        if (!PhHexStringToBuffer(&eventTraceString->sr, (PUCHAR)capturedEventTrace))
+        {
+            PhUiDisconnectFromPhSvc();
 
-        // Time Stamp
-        RtlSecondsSince1970ToTime(rtlEvent->TimeDateStamp, &time);
-        PhLargeIntegerToLocalSystemTime(&systemTime, &time);
-        string = PhFormatDateTime(&systemTime);
-        PhSetListViewSubItem(lvHandle, lvItemIndex, 4, string->Buffer);
-        PhDereferenceObject(string);
+            PhFree(capturedEventTrace);
 
-        // Checksum
-        PhPrintPointer(buffer, UlongToPtr(rtlEvent->CheckSum));
-        PhSetListViewSubItem(lvHandle, lvItemIndex, 5, buffer);
+            return STATUS_FAIL_CHECK;
+        }
 
-        currentEvent = PTR_ADD_OFFSET(currentEvent, capturedElementSize);
+        PhUiDisconnectFromPhSvc();
+
+        ExtendedListView_SetRedraw(Context->ListViewHandle, FALSE);
+        ListView_DeleteAllItems(Context->ListViewHandle);
+
+        for (i = 0; i < RTL_UNLOAD_EVENT_TRACE_NUMBER; i++)
+        {
+            PRTL_UNLOAD_EVENT_TRACE32 rtlEvent = PTR_ADD_OFFSET(capturedEventTrace, sizeof(RTL_UNLOAD_EVENT_TRACE32) * i);
+            INT lvItemIndex;
+            WCHAR buffer[128];
+            PPH_STRING string;
+            LARGE_INTEGER time;
+            SYSTEMTIME systemTime;
+
+            if (!rtlEvent->BaseAddress)
+                break;
+
+            PhPrintUInt32(buffer, rtlEvent->Sequence);
+            lvItemIndex = PhAddListViewItem(Context->ListViewHandle, MAXINT, buffer, rtlEvent);
+
+            // Name
+            if (PhCopyStringZ(rtlEvent->ImageName, RTL_NUMBER_OF(rtlEvent->ImageName), buffer, RTL_NUMBER_OF(buffer), NULL))
+            {
+                PhSetListViewSubItem(Context->ListViewHandle, lvItemIndex, 1, buffer);
+            }
+
+            // Base Address
+            PhPrintPointer(buffer, (PVOID)(ULONG_PTR)rtlEvent->BaseAddress);
+            PhSetListViewSubItem(Context->ListViewHandle, lvItemIndex, 2, buffer);
+
+            // Size
+            string = PhFormatSize(rtlEvent->SizeOfImage, -1);
+            PhSetListViewSubItem(Context->ListViewHandle, lvItemIndex, 3, string->Buffer);
+            PhDereferenceObject(string);
+
+            // Time Stamp
+            RtlSecondsSince1970ToTime(rtlEvent->TimeDateStamp, &time);
+            PhLargeIntegerToLocalSystemTime(&systemTime, &time);
+            string = PhFormatDateTime(&systemTime);
+            PhSetListViewSubItem(Context->ListViewHandle, lvItemIndex, 4, string->Buffer);
+            PhDereferenceObject(string);
+
+            // Checksum
+            PhPrintPointer(buffer, UlongToPtr(rtlEvent->CheckSum));
+            PhSetListViewSubItem(Context->ListViewHandle, lvItemIndex, 5, buffer);
+        }
+
+        ExtendedListView_SortItems(Context->ListViewHandle);
+        ExtendedListView_SetRedraw(Context->ListViewHandle, TRUE);
+
+        PhDereferenceObject(eventTraceString);
     }
+    else
+    {
+#endif
+        status = PhGetProcessUnloadedDlls(
+            Context->ProcessItem->ProcessId,
+            &capturedEventTrace,
+            &capturedElementSize,
+            &capturedElementCount
+            );
 
-    ExtendedListView_SortItems(lvHandle);
-    ExtendedListView_SetRedraw(lvHandle, TRUE);
+        if (!NT_SUCCESS(status))
+        {
+            PhShowStatus(NULL, L"Unable to retrieve unload event trace information.", status, 0);
+            return FALSE;
+        }
+
+        currentEvent = capturedEventTrace;
+
+        ExtendedListView_SetRedraw(Context->ListViewHandle, FALSE);
+        ListView_DeleteAllItems(Context->ListViewHandle);
+
+        for (i = 0; i < capturedElementCount; i++)
+        {
+            PRTL_UNLOAD_EVENT_TRACE rtlEvent = currentEvent;
+            INT lvItemIndex;
+            WCHAR buffer[128];
+            PPH_STRING string;
+            LARGE_INTEGER time;
+            SYSTEMTIME systemTime;
+
+            if (!rtlEvent->BaseAddress)
+                break;
+
+            PhPrintUInt32(buffer, rtlEvent->Sequence);
+            lvItemIndex = PhAddListViewItem(Context->ListViewHandle, MAXINT, buffer, rtlEvent);
+
+            // Name
+            if (PhCopyStringZ(rtlEvent->ImageName, RTL_NUMBER_OF(rtlEvent->ImageName), buffer, RTL_NUMBER_OF(buffer), NULL))
+            {
+                PhSetListViewSubItem(Context->ListViewHandle, lvItemIndex, 1, buffer);
+            }
+
+            // Base Address
+            PhPrintPointer(buffer, rtlEvent->BaseAddress);
+            PhSetListViewSubItem(Context->ListViewHandle, lvItemIndex, 2, buffer);
+
+            // Size
+            string = PhFormatSize(rtlEvent->SizeOfImage, -1);
+            PhSetListViewSubItem(Context->ListViewHandle, lvItemIndex, 3, string->Buffer);
+            PhDereferenceObject(string);
+
+            // Time Stamp
+            RtlSecondsSince1970ToTime(rtlEvent->TimeDateStamp, &time);
+            PhLargeIntegerToLocalSystemTime(&systemTime, &time);
+            string = PhFormatDateTime(&systemTime);
+            PhSetListViewSubItem(Context->ListViewHandle, lvItemIndex, 4, string->Buffer);
+            PhDereferenceObject(string);
+
+            // Checksum
+            PhPrintPointer(buffer, UlongToPtr(rtlEvent->CheckSum));
+            PhSetListViewSubItem(Context->ListViewHandle, lvItemIndex, 5, buffer);
+
+            currentEvent = PTR_ADD_OFFSET(currentEvent, capturedElementSize);
+        }
+
+        ExtendedListView_SortItems(Context->ListViewHandle);
+        ExtendedListView_SetRedraw(Context->ListViewHandle, TRUE);
+
+#ifdef _WIN64
+    }
+#endif
 
     if (Context->CapturedEventTrace)
         PhFree(Context->CapturedEventTrace);
 
     Context->CapturedEventTrace = capturedEventTrace;
 
-CleanupExit:
-
-    if (processHandle)
-        NtClose(processHandle);
-
-    if (NT_SUCCESS(status))
-    {
-        return TRUE;
-    }
-    else
-    {
-        PhShowStatus(hwndDlg, L"Unable to retrieve unload event trace information", status, 0);
-        return FALSE;
-    }
+    return NT_SUCCESS(status);
 }
 
 static INT NTAPI EtpNumberCompareFunction(
@@ -220,10 +240,24 @@ static INT NTAPI EtpNumberCompareFunction(
     _In_opt_ PVOID Context
     )
 {
-    PRTL_UNLOAD_EVENT_TRACE item1 = Item1;
-    PRTL_UNLOAD_EVENT_TRACE item2 = Item2;
+#ifdef _WIN64
+    PUNLOADED_DLLS_CONTEXT context = Context;
 
-    return uintcmp(item1->Sequence, item2->Sequence);
+    if (context->IsWow64)
+    {
+        PRTL_UNLOAD_EVENT_TRACE32 item1 = Item1;
+        PRTL_UNLOAD_EVENT_TRACE32 item2 = Item2;
+
+        return uintcmp(item1->Sequence, item2->Sequence);
+    }
+    else
+#endif
+    {
+        PRTL_UNLOAD_EVENT_TRACE item1 = Item1;
+        PRTL_UNLOAD_EVENT_TRACE item2 = Item2;
+
+        return uintcmp(item1->Sequence, item2->Sequence);
+    }
 }
 
 static INT NTAPI EtpBaseAddressCompareFunction(
@@ -232,10 +266,24 @@ static INT NTAPI EtpBaseAddressCompareFunction(
     _In_opt_ PVOID Context
     )
 {
-    PRTL_UNLOAD_EVENT_TRACE item1 = Item1;
-    PRTL_UNLOAD_EVENT_TRACE item2 = Item2;
+#ifdef _WIN64
+    PUNLOADED_DLLS_CONTEXT context = Context;
 
-    return uintptrcmp((ULONG_PTR)item1->BaseAddress, (ULONG_PTR)item2->BaseAddress);
+    if (context->IsWow64)
+    {
+        PRTL_UNLOAD_EVENT_TRACE32 item1 = Item1;
+        PRTL_UNLOAD_EVENT_TRACE32 item2 = Item2;
+
+        return uintptrcmp((ULONG_PTR)item1->BaseAddress, (ULONG_PTR)item2->BaseAddress);
+    }
+    else
+#endif
+    {
+        PRTL_UNLOAD_EVENT_TRACE item1 = Item1;
+        PRTL_UNLOAD_EVENT_TRACE item2 = Item2;
+
+        return uintptrcmp((ULONG_PTR)item1->BaseAddress, (ULONG_PTR)item2->BaseAddress);
+    }
 }
 
 static INT NTAPI EtpSizeCompareFunction(
@@ -244,10 +292,24 @@ static INT NTAPI EtpSizeCompareFunction(
     _In_opt_ PVOID Context
     )
 {
-    PRTL_UNLOAD_EVENT_TRACE item1 = Item1;
-    PRTL_UNLOAD_EVENT_TRACE item2 = Item2;
+#ifdef _WIN64
+    PUNLOADED_DLLS_CONTEXT context = Context;
 
-    return uintptrcmp(item1->SizeOfImage, item2->SizeOfImage);
+    if (context->IsWow64)
+    {
+        PRTL_UNLOAD_EVENT_TRACE32 item1 = Item1;
+        PRTL_UNLOAD_EVENT_TRACE32 item2 = Item2;
+
+        return uintptrcmp(item1->SizeOfImage, item2->SizeOfImage);
+    }
+    else
+#endif
+    {
+        PRTL_UNLOAD_EVENT_TRACE item1 = Item1;
+        PRTL_UNLOAD_EVENT_TRACE item2 = Item2;
+
+        return uintptrcmp(item1->SizeOfImage, item2->SizeOfImage);
+    }
 }
 
 static INT NTAPI EtpTimeStampCompareFunction(
@@ -256,10 +318,24 @@ static INT NTAPI EtpTimeStampCompareFunction(
     _In_opt_ PVOID Context
     )
 {
-    PRTL_UNLOAD_EVENT_TRACE item1 = Item1;
-    PRTL_UNLOAD_EVENT_TRACE item2 = Item2;
+#ifdef _WIN64
+    PUNLOADED_DLLS_CONTEXT context = Context;
 
-    return uintcmp(item1->TimeDateStamp, item2->TimeDateStamp);
+    if (context->IsWow64)
+    {
+        PRTL_UNLOAD_EVENT_TRACE32 item1 = Item1;
+        PRTL_UNLOAD_EVENT_TRACE32 item2 = Item2;
+
+        return uintcmp(item1->TimeDateStamp, item2->TimeDateStamp);
+    }
+    else
+#endif
+    {
+        PRTL_UNLOAD_EVENT_TRACE item1 = Item1;
+        PRTL_UNLOAD_EVENT_TRACE item2 = Item2;
+
+        return uintcmp(item1->TimeDateStamp, item2->TimeDateStamp);
+    }
 }
 
 static INT NTAPI EtpCheckSumCompareFunction(
@@ -268,10 +344,24 @@ static INT NTAPI EtpCheckSumCompareFunction(
     _In_opt_ PVOID Context
     )
 {
-    PRTL_UNLOAD_EVENT_TRACE item1 = Item1;
-    PRTL_UNLOAD_EVENT_TRACE item2 = Item2;
+#ifdef _WIN64
+    PUNLOADED_DLLS_CONTEXT context = Context;
 
-    return uintcmp(item1->CheckSum, item2->CheckSum);
+    if (context->IsWow64)
+    {
+        PRTL_UNLOAD_EVENT_TRACE32 item1 = Item1;
+        PRTL_UNLOAD_EVENT_TRACE32 item2 = Item2;
+
+        return uintcmp(item1->CheckSum, item2->CheckSum);
+    }
+    else
+#endif
+    {
+        PRTL_UNLOAD_EVENT_TRACE item1 = Item1;
+        PRTL_UNLOAD_EVENT_TRACE item2 = Item2;
+
+        return uintcmp(item1->CheckSum, item2->CheckSum);
+    }
 }
 
 INT_PTR CALLBACK EtpUnloadedDllsDlgProc(
@@ -285,15 +375,17 @@ INT_PTR CALLBACK EtpUnloadedDllsDlgProc(
 
     if (uMsg == WM_INITDIALOG)
     {
-        context = (PUNLOADED_DLLS_CONTEXT)lParam;
-        SetProp(hwndDlg, L"Context", (HANDLE)context);
+        context = PhAllocateZero(sizeof(UNLOADED_DLLS_CONTEXT));
+        context->ProcessItem = (PPH_PROCESS_ITEM)lParam;
+
+        PhSetWindowContext(hwndDlg, PH_WINDOW_CONTEXT_DEFAULT, context);
     }
     else
     {
-        context = (PUNLOADED_DLLS_CONTEXT)GetProp(hwndDlg, L"Context");
+        context = PhGetWindowContext(hwndDlg, PH_WINDOW_CONTEXT_DEFAULT);
 
         if (uMsg == WM_DESTROY)
-            RemoveProp(hwndDlg, L"Context");
+            PhRemoveWindowContext(hwndDlg, PH_WINDOW_CONTEXT_DEFAULT);
     }
 
     if (!context)
@@ -303,9 +395,11 @@ INT_PTR CALLBACK EtpUnloadedDllsDlgProc(
     {
     case WM_INITDIALOG:
         {
+            NTSTATUS status;
             HWND lvHandle;
 
-            PhCenterWindow(hwndDlg, GetParent(hwndDlg));
+            SendMessage(hwndDlg, WM_SETICON, ICON_SMALL, (LPARAM)PH_LOAD_SHARED_ICON_SMALL(PhInstanceHandle, MAKEINTRESOURCE(PHAPP_IDI_PROCESSHACKER)));
+            SendMessage(hwndDlg, WM_SETICON, ICON_BIG, (LPARAM)PH_LOAD_SHARED_ICON_LARGE(PhInstanceHandle, MAKEINTRESOURCE(PHAPP_IDI_PROCESSHACKER)));
 
             context->ListViewHandle = lvHandle = GetDlgItem(hwndDlg, IDC_LIST);
 
@@ -324,17 +418,47 @@ INT_PTR CALLBACK EtpUnloadedDllsDlgProc(
             ExtendedListView_SetCompareFunction(lvHandle, 3, EtpSizeCompareFunction);
             ExtendedListView_SetCompareFunction(lvHandle, 4, EtpTimeStampCompareFunction);
             ExtendedListView_SetCompareFunction(lvHandle, 5, EtpCheckSumCompareFunction);
+            ExtendedListView_SetContext(lvHandle, context);
+            PhLoadListViewColumnsFromSetting(SETTING_NAME_UNLOADED_COLUMNS, lvHandle);
 
-            if (!EtpRefreshUnloadedDlls(hwndDlg, context))
+            PhInitializeLayoutManager(&context->LayoutManager, hwndDlg);
+            PhAddLayoutItem(&context->LayoutManager, lvHandle, NULL, PH_ANCHOR_ALL);
+            PhAddLayoutItem(&context->LayoutManager, GetDlgItem(hwndDlg, IDC_REFRESH), NULL, PH_ANCHOR_LEFT | PH_ANCHOR_BOTTOM);
+            PhAddLayoutItem(&context->LayoutManager, GetDlgItem(hwndDlg, IDOK), NULL, PH_ANCHOR_RIGHT | PH_ANCHOR_BOTTOM);
+
+            if (PhGetIntegerPairSetting(SETTING_NAME_UNLOADED_WINDOW_POSITION).X != 0)
+                PhLoadWindowPlacementFromSetting(SETTING_NAME_UNLOADED_WINDOW_POSITION, SETTING_NAME_UNLOADED_WINDOW_SIZE, hwndDlg);
+            else
+                PhCenterWindow(hwndDlg, PhMainWndHandle); // GetParent(hwndDlg)
+
+            if (!NT_SUCCESS(status = EtpRefreshUnloadedDlls(hwndDlg, context)))
             {
+                PhShowStatus(NULL, L"Unable to retrieve unload event trace information.", status, 0);
                 EndDialog(hwndDlg, IDCANCEL);
                 return FALSE;
             }
+
+            PhInitializeWindowTheme(hwndDlg, !!PhGetIntegerSetting(L"EnableThemeSupport"));
+        }
+        break;
+    case WM_DESTROY:
+        {
+            PhSaveListViewColumnsToSetting(SETTING_NAME_UNLOADED_COLUMNS, context->ListViewHandle);
+            PhSaveWindowPlacementToSetting(SETTING_NAME_UNLOADED_WINDOW_POSITION, SETTING_NAME_UNLOADED_WINDOW_SIZE, hwndDlg);
+
+            PhDeleteLayoutManager(&context->LayoutManager);
+
+            if (context->CapturedEventTrace)
+                PhFree(context->CapturedEventTrace);
+
+            PhDereferenceObject(context->ProcessItem);
+
+            PhFree(context);
         }
         break;
     case WM_COMMAND:
         {
-            switch (LOWORD(wParam))
+            switch (GET_WM_COMMAND_ID(wParam, lParam))
             {
             case IDCANCEL:
             case IDOK:
@@ -349,6 +473,11 @@ INT_PTR CALLBACK EtpUnloadedDllsDlgProc(
     case WM_NOTIFY:
         {
             PhHandleListViewNotifyForCopy(lParam, context->ListViewHandle);
+        }
+        break;
+    case WM_SIZE:
+        {
+            PhLayoutManagerLayout(&context->LayoutManager);
         }
         break;
     }

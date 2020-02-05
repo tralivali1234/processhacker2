@@ -38,10 +38,12 @@ typedef enum _OBJECT_INFORMATION_CLASS
     MaxObjectInfoClass
 } OBJECT_INFORMATION_CLASS;
 #else
+#define ObjectBasicInformation 0
 #define ObjectNameInformation 1
 #define ObjectTypesInformation 3
 #define ObjectHandleFlagInformation 4
 #define ObjectSessionInformation 5
+#define ObjectSessionObjectInformation 6
 #endif
 
 typedef struct _OBJECT_BASIC_INFORMATION
@@ -112,7 +114,7 @@ NTSYSCALLAPI
 NTSTATUS
 NTAPI
 NtQueryObject(
-    _In_ HANDLE Handle,
+    _In_opt_ HANDLE Handle,
     _In_ OBJECT_INFORMATION_CLASS ObjectInformationClass,
     _Out_writes_bytes_opt_(ObjectInformationLength) PVOID ObjectInformation,
     _In_ ULONG ObjectInformationLength,

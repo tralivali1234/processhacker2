@@ -5,6 +5,7 @@ typedef struct _PH_MEMORY_RESULT
 {
     LONG RefCount;
     PVOID Address;
+    PVOID BaseAddress;
     SIZE_T Length;
     PH_STRINGREF Display;
 } PH_MEMORY_RESULT, *PPH_MEMORY_RESULT;
@@ -28,8 +29,17 @@ typedef struct _PH_MEMORY_STRING_OPTIONS
     PH_MEMORY_SEARCH_OPTIONS Header;
 
     ULONG MinimumLength;
-    BOOLEAN DetectUnicode;
     ULONG MemoryTypeMask;
+    union
+    {
+        BOOLEAN Flags;
+        struct
+        {
+            BOOLEAN DetectUnicode : 1;
+            BOOLEAN ExtendedUnicode : 1;
+            BOOLEAN Spare : 6;
+        };
+    };
 } PH_MEMORY_STRING_OPTIONS, *PPH_MEMORY_STRING_OPTIONS;
 
 PVOID PhAllocateForMemorySearch(
@@ -42,6 +52,7 @@ VOID PhFreeForMemorySearch(
 
 PVOID PhCreateMemoryResult(
     _In_ PVOID Address,
+    _In_ PVOID BaseAddress,
     _In_ SIZE_T Length
     );
 

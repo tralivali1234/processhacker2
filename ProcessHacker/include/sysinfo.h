@@ -128,8 +128,9 @@ typedef struct _PH_SYSINFO_SECTION
     HWND DialogHandle;
     HWND PanelHandle;
     ULONG PanelId;
-    WNDPROC GraphOldWndProc;
-    WNDPROC PanelOldWndProc;
+
+    WNDPROC GraphWindowProc;
+    WNDPROC PanelWindowProc;
 // begin_phapppub
 } PH_SYSINFO_SECTION, *PPH_SYSINFO_SECTION;
 // end_phapppub
