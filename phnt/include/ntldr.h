@@ -1,27 +1,11 @@
 /*
- * Process Hacker -
- *   Loader support functions
+ * Loader support functions
  *
- * This file is part of Process Hacker.
- *
- * Process Hacker is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * Process Hacker is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with Process Hacker.  If not, see <http://www.gnu.org/licenses/>.
+ * This file is part of System Informer.
  */
 
 #ifndef _NTLDR_H
 #define _NTLDR_H
-
-#if (PHNT_MODE != PHNT_MODE_KERNEL)
 
 // DLLs
 
@@ -102,50 +86,64 @@ typedef enum _LDR_DLL_LOAD_REASON
     LoadReasonDynamicLoad,
     LoadReasonAsImageLoad,
     LoadReasonAsDataLoad,
-    LoadReasonEnclavePrimary, // REDSTONE3
+    LoadReasonEnclavePrimary, // since REDSTONE3
     LoadReasonEnclaveDependency,
+    LoadReasonPatchImage, // since WIN11
     LoadReasonUnknown = -1
 } LDR_DLL_LOAD_REASON, *PLDR_DLL_LOAD_REASON;
 
+typedef enum _LDR_HOT_PATCH_STATE
+{
+    LdrHotPatchBaseImage,
+    LdrHotPatchNotApplied,
+    LdrHotPatchAppliedReverse,
+    LdrHotPatchAppliedForward,
+    LdrHotPatchFailedToPatch,
+    LdrHotPatchStateMax,
+} LDR_HOT_PATCH_STATE, *PLDR_HOT_PATCH_STATE;
+
+typedef struct _ACTIVATION_CONTEXT *PACTIVATION_CONTEXT;
+typedef struct _LDRP_LOAD_CONTEXT *PLDRP_LOAD_CONTEXT;
+
+// LDR_DATA_TABLE_ENTRY->Flags
 #define LDRP_PACKAGED_BINARY 0x00000001
-#define LDRP_STATIC_LINK 0x00000002
+#define LDRP_MARKED_FOR_REMOVAL 0x00000002
 #define LDRP_IMAGE_DLL 0x00000004
+#define LDRP_LOAD_NOTIFICATIONS_SENT 0x00000008
+#define LDRP_TELEMETRY_ENTRY_PROCESSED 0x00000010
+#define LDRP_PROCESS_STATIC_IMPORT 0x00000020
+#define LDRP_IN_LEGACY_LISTS 0x00000040
+#define LDRP_IN_INDEXES 0x00000080
+#define LDRP_SHIM_DLL 0x00000100
+#define LDRP_IN_EXCEPTION_TABLE 0x00000200
 #define LDRP_LOAD_IN_PROGRESS 0x00001000
-#define LDRP_UNLOAD_IN_PROGRESS 0x00002000
+#define LDRP_LOAD_CONFIG_PROCESSED 0x00002000
 #define LDRP_ENTRY_PROCESSED 0x00004000
-#define LDRP_ENTRY_INSERTED 0x00008000
-#define LDRP_CURRENT_LOAD 0x00010000
-#define LDRP_FAILED_BUILTIN_LOAD 0x00020000
+#define LDRP_PROTECT_DELAY_LOAD 0x00008000
 #define LDRP_DONT_CALL_FOR_THREADS 0x00040000
 #define LDRP_PROCESS_ATTACH_CALLED 0x00080000
-#define LDRP_DEBUG_SYMBOLS_LOADED 0x00100000
-#define LDRP_IMAGE_NOT_AT_BASE 0x00200000 // Vista and below
+#define LDRP_PROCESS_ATTACH_FAILED 0x00100000
+#define LDRP_COR_DEFERRED_VALIDATE 0x00200000
 #define LDRP_COR_IMAGE 0x00400000
-#define LDRP_DONT_RELOCATE 0x00800000 // LDR_COR_OWNS_UNMAP
-#define LDRP_SYSTEM_MAPPED 0x01000000
-#define LDRP_IMAGE_VERIFYING 0x02000000
-#define LDRP_DRIVER_DEPENDENT_DLL 0x04000000
-#define LDRP_ENTRY_NATIVE 0x08000000
+#define LDRP_DONT_RELOCATE 0x00800000
+#define LDRP_COR_IL_ONLY 0x01000000
+#define LDRP_CHPE_IMAGE 0x02000000
+#define LDRP_CHPE_EMULATOR_IMAGE 0x04000000
 #define LDRP_REDIRECTED 0x10000000
-#define LDRP_NON_PAGED_DEBUG_INFO 0x20000000
-#define LDRP_MM_LOADED 0x40000000
 #define LDRP_COMPAT_DATABASE_PROCESSED 0x80000000
 
 #define LDR_DATA_TABLE_ENTRY_SIZE_WINXP FIELD_OFFSET(LDR_DATA_TABLE_ENTRY, DdagNode)
 #define LDR_DATA_TABLE_ENTRY_SIZE_WIN7 FIELD_OFFSET(LDR_DATA_TABLE_ENTRY, BaseNameHashValue)
 #define LDR_DATA_TABLE_ENTRY_SIZE_WIN8 FIELD_OFFSET(LDR_DATA_TABLE_ENTRY, ImplicitPathOptions)
-#define LDR_DATA_TABLE_ENTRY_SIZE_WIN10 sizeof(LDR_DATA_TABLE_ENTRY)
+#define LDR_DATA_TABLE_ENTRY_SIZE_WIN10 FIELD_OFFSET(LDR_DATA_TABLE_ENTRY, SigningLevel)
+#define LDR_DATA_TABLE_ENTRY_SIZE_WIN11 sizeof(LDR_DATA_TABLE_ENTRY)
 
 // symbols
 typedef struct _LDR_DATA_TABLE_ENTRY
 {
     LIST_ENTRY InLoadOrderLinks;
     LIST_ENTRY InMemoryOrderLinks;
-    union
-    {
-        LIST_ENTRY InInitializationOrderLinks;
-        LIST_ENTRY InProgressLinks;
-    };
+    LIST_ENTRY InInitializationOrderLinks;
     PVOID DllBase;
     PLDR_INIT_ROUTINE EntryPoint;
     ULONG SizeOfImage;
@@ -181,7 +179,8 @@ typedef struct _LDR_DATA_TABLE_ENTRY
             ULONG DontRelocate : 1;
             ULONG CorILOnly : 1;
             ULONG ChpeImage : 1;
-            ULONG ReservedFlags5 : 2;
+            ULONG ChpeEmulatorImage : 1;
+            ULONG ReservedFlags5 : 1;
             ULONG Redirected : 1;
             ULONG ReservedFlags6 : 2;
             ULONG CompatDatabaseProcessed : 1;
@@ -191,11 +190,11 @@ typedef struct _LDR_DATA_TABLE_ENTRY
     USHORT TlsIndex;
     LIST_ENTRY HashLinks;
     ULONG TimeDateStamp;
-    struct _ACTIVATION_CONTEXT *EntryPointActivationContext;
+    PACTIVATION_CONTEXT EntryPointActivationContext;
     PVOID Lock; // RtlAcquireSRWLockExclusive
     PLDR_DDAG_NODE DdagNode;
     LIST_ENTRY NodeModuleLink;
-    struct _LDRP_LOAD_CONTEXT *LoadContext;
+    PLDRP_LOAD_CONTEXT LoadContext;
     PVOID ParentDllBase;
     PVOID SwitchBackContext;
     RTL_BALANCED_NODE BaseAddressIndexNode;
@@ -203,16 +202,25 @@ typedef struct _LDR_DATA_TABLE_ENTRY
     ULONG_PTR OriginalBase;
     LARGE_INTEGER LoadTime;
     ULONG BaseNameHashValue;
-    LDR_DLL_LOAD_REASON LoadReason;
+    LDR_DLL_LOAD_REASON LoadReason; // since WIN8
     ULONG ImplicitPathOptions;
-    ULONG ReferenceCount;
+    ULONG ReferenceCount; // since WIN10
     ULONG DependentLoadFlags;
     UCHAR SigningLevel; // since REDSTONE2
+    ULONG CheckSum; // since 22H1
+    PVOID ActivePatchImageBase;
+    LDR_HOT_PATCH_STATE HotPatchState;
 } LDR_DATA_TABLE_ENTRY, *PLDR_DATA_TABLE_ENTRY;
 
 #define LDR_IS_DATAFILE(DllHandle) (((ULONG_PTR)(DllHandle)) & (ULONG_PTR)1)
 #define LDR_IS_IMAGEMAPPING(DllHandle) (((ULONG_PTR)(DllHandle)) & (ULONG_PTR)2)
 #define LDR_IS_RESOURCE(DllHandle) (LDR_IS_IMAGEMAPPING(DllHandle) || LDR_IS_DATAFILE(DllHandle))
+#define LDR_MAPPEDVIEW_TO_DATAFILE(BaseAddress) ((PVOID)(((ULONG_PTR)(BaseAddress)) | (ULONG_PTR)1))
+#define LDR_MAPPEDVIEW_TO_IMAGEMAPPING(BaseAddress) ((PVOID)(((ULONG_PTR)(BaseAddress)) | (ULONG_PTR)2))
+#define LDR_DATAFILE_TO_MAPPEDVIEW(DllHandle) ((PVOID)(((ULONG_PTR)(DllHandle)) & ~(ULONG_PTR)1))
+#define LDR_IMAGEMAPPING_TO_MAPPEDVIEW(DllHandle) ((PVOID)(((ULONG_PTR)(DllHandle)) & ~(ULONG_PTR)2))
+
+#if (PHNT_MODE != PHNT_MODE_KERNEL)
 
 NTSYSAPI
 NTSTATUS
@@ -252,7 +260,7 @@ LdrGetDllHandleEx(
     _In_opt_ PWSTR DllPath,
     _In_opt_ PULONG DllCharacteristics,
     _In_ PUNICODE_STRING DllName,
-    _Out_opt_ PVOID *DllHandle
+    _Out_ PVOID *DllHandle
     );
 
 #if (PHNT_VERSION >= PHNT_WIN7)
@@ -286,6 +294,17 @@ NTAPI
 LdrGetDllFullName(
     _In_ PVOID DllHandle,
     _Out_ PUNICODE_STRING FullDllName
+    );
+
+// rev
+NTSYSAPI
+NTSTATUS
+NTAPI
+LdrGetDllPath(
+    _In_  PCWSTR DllName,
+    _In_  ULONG  Flags, // LOAD_LIBRARY_SEARCH_*
+    _Out_ PWSTR* DllPath,
+    _Out_ PWSTR* SearchPaths
     );
 
 // rev
@@ -379,7 +398,7 @@ NTAPI
 LdrLockLoaderLock(
     _In_ ULONG Flags,
     _Out_opt_ ULONG *Disposition,
-    _Out_ PVOID *Cookie
+    _Out_opt_ PVOID *Cookie
     );
 
 #define LDR_UNLOCK_LOADER_LOCK_FLAG_RAISE_ON_ERRORS 0x00000001
@@ -389,7 +408,7 @@ NTSTATUS
 NTAPI
 LdrUnlockLoaderLock(
     _In_ ULONG Flags,
-    _Inout_ PVOID Cookie
+    _In_opt_ PVOID Cookie
     );
 
 NTSYSAPI
@@ -397,7 +416,7 @@ NTSTATUS
 NTAPI
 LdrRelocateImage(
     _In_ PVOID NewBase,
-    _In_ PSTR LoaderName,
+    _In_opt_ PSTR LoaderName,
     _In_ NTSTATUS Success,
     _In_ NTSTATUS Conflict,
     _In_ NTSTATUS Invalid
@@ -408,8 +427,8 @@ NTSTATUS
 NTAPI
 LdrRelocateImageWithBias(
     _In_ PVOID NewBase,
-    _In_ LONGLONG Bias,
-    _In_ PSTR LoaderName,
+    _In_opt_ LONGLONG Bias,
+    _In_opt_ PSTR LoaderName,
     _In_ NTSTATUS Success,
     _In_ NTSTATUS Conflict,
     _In_ NTSTATUS Invalid
@@ -424,6 +443,19 @@ LdrProcessRelocationBlock(
     _In_ PUSHORT NextOffset,
     _In_ LONG_PTR Diff
     );
+
+#if (PHNT_VERSION >= PHNT_WIN8)
+NTSYSAPI
+PIMAGE_BASE_RELOCATION
+NTAPI
+LdrProcessRelocationBlockEx(
+    _In_ ULONG Machine, // IMAGE_FILE_MACHINE_AMD64|IMAGE_FILE_MACHINE_ARM|IMAGE_FILE_MACHINE_THUMB|IMAGE_FILE_MACHINE_ARMNT
+    _In_ ULONG_PTR VA,
+    _In_ ULONG SizeOfBlock,
+    _In_ PUSHORT NextOffset,
+    _In_ LONG_PTR Diff
+    );
+#endif
 
 NTSYSAPI
 BOOLEAN
@@ -542,7 +574,7 @@ NTAPI
 LdrRegisterDllNotification(
     _In_ ULONG Flags,
     _In_ PLDR_DLL_NOTIFICATION_FUNCTION NotificationFunction,
-    _In_ PVOID Context,
+    _In_opt_ PVOID Context,
     _Out_ PVOID *Cookie
     );
 
@@ -565,17 +597,36 @@ LdrStandardizeSystemPath(
     _In_ PUNICODE_STRING SystemPath
     );
 
+#if (PHNT_VERSION >= PHNT_WINBLUE)
+typedef struct _LDR_FAILURE_DATA
+{
+    NTSTATUS Status;
+    WCHAR DllName[0x20];
+    WCHAR AdditionalInfo[0x20];
+} LDR_FAILURE_DATA, *PLDR_FAILURE_DATA;
+
+NTSYSAPI
+PLDR_FAILURE_DATA
+NTAPI
+LdrGetFailureData(
+    VOID
+    );
+#endif
+
 // private
 typedef struct _PS_MITIGATION_OPTIONS_MAP
 {
-    ULONG_PTR Map[2];
+    ULONG_PTR Map[3]; // 2 < 20H1
 } PS_MITIGATION_OPTIONS_MAP, *PPS_MITIGATION_OPTIONS_MAP;
 
 // private
 typedef struct _PS_MITIGATION_AUDIT_OPTIONS_MAP
 {
-    ULONG_PTR Map[2];
+    ULONG_PTR Map[3]; // 2 < 20H1
 } PS_MITIGATION_AUDIT_OPTIONS_MAP, *PPS_MITIGATION_AUDIT_OPTIONS_MAP;
+
+#define PS_SYSTEM_DLL_INIT_BLOCK_V1 0x0F0
+#define PS_SYSTEM_DLL_INIT_BLOCK_V2 0x128
 
 // private
 typedef struct _PS_SYSTEM_DLL_INIT_BLOCK
@@ -583,7 +634,7 @@ typedef struct _PS_SYSTEM_DLL_INIT_BLOCK
     ULONG Size;
     ULONG_PTR SystemDllWowRelocation;
     ULONG_PTR SystemDllNativeRelocation;
-    ULONG_PTR Wow64SharedInformation[16];
+    ULONG_PTR Wow64SharedInformation[16]; // use WOW64_SHARED_INFORMATION as index
     ULONG RngData;
     union
     {
@@ -600,16 +651,18 @@ typedef struct _PS_SYSTEM_DLL_INIT_BLOCK
     ULONG_PTR Wow64CfgBitMap;
     ULONG_PTR Wow64CfgBitMapSize;
     PS_MITIGATION_AUDIT_OPTIONS_MAP MitigationAuditOptionsMap; // REDSTONE3
+    ULONG_PTR ScpCfgCheckFunction; // since 24H2
+    ULONG_PTR ScpCfgCheckESFunction;
+    ULONG_PTR ScpCfgDispatchFunction;
+    ULONG_PTR ScpCfgDispatchESFunction;
+    ULONG_PTR ScpArm64EcCallCheck;
+    ULONG_PTR ScpArm64EcCfgCheckFunction;
+    ULONG_PTR ScpArm64EcCfgCheckESFunction;
 } PS_SYSTEM_DLL_INIT_BLOCK, *PPS_SYSTEM_DLL_INIT_BLOCK;
 
-#if (PHNT_VERSION >= PHNT_THRESHOLD)
 // rev
-NTSYSAPI
-PPS_SYSTEM_DLL_INIT_BLOCK
-NTAPI
-LdrSystemDllInitBlock(
-    VOID
-    );
+#if (PHNT_VERSION >= PHNT_THRESHOLD)
+NTSYSAPI PS_SYSTEM_DLL_INIT_BLOCK LdrSystemDllInitBlock;
 #endif
 
 // Load as data table
@@ -624,7 +677,8 @@ LdrAddLoadAsDataTable(
     _In_ PVOID Module,
     _In_ PWSTR FilePath,
     _In_ SIZE_T Size,
-    _In_ HANDLE Handle
+    _In_ HANDLE Handle,
+    _In_opt_ PACTIVATION_CONTEXT ActCtx
     );
 
 // private
@@ -650,12 +704,12 @@ LdrGetFileNameFromLoadAsDataTable(
 #endif
 
 NTSYSAPI
-NTSTATUS 
-NTAPI 
+NTSTATUS
+NTAPI
 LdrDisableThreadCalloutsForDll(
     _In_ PVOID DllImageBase
     );
-    
+
 // Resources
 
 NTSYSAPI
@@ -693,6 +747,17 @@ LdrFindResource_U(
 NTSYSAPI
 NTSTATUS
 NTAPI
+LdrFindResourceEx_U(
+    _In_ ULONG Flags,
+    _In_ PVOID DllHandle,
+    _In_ PLDR_RESOURCE_INFO ResourceInfo,
+    _In_ ULONG Level,
+    _Out_ PIMAGE_RESOURCE_DATA_ENTRY *ResourceDataEntry
+    );
+
+NTSYSAPI
+NTSTATUS
+NTAPI
 LdrFindResourceDirectory_U(
     _In_ PVOID DllHandle,
     _In_ PLDR_RESOURCE_INFO ResourceInfo,
@@ -700,7 +765,7 @@ LdrFindResourceDirectory_U(
     _Out_ PIMAGE_RESOURCE_DIRECTORY *ResourceDirectory
     );
 
-// private 
+// private
 typedef struct _LDR_ENUM_RESOURCE_ENTRY
 {
     union
@@ -719,7 +784,7 @@ typedef struct _LDR_ENUM_RESOURCE_ENTRY
 } LDR_ENUM_RESOURCE_ENTRY, *PLDR_ENUM_RESOURCE_ENTRY;
 
 #define NAME_FROM_RESOURCE_ENTRY(RootDirectory, Entry) \
-    ((Entry)->NameIsString ? (ULONG_PTR)PTR_ADD_OFFSET((RootDirectory), (Entry)->NameOffset) : (Entry)->Id)
+    ((Entry)->NameIsString ? (ULONG_PTR)((ULONG_PTR)(RootDirectory) + (ULONG_PTR)((Entry)->NameOffset)) : (Entry)->Id)
 
 NTSYSAPI
 NTSTATUS
@@ -740,13 +805,53 @@ LdrFindEntryForAddress(
     _Out_ PLDR_DATA_TABLE_ENTRY *Entry
     );
 
+// rev
+NTSYSAPI
+NTSTATUS
+NTAPI
+LdrLoadAlternateResourceModule(
+    _In_ PVOID DllHandle,
+    _Out_ PVOID *ResourceDllBase,
+    _Out_opt_ ULONG_PTR *ResourceOffset,
+    _In_ ULONG Flags
+    );
+
+// rev
+NTSYSAPI
+NTSTATUS
+NTAPI
+LdrLoadAlternateResourceModuleEx(
+    _In_ PVOID DllHandle,
+    _In_ LANGID LanguageId,
+    _Out_ PVOID *ResourceDllBase,
+    _Out_opt_ ULONG_PTR *ResourceOffset,
+    _In_ ULONG Flags
+    );
+
+// rev
+NTSYSAPI
+BOOLEAN
+NTAPI
+LdrUnloadAlternateResourceModule(
+    _In_ PVOID DllHandle
+    );
+
+// rev
+NTSYSAPI
+BOOLEAN
+NTAPI
+LdrUnloadAlternateResourceModuleEx(
+    _In_ PVOID DllHandle,
+    _In_ ULONG Flags
+    );
+
 #endif // (PHNT_MODE != PHNT_MODE_KERNEL)
 
 // Module information
 
 typedef struct _RTL_PROCESS_MODULE_INFORMATION
 {
-    HANDLE Section;
+    PVOID Section;
     PVOID MappedBase;
     PVOID ImageBase;
     ULONG ImageSize;
@@ -761,14 +866,30 @@ typedef struct _RTL_PROCESS_MODULE_INFORMATION
 typedef struct _RTL_PROCESS_MODULES
 {
     ULONG NumberOfModules;
-    RTL_PROCESS_MODULE_INFORMATION Modules[1];
+    _Field_size_(NumberOfModules) RTL_PROCESS_MODULE_INFORMATION Modules[1];
 } RTL_PROCESS_MODULES, *PRTL_PROCESS_MODULES;
 
 // private
 typedef struct _RTL_PROCESS_MODULE_INFORMATION_EX
 {
     USHORT NextOffset;
-    RTL_PROCESS_MODULE_INFORMATION BaseInfo;
+    union
+    {
+        RTL_PROCESS_MODULE_INFORMATION BaseInfo;
+        struct
+        {
+            PVOID Section;
+            PVOID MappedBase;
+            PVOID ImageBase;
+            ULONG ImageSize;
+            ULONG Flags;
+            USHORT LoadOrderIndex;
+            USHORT InitOrderIndex;
+            USHORT LoadCount;
+            USHORT OffsetToFileName;
+            UCHAR FullPathName[256];
+        };
+    };
     ULONG ImageChecksum;
     ULONG TimeDateStamp;
     PVOID DefaultBase;
@@ -786,8 +907,8 @@ LdrQueryProcessModuleInformation(
     );
 
 typedef VOID (NTAPI *PLDR_ENUM_CALLBACK)(
-    _In_ PLDR_DATA_TABLE_ENTRY ModuleInformation, 
-    _In_ PVOID Parameter, 
+    _In_ PLDR_DATA_TABLE_ENTRY ModuleInformation,
+    _In_ PVOID Parameter,
     _Out_ BOOLEAN *Stop
     );
 
@@ -879,10 +1000,24 @@ typedef PVOID (NTAPI *PDELAYLOAD_FAILURE_DLL_CALLBACK)(
 // rev
 typedef PVOID (NTAPI *PDELAYLOAD_FAILURE_SYSTEM_ROUTINE)(
     _In_ PCSTR DllName,
-    _In_ PCSTR ProcName
+    _In_ PCSTR ProcedureName
     );
 
-// rev
+#if (PHNT_VERSION >= PHNT_THRESHOLD)
+// rev from QueryOptionalDelayLoadedAPI
+NTSYSAPI
+NTSTATUS
+NTAPI
+LdrQueryOptionalDelayLoadedAPI(
+    _In_ PVOID ParentModuleBase,
+    _In_ PCSTR DllName,
+    _In_ PCSTR ProcedureName,
+    _Reserved_ ULONG Flags
+    );
+#endif
+
+#if (PHNT_VERSION >= PHNT_WIN8)
+// rev from ResolveDelayLoadedAPI
 NTSYSAPI
 PVOID
 NTAPI
@@ -895,17 +1030,17 @@ LdrResolveDelayLoadedAPI(
     _Reserved_ ULONG Flags
     );
 
-// rev
+// rev from ResolveDelayLoadsFromDll
 NTSYSAPI
 NTSTATUS
 NTAPI
 LdrResolveDelayLoadsFromDll(
-    _In_ PVOID ParentBase,
+    _In_ PVOID ParentModuleBase,
     _In_ PCSTR TargetDllName,
     _Reserved_ ULONG Flags
     );
 
-// rev
+// rev from SetDefaultDllDirectories
 NTSYSAPI
 NTSTATUS
 NTAPI
@@ -913,22 +1048,43 @@ LdrSetDefaultDllDirectories(
     _In_ ULONG DirectoryFlags
     );
 
-// rev
+// rev from AddDllDirectory
 NTSYSAPI
 NTSTATUS
+NTAPI
+LdrAddDllDirectory(
+    _In_ PUNICODE_STRING NewDirectory,
+    _Out_ PDLL_DIRECTORY_COOKIE Cookie
+    );
+
+// rev from RemoveDllDirectory
+NTSYSAPI
+NTSTATUS
+NTAPI
+LdrRemoveDllDirectory(
+    _In_ DLL_DIRECTORY_COOKIE Cookie
+    );
+#endif
+
+// rev
+DECLSPEC_NORETURN
+NTSYSAPI
+VOID
 NTAPI
 LdrShutdownProcess(
     VOID
     );
 
 // rev
+DECLSPEC_NORETURN
 NTSYSAPI
-NTSTATUS
+VOID
 NTAPI
 LdrShutdownThread(
     VOID
     );
 
+#if (PHNT_VERSION >= PHNT_WINBLUE)
 // rev
 NTSYSAPI
 NTSTATUS
@@ -944,6 +1100,7 @@ NTAPI
 LdrControlFlowGuardEnforced(
     VOID
     );
+#endif
 
 #if (PHNT_VERSION >= PHNT_19H1)
 // rev
@@ -953,6 +1110,98 @@ NTAPI
 LdrIsModuleSxsRedirected(
     _In_ PVOID DllHandle
     );
+#endif
+
+#if (PHNT_VERSION >= PHNT_THRESHOLD)
+// rev
+NTSYSAPI
+NTSTATUS
+NTAPI
+LdrUpdatePackageSearchPath(
+    _In_ PWSTR SearchPath
+    );
+#endif
+
+#if (PHNT_VERSION >= PHNT_THRESHOLD)
+
+// rev
+#define ENCLAVE_STATE_CREATED         0x00000000ul // LdrpCreateSoftwareEnclave initial state
+#define ENCLAVE_STATE_INITIALIZED     0x00000001ul // ZwInitializeEnclave successful (LdrInitializeEnclave)
+#define ENCLAVE_STATE_INITIALIZED_VBS 0x00000002ul // only for ENCLAVE_TYPE_VBS (LdrInitializeEnclave)
+
+// rev
+typedef struct _LDR_SOFTWARE_ENCLAVE
+{
+    LIST_ENTRY Links; // ntdll!LdrpEnclaveList
+    RTL_CRITICAL_SECTION CriticalSection;
+    ULONG EnclaveType; // ENCLAVE_TYPE_*
+    LONG ReferenceCount;
+    ULONG EnclaveState; // ENCLAVE_STATE_*
+    PVOID BaseAddress;
+    SIZE_T Size;
+    PVOID PreviousBaseAddress;
+    LIST_ENTRY Modules; // LDR_DATA_TABLE_ENTRY.InLoadOrderLinks
+    PLDR_DATA_TABLE_ENTRY PrimaryModule;
+    PLDR_DATA_TABLE_ENTRY BCryptModule;
+    PLDR_DATA_TABLE_ENTRY BCryptPrimitivesModule;
+} LDR_SOFTWARE_ENCLAVE, *PLDR_SOFTWARE_ENCLAVE;
+
+// rev from CreateEnclave
+NTSYSAPI
+NTSTATUS
+NTAPI
+LdrCreateEnclave(
+    _In_ HANDLE ProcessHandle,
+    _Inout_ PVOID* BaseAddress,
+    _In_ ULONG Reserved,
+    _In_ SIZE_T Size,
+    _In_ SIZE_T InitialCommitment,
+    _In_ ULONG EnclaveType,
+    _In_reads_bytes_(EnclaveInformationLength) PVOID EnclaveInformation,
+    _In_ ULONG EnclaveInformationLength,
+    _Out_ PULONG EnclaveError
+    );
+
+// rev from InitializeEnclave
+NTSYSAPI
+NTSTATUS
+NTAPI
+LdrInitializeEnclave(
+    _In_ HANDLE ProcessHandle,
+    _In_ PVOID BaseAddress,
+    _In_reads_bytes_(EnclaveInformationLength) PVOID EnclaveInformation,
+    _In_ ULONG EnclaveInformationLength,
+    _Out_ PULONG EnclaveError
+    );
+
+// rev from DeleteEnclave
+NTSYSAPI
+NTSTATUS
+NTAPI
+LdrDeleteEnclave(
+    _In_ PVOID BaseAddress
+    );
+
+// rev from CallEnclave
+NTSYSAPI
+NTSTATUS
+NTAPI
+LdrCallEnclave(
+    _In_ PENCLAVE_ROUTINE Routine,
+    _In_ ULONG Flags, // ENCLAVE_CALL_FLAG_*
+    _Inout_ PVOID* RoutineParamReturn
+    );
+
+// rev from LoadEnclaveImage
+NTSYSAPI
+NTSTATUS
+NTAPI
+LdrLoadEnclaveModule(
+    _In_ PVOID BaseAddress,
+    _In_opt_ PWSTR DllPath,
+    _In_ PUNICODE_STRING DllName
+    );
+
 #endif
 
 #endif // (PHNT_MODE != PHNT_MODE_KERNEL)

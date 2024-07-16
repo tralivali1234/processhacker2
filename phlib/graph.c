@@ -1,24 +1,13 @@
 /*
- * Process Hacker -
- *   graph control
+ * Copyright (c) 2022 Winsider Seminars & Solutions, Inc.  All rights reserved.
  *
- * Copyright (C) 2010-2016 wj32
- * Copyright (C) 2017-2018 dmex
+ * This file is part of System Informer.
  *
- * This file is part of Process Hacker.
+ * Authors:
  *
- * Process Hacker is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
+ *     wj32    2010-2016
+ *     dmex    2017-2023
  *
- * Process Hacker is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with Process Hacker.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include <ph.h>
@@ -32,12 +21,23 @@
 typedef struct _PHP_GRAPH_CONTEXT
 {
     HWND Handle;
+    HWND ParentHandle;
     ULONG Style;
     ULONG_PTR Id;
     PH_GRAPH_DRAW_INFO DrawInfo;
     PH_GRAPH_OPTIONS Options;
-    BOOLEAN NeedsUpdate;
-    BOOLEAN NeedsDraw;
+
+    union
+    {
+        USHORT Flags;
+        struct
+        {
+            USHORT NeedsUpdate : 1;
+            USHORT NeedsDraw : 1;
+            USHORT Hot : 1;
+            USHORT Spare : 13;
+        };
+    };
 
     HDC BufferedContext;
     HBITMAP BufferedOldBitmap;
@@ -78,7 +78,7 @@ BOOLEAN PhGraphControlInitialization(
     c.cbWndExtra = sizeof(PVOID);
     c.hInstance = PhInstanceHandle;
     c.hIcon = NULL;
-    c.hCursor = LoadCursor(NULL, IDC_ARROW);
+    c.hCursor = PhLoadCursor(NULL, IDC_ARROW);
     c.hbrBackground = NULL;
     c.lpszMenuName = NULL;
     c.lpszClassName = PH_GRAPH_CLASSNAME;
@@ -206,7 +206,7 @@ VOID PhDrawGraphDirect(
 
     if (DrawInfo->BackColor == 0)
     {
-        memset(bits, 0, (size_t)numberOfPixels * 4);
+        memset(bits, 0, numberOfPixels * sizeof(RGBQUAD));
     }
     else
     {
@@ -632,36 +632,7 @@ VOID PhSetGraphText(
     DrawInfo->TextBoxRect = PhRectangleToRect(boxRectangle);
 }
 
-static HFONT PhpTrayIconFont( // dmex
-    VOID
-    )
-{
-    static HFONT iconTextFont = NULL;
-
-    if (!iconTextFont)
-    {
-        iconTextFont = CreateFont(
-            PhMultiplyDivideSigned(-11, PhGlobalDpi, 96),
-            0,
-            0,
-            0,
-            FW_NORMAL,
-            FALSE,
-            FALSE,
-            FALSE,
-            ANSI_CHARSET,
-            OUT_DEFAULT_PRECIS,
-            CLIP_DEFAULT_PRECIS,
-            ANTIALIASED_QUALITY,
-            DEFAULT_PITCH,
-            L"Tahoma"
-            );
-    }
-
-    return iconTextFont;
-}
-
-VOID PhDrawTrayIconText( // dmex
+VOID PhDrawTrayIconText(
     _In_ HDC hdc,
     _In_ PVOID Bits,
     _Inout_ PPH_GRAPH_DRAW_INFO DrawInfo,
@@ -680,15 +651,12 @@ VOID PhDrawTrayIconText( // dmex
 
     if (DrawInfo->BackColor == 0)
     {
-        memset(bits, 0, (size_t)numberOfPixels * 4);
+        memset(bits, 0, numberOfPixels * sizeof(RGBQUAD));
     }
     else
     {
         PhFillMemoryUlong(bits, COLORREF_TO_BITS(DrawInfo->BackColor), numberOfPixels);
     }
-
-    if (!DrawInfo->TextFont) // HACK: default font for plugins.
-        DrawInfo->TextFont = PhpTrayIconFont();
 
     if (DrawInfo->TextFont)
         oldFont = SelectFont(hdc, DrawInfo->TextFont);
@@ -797,26 +765,28 @@ static VOID PhpCreateBufferedContext(
     )
 {
     HDC hdc;
-    BITMAPINFOHEADER header;
+    BITMAPINFO bitmapInfo;
 
     PhpDeleteBufferedContext(Context);
 
-    GetClientRect(Context->Handle, &Context->BufferedContextRect);
+    if (!GetClientRect(Context->Handle, &Context->BufferedContextRect))
+        return;
+    if (!(Context->BufferedContextRect.right && Context->BufferedContextRect.bottom))
+        return;
+
+    memset(&bitmapInfo, 0, sizeof(BITMAPINFO));
+    bitmapInfo.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bitmapInfo.bmiHeader.biPlanes = 1;
+    bitmapInfo.bmiHeader.biCompression = BI_RGB;
+    bitmapInfo.bmiHeader.biWidth = Context->BufferedContextRect.right;
+    bitmapInfo.bmiHeader.biHeight = Context->BufferedContextRect.bottom;
+    bitmapInfo.bmiHeader.biBitCount = 32;
 
     hdc = GetDC(Context->Handle);
     Context->BufferedContext = CreateCompatibleDC(hdc);
-
-    memset(&header, 0, sizeof(BITMAPINFOHEADER));
-    header.biSize = sizeof(BITMAPINFOHEADER);
-    header.biWidth = Context->BufferedContextRect.right;
-    header.biHeight = Context->BufferedContextRect.bottom;
-    header.biPlanes = 1;
-    header.biBitCount = 32;
-
-    Context->BufferedBitmap = CreateDIBSection(hdc, (BITMAPINFO *)&header, DIB_RGB_COLORS, &Context->BufferedBits, NULL, 0);
-
-    ReleaseDC(Context->Handle, hdc);
+    Context->BufferedBitmap = CreateDIBSection(hdc, &bitmapInfo, DIB_RGB_COLORS, &Context->BufferedBits, NULL, 0);
     Context->BufferedOldBitmap = SelectBitmap(Context->BufferedContext, Context->BufferedBitmap);
+    ReleaseDC(Context->Handle, hdc);
 }
 
 static VOID PhpDeleteFadeOutContext(
@@ -840,7 +810,7 @@ static VOID PhpCreateFadeOutContext(
     )
 {
     HDC hdc;
-    BITMAPINFOHEADER header;
+    BITMAPINFO bitmapInfo;
     ULONG i;
     ULONG j;
     ULONG height;
@@ -855,20 +825,19 @@ static VOID PhpCreateFadeOutContext(
     GetClientRect(Context->Handle, &Context->FadeOutContextRect);
     Context->FadeOutContextRect.right = Context->Options.FadeOutWidth;
 
+    memset(&bitmapInfo, 0, sizeof(BITMAPINFO));
+    bitmapInfo.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bitmapInfo.bmiHeader.biPlanes = 1;
+    bitmapInfo.bmiHeader.biCompression = BI_RGB;
+    bitmapInfo.bmiHeader.biWidth = Context->FadeOutContextRect.right;
+    bitmapInfo.bmiHeader.biHeight = Context->FadeOutContextRect.bottom;
+    bitmapInfo.bmiHeader.biBitCount = 32;
+
     hdc = GetDC(Context->Handle);
     Context->FadeOutContext = CreateCompatibleDC(hdc);
-
-    memset(&header, 0, sizeof(BITMAPINFOHEADER));
-    header.biSize = sizeof(BITMAPINFOHEADER);
-    header.biWidth = Context->FadeOutContextRect.right;
-    header.biHeight = Context->FadeOutContextRect.bottom;
-    header.biPlanes = 1;
-    header.biBitCount = 32;
-
-    Context->FadeOutBitmap = CreateDIBSection(hdc, (BITMAPINFO *)&header, DIB_RGB_COLORS, &Context->FadeOutBits, NULL, 0);
-
-    ReleaseDC(Context->Handle, hdc);
+    Context->FadeOutBitmap = CreateDIBSection(hdc, &bitmapInfo, DIB_RGB_COLORS, &Context->FadeOutBits, NULL, 0);
     Context->FadeOutOldBitmap = SelectBitmap(Context->FadeOutContext, Context->FadeOutBitmap);
+    ReleaseDC(Context->Handle, hdc);
 
     if (!Context->FadeOutBits)
         return;
@@ -901,6 +870,9 @@ VOID PhpUpdateDrawInfo(
 {
     PH_GRAPH_GETDRAWINFO getDrawInfo;
 
+    if (!(Context->BufferedContextRect.right && Context->BufferedContextRect.bottom))
+        return;
+
     Context->DrawInfo.Width = Context->BufferedContextRect.right;
     Context->DrawInfo.Height = Context->BufferedContextRect.bottom;
 
@@ -909,7 +881,7 @@ VOID PhpUpdateDrawInfo(
     getDrawInfo.Header.code = GCN_GETDRAWINFO;
     getDrawInfo.DrawInfo = &Context->DrawInfo;
 
-    SendMessage(GetParent(hwnd), WM_NOTIFY, 0, (LPARAM)&getDrawInfo);
+    SendMessage(Context->ParentHandle, WM_NOTIFY, 0, (LPARAM)&getDrawInfo);
 }
 
 VOID PhpDrawGraphControl(
@@ -960,7 +932,7 @@ VOID PhpDrawGraphControl(
         drawPanel.hdc = Context->BufferedContext;
         drawPanel.Rect = Context->BufferedContextRect;
 
-        SendMessage(GetParent(hwnd), WM_NOTIFY, 0, (LPARAM)&drawPanel);
+        SendMessage(Context->ParentHandle, WM_NOTIFY, 0, (LPARAM)&drawPanel);
     }
 }
 
@@ -973,12 +945,12 @@ LRESULT CALLBACK PhpGraphWndProc(
 {
     PPHP_GRAPH_CONTEXT context;
 
-    context = (PPHP_GRAPH_CONTEXT)GetWindowLongPtr(hwnd, 0);
+    context = PhGetWindowContextEx(hwnd);
 
     if (uMsg == WM_CREATE)
     {
         PhpCreateGraphContext(&context);
-        SetWindowLongPtr(hwnd, 0, (LONG_PTR)context);
+        PhSetWindowContextEx(hwnd, context);
     }
 
     if (!context)
@@ -1015,13 +987,14 @@ LRESULT CALLBACK PhpGraphWndProc(
             CREATESTRUCT *createStruct = (CREATESTRUCT *)lParam;
 
             context->Handle = hwnd;
+            context->ParentHandle = createStruct->hwndParent;
             context->Style = createStruct->style;
             context->Id = (ULONG_PTR)createStruct->hMenu;
         }
         break;
     case WM_DESTROY:
         {
-            SetWindowLongPtr(hwnd, 0, (LONG_PTR)NULL);
+            PhRemoveWindowContextEx(hwnd);
 
             if (context->TooltipHandle)
                 DestroyWindow(context->TooltipHandle);
@@ -1111,7 +1084,7 @@ LRESULT CALLBACK PhpGraphWndProc(
 
             updateRegion = (HRGN)wParam;
 
-            if (updateRegion == (HRGN)1) // HRGN_FULL
+            if (updateRegion == HRGN_FULL)
                 updateRegion = NULL;
 
             // Themed border
@@ -1169,7 +1142,7 @@ LRESULT CALLBACK PhpGraphWndProc(
                         getTooltipText.Text.Buffer = NULL;
                         getTooltipText.Text.Length = 0;
 
-                        SendMessage(GetParent(hwnd), WM_NOTIFY, 0, (LPARAM)&getTooltipText);
+                        SendMessage(context->ParentHandle, WM_NOTIFY, 0, (LPARAM)&getTooltipText);
 
                         if (getTooltipText.Text.Buffer)
                         {
@@ -1185,7 +1158,7 @@ LRESULT CALLBACK PhpGraphWndProc(
         {
             if (context->Options.DefaultCursor)
             {
-                SetCursor(context->Options.DefaultCursor);
+                PhSetCursor(context->Options.DefaultCursor);
                 return TRUE;
             }
         }
@@ -1204,6 +1177,28 @@ LRESULT CALLBACK PhpGraphWndProc(
                     SendMessage(context->TooltipHandle, TTM_UPDATE, 0, 0);
                     context->LastCursorLocation = point;
                 }
+
+                if (!context->Hot)
+                {
+                    TRACKMOUSEEVENT trackMouseEvent;
+
+                    context->Hot = TRUE;
+                    trackMouseEvent.cbSize = sizeof(TRACKMOUSEEVENT);
+                    trackMouseEvent.dwFlags = TME_LEAVE;
+                    trackMouseEvent.hwndTrack = hwnd;
+                    trackMouseEvent.dwHoverTime = 0;
+                    TrackMouseEvent(&trackMouseEvent);
+                }
+            }
+        }
+        break;
+    case WM_MOUSELEAVE:
+        {
+            context->Hot = FALSE;
+
+            if (context->TooltipHandle)
+            {
+                SendMessage(context->TooltipHandle, TTM_POP, 0, 0);
             }
         }
         break;
@@ -1230,7 +1225,7 @@ LRESULT CALLBACK PhpGraphWndProc(
             mouseEvent.Index = (clientRect.right - mouseEvent.Point.x - 1) / context->DrawInfo.Step;
             mouseEvent.TotalCount = context->DrawInfo.LineDataCount;
 
-            SendMessage(GetParent(hwnd), WM_NOTIFY, 0, (LPARAM)&mouseEvent);
+            SendMessage(context->ParentHandle, WM_NOTIFY, 0, (LPARAM)&mouseEvent);
         }
         break;
     case GCM_GETDRAWINFO:
@@ -1302,6 +1297,12 @@ LRESULT CALLBACK PhpGraphWndProc(
                 SendMessage(context->TooltipHandle, TTM_SETDELAYTIME, TTDT_AUTOPOP, MAXSHORT);
                 // Allow newlines (-1 doesn't work)
                 SendMessage(context->TooltipHandle, TTM_SETMAXTIPWIDTH, 0, MAXSHORT);
+
+                if (PhEnableThemeSupport)
+                {
+                    PhSetControlTheme(context->TooltipHandle, L"DarkMode_Explorer");
+                    //SendMessage(context->TooltipHandle, TTM_SETWINDOWTHEME, 0, (LPARAM)L"DarkMode_Explorer");
+                }
             }
             else
             {

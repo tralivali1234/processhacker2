@@ -1,31 +1,15 @@
 /*
- * Process Hacker Plugins -
- *   Update Checker Plugin
+ * Copyright (c) 2022 Winsider Seminars & Solutions, Inc.  All rights reserved.
  *
- * Copyright (C) 2016-2019 dmex
+ * This file is part of System Informer.
  *
- * This file is part of Process Hacker.
+ * Authors:
  *
- * Process Hacker is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
+ *     dmex    2016-2019
  *
- * Process Hacker is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with Process Hacker.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include "updater.h"
-
-static TASKDIALOG_BUTTON TaskDialogButtonArray[] =
-{
-    { IDOK, L"Check for updates" }
-};
 
 HRESULT CALLBACK CheckForUpdatesCallbackProc(
     _In_ HWND hwndDlg,
@@ -51,6 +35,29 @@ HRESULT CALLBACK CheckForUpdatesCallbackProc(
             }
         }
         break;
+    case TDN_RADIO_BUTTON_CLICKED:
+        {
+            PH_RELEASE_CHANNEL channel;
+
+            switch ((INT)wParam)
+            {
+            default:
+            case IDOK:
+                channel = PhReleaseChannel;
+                break;
+            case IDRETRY:
+                channel = PhCanaryChannel;
+                break;
+            }
+
+            if (PhGetPhReleaseChannel() != channel)
+            {
+                context->Channel = channel;
+                context->SwitchingChannel = TRUE;
+                PhSetIntegerSetting(L"ReleaseChannel", channel);
+            }
+        }
+        break;
     }
 
     return S_OK;
@@ -60,23 +67,88 @@ VOID ShowCheckForUpdatesDialog(
     _In_ PPH_UPDATER_CONTEXT Context
     )
 {
+    static TASKDIALOG_BUTTON UpdateTaskDialogButtonArray[] =
+    {
+        { IDOK, L"Check" }
+    };
+    //static TASKDIALOG_BUTTON SwitchTaskDialogButtonArray[] =
+    //{
+    //    { IDOK, L"Yes" }
+    //};
+    static TASKDIALOG_BUTTON checkForUpdatesRadioButtons[] =
+    {
+        { IDOK, L"Stable\n - Recommended" },
+        { IDRETRY, L"Canary\n - Preview" },
+        //{ IDIGNORE, L"Stable\n - Recommended" },
+        //{ IDCONTINUE, L"Canary\n - Preview" },
+    };
     TASKDIALOGCONFIG config;
 
     memset(&config, 0, sizeof(TASKDIALOGCONFIG));
     config.cbSize = sizeof(TASKDIALOGCONFIG);
-    config.dwFlags = TDF_USE_HICON_MAIN | TDF_ALLOW_DIALOG_CANCELLATION | TDF_CAN_BE_MINIMIZED | TDF_ENABLE_HYPERLINKS;
+    config.dwFlags = TDF_USE_HICON_MAIN | TDF_ALLOW_DIALOG_CANCELLATION | TDF_CAN_BE_MINIMIZED | TDF_ENABLE_HYPERLINKS | TDF_EXPAND_FOOTER_AREA;
     config.dwCommonButtons = TDCBF_CLOSE_BUTTON;
-    config.hMainIcon = Context->IconLargeHandle;
-    config.cxWidth = 200;
-    config.pButtons = TaskDialogButtonArray;
-    config.cButtons = RTL_NUMBER_OF(TaskDialogButtonArray);
+    config.hMainIcon = PhGetApplicationIcon(FALSE);
+    config.pRadioButtons = checkForUpdatesRadioButtons;
+    config.cRadioButtons = RTL_NUMBER_OF(checkForUpdatesRadioButtons);
     config.pfCallback = CheckForUpdatesCallbackProc;
     config.lpCallbackData = (LONG_PTR)Context;
+    config.cxWidth = 200;
 
-    config.pszWindowTitle = L"Process Hacker - Updater";
-    config.pszMainInstruction = L"Check for new Process Hacker releases?";
-    //config.pszContent = L"The updater will check for new Process Hacker releases and optionally download and install the update.\r\n\r\nClick the check for updates button to continue.";
-    config.pszContent = L"Select \"check for updates\" to continue.\r\n";
+    config.pszWindowTitle = L"System Informer - Updater";
+
+    switch (Context->Channel)
+    {
+    default:
+    case PhReleaseChannel:
+        config.nDefaultRadioButton = IDOK;
+        break;
+    case PhCanaryChannel:
+        config.nDefaultRadioButton = IDRETRY;
+        break;
+    }
+
+    //if (Context->SwitchingChannel)
+    //{
+    //    config.pButtons = SwitchTaskDialogButtonArray;
+    //    config.cButtons = RTL_NUMBER_OF(SwitchTaskDialogButtonArray);
+    //
+    //    switch (Context->Channel)
+    //    {
+    //    case PhReleaseChannel:
+    //        config.pszMainInstruction = L"Switch to the System Informer release channel?";
+    //        break;
+    //    //case PhPreviewChannel:
+    //    //    config.pszMainInstruction = L"Switch to the System Informer preview channel?";
+    //    //    break;
+    //    case PhCanaryChannel:
+    //        config.pszMainInstruction = L"Switch to the System Informer canary channel?";
+    //        break;
+    //    //case PhDeveloperChannel:
+    //    //    config.pszMainInstruction = L"Switch to the System Informer developer channel?";
+    //    //    break;
+    //    default:
+    //        config.pszMainInstruction = L"Switch the System Informer update channel?";
+    //        break;
+    //    }
+    //
+    //    //if (Context->Channel < PhGetPhReleaseChannel())
+    //    //{
+    //    //    config.pszContent = L"Downgrading the channel might cause instability.\r\n\r\nClick Yes to continue.\r\n";
+    //    //}
+    //    //else
+    //    {
+    //        config.pszContent = L"Click Yes to continue.";
+    //    }
+    //}
+    //else
+    {
+        config.pButtons = UpdateTaskDialogButtonArray;
+        config.cButtons = RTL_NUMBER_OF(UpdateTaskDialogButtonArray);
+        config.pszMainInstruction = L"Check for an updated System Informer release?";
+        config.pszContent = L"Click Check to continue.";
+    }
+
 
     TaskDialogNavigatePage(Context->DialogHandle, &config);
 }

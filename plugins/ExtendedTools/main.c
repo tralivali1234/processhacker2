@@ -1,27 +1,17 @@
 /*
- * Process Hacker Extended Tools -
- *   main program
+ * Copyright (c) 2022 Winsider Seminars & Solutions, Inc.  All rights reserved.
  *
- * Copyright (C) 2010-2015 wj32
- * Copyright (C) 2018 dmex
+ * This file is part of System Informer.
  *
- * This file is part of Process Hacker.
+ * Authors:
  *
- * Process Hacker is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
+ *     wj32    2010-2015
+ *     dmex    2018-2024
  *
- * Process Hacker is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with Process Hacker.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include "exttools.h"
+#include "extension\plugin.h"
 
 PPH_PLUGIN PluginInstance = NULL;
 HWND ProcessTreeNewHandle = NULL;
@@ -34,6 +24,7 @@ PH_CALLBACK_REGISTRATION PluginShowOptionsCallbackRegistration;
 PH_CALLBACK_REGISTRATION PluginMenuItemCallbackRegistration;
 PH_CALLBACK_REGISTRATION PluginTreeNewMessageCallbackRegistration;
 PH_CALLBACK_REGISTRATION PluginPhSvcRequestCallbackRegistration;
+PH_CALLBACK_REGISTRATION MainMenuInitializingCallbackRegistration;
 PH_CALLBACK_REGISTRATION MainWindowShowingCallbackRegistration;
 PH_CALLBACK_REGISTRATION ProcessesUpdatedCallbackRegistration;
 PH_CALLBACK_REGISTRATION ProcessPropertiesInitializingCallbackRegistration;
@@ -49,26 +40,62 @@ PH_CALLBACK_REGISTRATION TrayIconsInitializingCallbackRegistration;
 PH_CALLBACK_REGISTRATION ProcessItemsUpdatedCallbackRegistration;
 PH_CALLBACK_REGISTRATION NetworkItemsUpdatedCallbackRegistration;
 PH_CALLBACK_REGISTRATION ProcessStatsEventCallbackRegistration;
+PH_CALLBACK_REGISTRATION SettingsUpdatedCallbackRegistration;
 
+EXTENDEDTOOLS_INTERFACE PluginInterface =
+{
+    EXTENDEDTOOLS_INTERFACE_VERSION,
+    EtLookupTotalGpuAdapterUtilization,
+    EtLookupTotalGpuAdapterDedicated,
+    EtLookupTotalGpuAdapterShared,
+    EtLookupTotalGpuAdapterEngineUtilization
+};
+
+ULONG EtWindowsVersion = WINDOWS_ANCIENT;
+BOOLEAN EtIsExecutingInWow64 = FALSE;
+BOOLEAN EtGpuFahrenheitEnabled = FALSE;
+BOOLEAN EtNpuFahrenheitEnabled = FALSE;
+ULONG EtSampleCount = 0;
 ULONG ProcessesUpdatedCount = 0;
 static HANDLE ModuleProcessId = NULL;
+ULONG EtUpdateInterval = 0;
+USHORT EtMaxPrecisionUnit = 2;
+BOOLEAN EtGraphShowText = FALSE;
+BOOLEAN EtEnableScaleGraph = FALSE;
+BOOLEAN EtEnableScaleText = FALSE;
+BOOLEAN EtPropagateCpuUsage = FALSE;
+BOOLEAN EtEnableAvxSupport = FALSE;
 
 VOID NTAPI LoadCallback(
     _In_opt_ PVOID Parameter,
     _In_opt_ PVOID Context
     )
 {
+    EtWindowsVersion = PhWindowsVersion;
+    EtIsExecutingInWow64 = PhIsExecutingInWow64();
+    EtSampleCount = PhGetIntegerSetting(L"SampleCount");
+
+    EtLoadSettings();
+
     EtEtwStatisticsInitialization();
     EtGpuMonitorInitialization();
+    EtNpuMonitorInitialization();
+    EtFramesMonitorInitialization();
 }
 
 VOID NTAPI UnloadCallback(
-    _In_opt_ PVOID Parameter,
-    _In_opt_ PVOID Context
+    _In_ PVOID Parameter,
+    _In_ PVOID Context
     )
 {
-    EtSaveSettingsDiskTreeList();
+    BOOLEAN SessionEnding = (BOOLEAN)PtrToUlong(Parameter);
+
+    // Skip ETW when the system is shutting down. (dmex)
+    if (SessionEnding)
+        return;
+
     EtEtwStatisticsUninitialization();
+    EtFramesMonitorUninitialization();
 }
 
 VOID NTAPI ShowOptionsCallback(
@@ -91,20 +118,17 @@ VOID NTAPI ShowOptionsCallback(
 }
 
 VOID NTAPI MenuItemCallback(
-    _In_opt_ PVOID Parameter,
+    _In_ PVOID Parameter,
     _In_opt_ PVOID Context
     )
 {
     PPH_PLUGIN_MENU_ITEM menuItem = Parameter;
 
-    if (!menuItem)
-        return;
-
     switch (menuItem->Id)
     {
     case ID_PROCESS_UNLOADEDMODULES:
         {
-            EtShowUnloadedDllsDialog(menuItem->Context);
+            EtShowUnloadedDllsDialog(menuItem->OwnerWindow, menuItem->Context);
         }
         break;
     case ID_PROCESS_WSWATCH:
@@ -126,18 +150,57 @@ VOID NTAPI MenuItemCallback(
                 );
         }
         break;
+    case ID_REPARSE_POINTS:
+    case ID_REPARSE_OBJID:
+    case ID_REPARSE_SDDL:
+        {
+            EtShowReparseDialog(menuItem->OwnerWindow, UlongToPtr(menuItem->Id));
+        }
+        break;
+    case ID_PROCESS_WAITCHAIN:
+        {
+            EtShowWaitChainProcessDialog(menuItem->OwnerWindow, menuItem->Context);
+        }
+        break;
+    case ID_THREAD_WAITCHAIN:
+        {
+            EtShowWaitChainThreadDialog(menuItem->OwnerWindow, menuItem->Context);
+        }
+        break;
+    case ID_PIPE_ENUM:
+        {
+            EtShowPipeEnumDialog(menuItem->OwnerWindow);
+        }
+        break;
+    case ID_FIRMWARE:
+        {
+            EtShowFirmwareDialog(menuItem->OwnerWindow);
+        }
+        break;
+    case ID_OBJMGR:
+        {
+            EtShowObjectManagerDialog(menuItem->OwnerWindow);
+        }
+        break;
+    case ID_POOL_TABLE:
+        {
+            EtShowPoolTableDialog(menuItem->OwnerWindow);
+        }
+        break;
+    case ID_TPM:
+        {
+            EtShowTpmDialog(menuItem->OwnerWindow);
+        }
+        break;
     }
 }
 
 VOID NTAPI TreeNewMessageCallback(
-    _In_opt_ PVOID Parameter,
+    _In_ PVOID Parameter,
     _In_opt_ PVOID Context
     )
 {
     PPH_PLUGIN_TREENEW_MESSAGE message = Parameter;
-
-    if (!message)
-        return;
 
     if (message->TreeNewHandle == ProcessTreeNewHandle)
         EtProcessTreeNewMessage(Parameter);
@@ -156,13 +219,62 @@ VOID NTAPI PhSvcRequestCallback(
     DispatchPhSvcRequest(Parameter);
 }
 
+VOID NTAPI MainMenuInitializingCallback(
+    _In_ PVOID Parameter,
+    _In_opt_ PVOID Context
+    )
+{
+    PPH_PLUGIN_MENU_INFORMATION menuInfo = Parameter;
+    PPH_EMENU_ITEM systemMenu;
+    PPH_EMENU_ITEM bootMenuItem;
+    PPH_EMENU_ITEM tpmMenuItem;
+    PPH_EMENU_ITEM reparsePointsMenu;
+    PPH_EMENU_ITEM reparseObjIdMenu;
+    PPH_EMENU_ITEM reparseSsdlMenu;
+
+    if (menuInfo->u.MainMenu.SubMenuIndex != PH_MENU_ITEM_LOCATION_TOOLS)
+        return;
+
+    if (!(systemMenu = PhFindEMenuItem(menuInfo->Menu, 0, L"System", 0)))
+    {
+        PhInsertEMenuItem(menuInfo->Menu, systemMenu = PhPluginCreateEMenuItem(PluginInstance, 0, 0, L"&System", NULL), ULONG_MAX);
+    }
+
+    PhInsertEMenuItem(systemMenu, PhPluginCreateEMenuItem(PluginInstance, 0, ID_POOL_TABLE, L"Poo&l Table", NULL), ULONG_MAX);
+    PhInsertEMenuItem(systemMenu, PhPluginCreateEMenuItem(PluginInstance, 0, ID_OBJMGR, L"&Object Manager", NULL), ULONG_MAX);
+    PhInsertEMenuItem(systemMenu, bootMenuItem = PhPluginCreateEMenuItem(PluginInstance, 0, ID_FIRMWARE, L"Firm&ware Table", NULL), ULONG_MAX);
+    PhInsertEMenuItem(systemMenu, tpmMenuItem = PhPluginCreateEMenuItem(PluginInstance, 0, ID_TPM, L"&Trusted Platform Module", NULL), ULONG_MAX);
+    PhInsertEMenuItem(systemMenu, PhPluginCreateEMenuItem(PluginInstance, 0, ID_PIPE_ENUM, L"&Named Pipes", NULL), ULONG_MAX);
+    PhInsertEMenuItem(systemMenu, reparsePointsMenu = PhPluginCreateEMenuItem(PluginInstance, 0, ID_REPARSE_POINTS, L"NTFS Reparse Points", NULL), ULONG_MAX);
+    PhInsertEMenuItem(systemMenu, reparseObjIdMenu = PhPluginCreateEMenuItem(PluginInstance, 0, ID_REPARSE_OBJID, L"NTFS Object Identifiers", NULL), ULONG_MAX);
+    PhInsertEMenuItem(systemMenu, reparseSsdlMenu = PhPluginCreateEMenuItem(PluginInstance, 0, ID_REPARSE_SDDL, L"NTFS Security Descriptors", NULL), ULONG_MAX);
+
+    if (!PhGetOwnTokenAttributes().Elevated)
+    {
+        bootMenuItem->Flags |= PH_EMENU_DISABLED;
+        tpmMenuItem->Flags |= PH_EMENU_DISABLED;
+        reparsePointsMenu->Flags |= PH_EMENU_DISABLED;
+        reparseObjIdMenu->Flags |= PH_EMENU_DISABLED;
+        reparseSsdlMenu->Flags |= PH_EMENU_DISABLED;
+    }
+
+    if (EtWindowsVersion < WINDOWS_8)
+    {
+        PhSetEnabledEMenuItem(tpmMenuItem, FALSE);
+    }
+}
+
 VOID NTAPI MainWindowShowingCallback(
     _In_opt_ PVOID Parameter,
     _In_opt_ PVOID Context
     )
 {
     EtInitializeDiskTab();
+    EtInitializeFirewallTab();
+
     EtRegisterToolbarGraphs();
+
+    EtFramesMonitorStart();
 }
 
 VOID NTAPI ProcessesUpdatedCallback(
@@ -170,10 +282,9 @@ VOID NTAPI ProcessesUpdatedCallback(
     _In_opt_ PVOID Context
     )
 {
-    if (ProcessesUpdatedCount <= 2)
+    if (ProcessesUpdatedCount != 3)
     {
         ProcessesUpdatedCount++;
-        return;
     }
 }
 
@@ -185,6 +296,8 @@ VOID NTAPI ProcessPropertiesInitializingCallback(
     if (Parameter)
     {
         EtProcessGpuPropertiesInitializing(Parameter);
+        EtProcessNpuPropertiesInitializing(Parameter);
+        EtProcessFramesPropertiesInitializing(Parameter);
         EtProcessEtwPropertiesInitializing(Parameter);
     }
 }
@@ -199,7 +312,7 @@ VOID NTAPI HandlePropertiesInitializingCallback(
 }
 
 VOID NTAPI ProcessMenuInitializingCallback(
-    _In_opt_ PVOID Parameter,
+    _In_ PVOID Parameter,
     _In_opt_ PVOID Context
     )
 {
@@ -207,9 +320,7 @@ VOID NTAPI ProcessMenuInitializingCallback(
     PPH_PROCESS_ITEM processItem;
     ULONG flags;
     PPH_EMENU_ITEM miscMenu;
-
-    if (!menuInfo)
-        return;
+    PPH_EMENU_ITEM menuItem;
 
     if (menuInfo->u.Process.NumberOfProcesses == 1)
         processItem = menuInfo->u.Process.Processes[0];
@@ -218,8 +329,18 @@ VOID NTAPI ProcessMenuInitializingCallback(
 
     flags = 0;
 
-    if (!processItem)
+    if (processItem)
+    {
+        if (PH_IS_FAKE_PROCESS_ID(processItem->ProcessId) ||
+            processItem->ProcessId == SYSTEM_IDLE_PROCESS_ID)
+        {
+            flags = PH_EMENU_DISABLED;
+        }
+    }
+    else
+    {
         flags = PH_EMENU_DISABLED;
+    }
 
     miscMenu = PhFindEMenuItem(menuInfo->Menu, 0, NULL, PHAPP_ID_PROCESS_MISCELLANEOUS);
 
@@ -227,11 +348,19 @@ VOID NTAPI ProcessMenuInitializingCallback(
     {
         PhInsertEMenuItem(miscMenu, PhPluginCreateEMenuItem(PluginInstance, flags, ID_PROCESS_UNLOADEDMODULES, L"&Unloaded modules", processItem), ULONG_MAX);
         PhInsertEMenuItem(miscMenu, PhPluginCreateEMenuItem(PluginInstance, flags, ID_PROCESS_WSWATCH, L"&WS watch", processItem), ULONG_MAX);
+        menuItem = PhPluginCreateEMenuItem(PluginInstance, flags, ID_PROCESS_WAITCHAIN, L"Wait Chain Tra&versal", processItem);
+        PhInsertEMenuItem(miscMenu, menuItem, ULONG_MAX);
+
+        if (!processItem || !processItem->QueryHandle || processItem->ProcessId == NtCurrentProcessId())
+            menuItem->Flags |= PH_EMENU_DISABLED;
+
+        if (!PhGetOwnTokenAttributes().Elevated)
+            menuItem->Flags |= PH_EMENU_DISABLED;
     }
 }
 
 VOID NTAPI ThreadMenuInitializingCallback(
-    _In_opt_ PVOID Parameter,
+    _In_ PVOID Parameter,
     _In_opt_ PVOID Context
     )
 {
@@ -239,9 +368,6 @@ VOID NTAPI ThreadMenuInitializingCallback(
     PPH_THREAD_ITEM threadItem;
     ULONG insertIndex;
     PPH_EMENU_ITEM menuItem;
-
-    if (!menuInfo)
-        return;
 
     if (menuInfo->u.Thread.NumberOfThreads == 1)
         threadItem = menuInfo->u.Thread.Threads[0];
@@ -256,11 +382,27 @@ VOID NTAPI ThreadMenuInitializingCallback(
     menuItem = PhPluginCreateEMenuItem(PluginInstance, 0, ID_THREAD_CANCELIO, L"Ca&ncel I/O", threadItem);
     PhInsertEMenuItem(menuInfo->Menu, menuItem, insertIndex);
 
-    if (!threadItem) menuItem->Flags |= PH_EMENU_DISABLED;
+    if (!threadItem)
+        PhSetDisabledEMenuItem(menuItem);
+    if (menuInfo->u.Thread.ProcessId == SYSTEM_IDLE_PROCESS_ID)
+        PhSetDisabledEMenuItem(menuItem);
+
+    if (menuItem = PhFindEMenuItem(menuInfo->Menu, 0, NULL, PHAPP_ID_ANALYZE_WAIT))
+        insertIndex = PhIndexOfEMenuItem(menuInfo->Menu, menuItem) + 1;
+    else
+        insertIndex = ULONG_MAX;
+
+    menuItem = PhPluginCreateEMenuItem(PluginInstance, 0, ID_THREAD_WAITCHAIN, L"Wait Chain Tra&versal", threadItem);
+    PhInsertEMenuItem(menuInfo->Menu, menuItem, insertIndex);
+
+    if (!threadItem)
+        PhSetDisabledEMenuItem(menuItem);
+    if (menuInfo->u.Thread.ProcessId == SYSTEM_IDLE_PROCESS_ID || menuInfo->u.Thread.ProcessId == NtCurrentProcessId())
+        PhSetDisabledEMenuItem(menuItem);
 }
 
 VOID NTAPI ModuleMenuInitializingCallback(
-    _In_opt_ PVOID Parameter,
+    _In_ PVOID Parameter,
     _In_opt_ PVOID Context
     )
 {
@@ -272,9 +414,6 @@ VOID NTAPI ModuleMenuInitializingCallback(
     PPH_EMENU_ITEM menuItem;
 
     addMenuItem = FALSE;
-
-    if (!menuInfo)
-        return;
 
     if (processItem = PhReferenceProcessItem(menuInfo->u.Module.ProcessId))
     {
@@ -307,69 +446,58 @@ VOID NTAPI ModuleMenuInitializingCallback(
 }
 
 VOID NTAPI ProcessTreeNewInitializingCallback(
-    _In_opt_ PVOID Parameter,
+    _In_ PVOID Parameter,
     _In_opt_ PVOID Context
     )
 {
     PPH_PLUGIN_TREENEW_INFORMATION treeNewInfo = Parameter;
-
-    if (!treeNewInfo)
-        return;
 
     ProcessTreeNewHandle = treeNewInfo->TreeNewHandle;
     EtProcessTreeNewInitializing(Parameter);
 }
 
 VOID NTAPI NetworkTreeNewInitializingCallback(
-    _In_opt_ PVOID Parameter,
+    _In_ PVOID Parameter,
     _In_opt_ PVOID Context
     )
 {
     PPH_PLUGIN_TREENEW_INFORMATION treeNewInfo = Parameter;
-
-    if (!treeNewInfo)
-        return;
 
     NetworkTreeNewHandle = treeNewInfo->TreeNewHandle;
     EtNetworkTreeNewInitializing(Parameter);
 }
 
 VOID NTAPI SystemInformationInitializingCallback(
-    _In_opt_ PVOID Parameter,
+    _In_ PVOID Parameter,
     _In_opt_ PVOID Context
     )
 {
-    if (!Parameter)
-        return;
-
     if (EtGpuEnabled)
         EtGpuSystemInformationInitializing(Parameter);
-    if (EtEtwEnabled && !!PhGetIntegerSetting(SETTING_NAME_ENABLE_SYSINFO_GRAPHS))
+    if (EtNpuEnabled)
+        EtNpuSystemInformationInitializing(Parameter);
+    if (EtEtwEnabled && PhGetIntegerSetting(SETTING_NAME_ENABLE_SYSINFO_GRAPHS))
         EtEtwSystemInformationInitializing(Parameter);
 }
 
 VOID NTAPI MiniInformationInitializingCallback(
-    _In_opt_ PVOID Parameter,
+    _In_ PVOID Parameter,
     _In_opt_ PVOID Context
     )
 {
-    if (!Parameter)
-        return;
-
     if (EtGpuEnabled)
         EtGpuMiniInformationInitializing(Parameter);
+    if (EtNpuEnabled)
+        EtNpuMiniInformationInitializing(Parameter);
     if (EtEtwEnabled)
         EtEtwMiniInformationInitializing(Parameter);
 }
 
 VOID NTAPI TrayIconsInitializingCallback(
-    _In_opt_ PVOID Parameter,
+    _In_ PVOID Parameter,
     _In_opt_ PVOID Context
     )
 {
-    if (!Parameter)
-        return;
-
     EtLoadTrayIconGuids();
     EtRegisterNotifyIcons(Parameter);
 }
@@ -391,7 +519,14 @@ VOID NTAPI ProcessItemsUpdatedCallback(
 
         block = CONTAINING_RECORD(listEntry, ET_PROCESS_BLOCK, ListEntry);
 
-        PhUpdateDelta(&block->HardFaultsDelta, block->ProcessItem->HardFaultCount);
+        // Update the frame stats for the process (dmex)
+        if (EtFramesEnabled)
+        {
+            if (!(block->ProcessItem->State & PH_PROCESS_ITEM_REMOVED))
+            {
+                EtProcessFramesUpdateProcessBlock(block);
+            }
+        }
 
         // Invalidate all text.
 
@@ -431,14 +566,12 @@ VOID NTAPI NetworkItemsUpdatedCallback(
 }
 
 VOID NTAPI ProcessStatsEventCallback(
-    _In_opt_ PVOID Parameter,
+    _In_ PVOID Parameter,
     _In_opt_ PVOID Context
     )
 {
     PPH_PLUGIN_PROCESS_STATS_EVENT event = Parameter;
 
-    if (!event)
-        return;
     if (event->Version)
         return;
 
@@ -454,105 +587,476 @@ VOID NTAPI ProcessStatsEventCallback(
 
             block->ListViewGroupCache[ET_PROCESS_STATISTICS_CATEGORY_GPU] = PhAddListViewGroup(
                 listViewHandle, (INT)ListView_GetGroupCount(listViewHandle), L"GPU");
-            block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_RUNNINGTIME] = PhAddListViewGroupItem(
-                listViewHandle, block->ListViewGroupCache[ET_PROCESS_STATISTICS_CATEGORY_GPU], MAXINT, L"Running time", NULL);
-            block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_CONTEXTSWITCHES] = PhAddListViewGroupItem(
-                listViewHandle, block->ListViewGroupCache[ET_PROCESS_STATISTICS_CATEGORY_GPU], MAXINT, L"Context switches", NULL);
-            //block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_TOTALNODES] = PhAddListViewGroupItem(
-            //    listViewHandle, block->ListViewGroupCache[ET_PROCESS_STATISTICS_CATEGORY_GPU], MAXINT, L"Total Nodes", NULL);
-            //block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_TOTALSEGMENTS] = PhAddListViewGroupItem(
-            //    listViewHandle, block->ListViewGroupCache[ET_PROCESS_STATISTICS_CATEGORY_GPU], MAXINT, L"Total Segments", NULL);
-            block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_TOTALDEDICATED] = PhAddListViewGroupItem(
-                listViewHandle, block->ListViewGroupCache[ET_PROCESS_STATISTICS_CATEGORY_GPU], MAXINT, L"Total Dedicated", NULL);
-            block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_TOTALSHARED] = PhAddListViewGroupItem(
-                listViewHandle, block->ListViewGroupCache[ET_PROCESS_STATISTICS_CATEGORY_GPU], MAXINT, L"Total Shared", NULL);
-            block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_TOTALCOMMIT] = PhAddListViewGroupItem(
-                listViewHandle, block->ListViewGroupCache[ET_PROCESS_STATISTICS_CATEGORY_GPU], MAXINT, L"Total Commit", NULL);
+            block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_GPUTOTALDEDICATED] = PhAddListViewGroupItem(
+                listViewHandle, block->ListViewGroupCache[ET_PROCESS_STATISTICS_CATEGORY_GPU], MAXINT, L"Dedicated memory", NULL);
+            PhSetListViewItemParam(listViewHandle, block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_GPUTOTALDEDICATED],
+                UlongToPtr(block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_GPUTOTALDEDICATED]));
+            block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_GPUTOTALSHARED] = PhAddListViewGroupItem(
+                listViewHandle, block->ListViewGroupCache[ET_PROCESS_STATISTICS_CATEGORY_GPU], MAXINT, L"Shared memory", NULL);
+            PhSetListViewItemParam(listViewHandle, block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_GPUTOTALSHARED],
+                UlongToPtr(block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_GPUTOTALSHARED]));
+            block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_GPUTOTALCOMMIT] = PhAddListViewGroupItem(
+                listViewHandle, block->ListViewGroupCache[ET_PROCESS_STATISTICS_CATEGORY_GPU], MAXINT, L"Commit memory", NULL);
+            PhSetListViewItemParam(listViewHandle, block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_GPUTOTALCOMMIT],
+                UlongToPtr(block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_GPUTOTALCOMMIT]));
+            block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_GPUTOTAL] = PhAddListViewGroupItem(
+                listViewHandle, block->ListViewGroupCache[ET_PROCESS_STATISTICS_CATEGORY_GPU], MAXINT, L"Total memory", NULL);
+            PhSetListViewItemParam(listViewHandle, block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_GPUTOTAL],
+                UlongToPtr(block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_GPUTOTAL]));
 
             block->ListViewGroupCache[ET_PROCESS_STATISTICS_CATEGORY_DISK] = PhAddListViewGroup(
                 listViewHandle, (INT)ListView_GetGroupCount(listViewHandle), L"Disk I/O");
             block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_DISKREADS] = PhAddListViewGroupItem(
                 listViewHandle, block->ListViewGroupCache[ET_PROCESS_STATISTICS_CATEGORY_DISK], MAXINT, L"Reads", NULL);
+            PhSetListViewItemParam(listViewHandle, block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_DISKREADS],
+                UlongToPtr(block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_DISKREADS]));
             block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_DISKREADBYTES] = PhAddListViewGroupItem(
                 listViewHandle, block->ListViewGroupCache[ET_PROCESS_STATISTICS_CATEGORY_DISK], MAXINT, L"Read bytes", NULL);
+            PhSetListViewItemParam(listViewHandle, block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_DISKREADBYTES],
+                UlongToPtr(block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_DISKREADBYTES]));
             block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_DISKREADBYTESDELTA] = PhAddListViewGroupItem(
                 listViewHandle, block->ListViewGroupCache[ET_PROCESS_STATISTICS_CATEGORY_DISK], MAXINT, L"Read bytes delta", NULL);
+            PhSetListViewItemParam(listViewHandle, block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_DISKREADBYTESDELTA],
+                UlongToPtr(block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_DISKREADBYTESDELTA]));
             block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_DISKWRITES] = PhAddListViewGroupItem(
                 listViewHandle, block->ListViewGroupCache[ET_PROCESS_STATISTICS_CATEGORY_DISK], MAXINT, L"Writes", NULL);
+            PhSetListViewItemParam(listViewHandle, block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_DISKWRITES],
+                UlongToPtr(block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_DISKWRITES]));
             block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_DISKWRITEBYTES] = PhAddListViewGroupItem(
                 listViewHandle, block->ListViewGroupCache[ET_PROCESS_STATISTICS_CATEGORY_DISK], MAXINT, L"Write bytes", NULL);
+            PhSetListViewItemParam(listViewHandle, block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_DISKWRITEBYTES],
+                UlongToPtr(block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_DISKWRITEBYTES]));
             block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_DISKWRITEBYTESDELTA] = PhAddListViewGroupItem(
                 listViewHandle, block->ListViewGroupCache[ET_PROCESS_STATISTICS_CATEGORY_DISK], MAXINT, L"Write bytes delta", NULL);
+            PhSetListViewItemParam(listViewHandle, block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_DISKWRITEBYTESDELTA],
+                UlongToPtr(block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_DISKWRITEBYTESDELTA]));
+            block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_DISKTOTAL] = PhAddListViewGroupItem(
+                listViewHandle, block->ListViewGroupCache[ET_PROCESS_STATISTICS_CATEGORY_DISK], MAXINT, L"Total", NULL);
+            PhSetListViewItemParam(listViewHandle, block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_DISKTOTAL],
+                UlongToPtr(block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_DISKTOTAL]));
+            block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_DISKTOTALBYTES] = PhAddListViewGroupItem(
+                listViewHandle, block->ListViewGroupCache[ET_PROCESS_STATISTICS_CATEGORY_DISK], MAXINT, L"Total bytes", NULL);
+            PhSetListViewItemParam(listViewHandle, block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_DISKTOTALBYTES],
+                UlongToPtr(block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_DISKTOTALBYTES]));
+            block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_DISKTOTALBYTESDELTA] = PhAddListViewGroupItem(
+                listViewHandle, block->ListViewGroupCache[ET_PROCESS_STATISTICS_CATEGORY_DISK], MAXINT, L"Total bytes delta", NULL);
+            PhSetListViewItemParam(listViewHandle, block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_DISKTOTALBYTESDELTA],
+                UlongToPtr(block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_DISKTOTALBYTESDELTA]));
 
             block->ListViewGroupCache[ET_PROCESS_STATISTICS_CATEGORY_NETWORK] = PhAddListViewGroup(
                 listViewHandle, (INT)ListView_GetGroupCount(listViewHandle), L"Network I/O");
             block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_NETWORKREADS] = PhAddListViewGroupItem(
                 listViewHandle, block->ListViewGroupCache[ET_PROCESS_STATISTICS_CATEGORY_NETWORK], MAXINT, L"Receives", NULL);
+            PhSetListViewItemParam(listViewHandle, block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_NETWORKREADS],
+                UlongToPtr(block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_NETWORKREADS]));
             block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_NETWORKREADBYTES] = PhAddListViewGroupItem(
                 listViewHandle, block->ListViewGroupCache[ET_PROCESS_STATISTICS_CATEGORY_NETWORK], MAXINT, L"Receive bytes", NULL);
+            PhSetListViewItemParam(listViewHandle, block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_NETWORKREADBYTES],
+                UlongToPtr(block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_NETWORKREADBYTES]));
             block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_NETWORKREADBYTESDELTA] = PhAddListViewGroupItem(
                 listViewHandle, block->ListViewGroupCache[ET_PROCESS_STATISTICS_CATEGORY_NETWORK], MAXINT, L"Receive bytes delta", NULL);
+            PhSetListViewItemParam(listViewHandle, block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_NETWORKREADBYTESDELTA],
+                UlongToPtr(block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_NETWORKREADBYTESDELTA]));
             block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_NETWORKWRITES] = PhAddListViewGroupItem(
                 listViewHandle, block->ListViewGroupCache[ET_PROCESS_STATISTICS_CATEGORY_NETWORK], MAXINT, L"Sends", NULL);
+            PhSetListViewItemParam(listViewHandle, block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_NETWORKWRITES],
+                UlongToPtr(block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_NETWORKWRITES]));
             block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_NETWORKWRITEBYTES] = PhAddListViewGroupItem(
                 listViewHandle, block->ListViewGroupCache[ET_PROCESS_STATISTICS_CATEGORY_NETWORK], MAXINT, L"Send bytes", NULL);
+            PhSetListViewItemParam(listViewHandle, block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_NETWORKWRITEBYTES],
+                UlongToPtr(block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_NETWORKWRITEBYTES]));
             block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_NETWORKWRITEBYTESDELTA] = PhAddListViewGroupItem(
                 listViewHandle, block->ListViewGroupCache[ET_PROCESS_STATISTICS_CATEGORY_NETWORK], MAXINT, L"Send bytes delta", NULL);
+            PhSetListViewItemParam(listViewHandle, block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_NETWORKWRITEBYTESDELTA],
+                UlongToPtr(block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_NETWORKWRITEBYTESDELTA]));
+            block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_NETWORKTOTAL] = PhAddListViewGroupItem(
+                listViewHandle, block->ListViewGroupCache[ET_PROCESS_STATISTICS_CATEGORY_NETWORK], MAXINT, L"Total", NULL);
+            PhSetListViewItemParam(listViewHandle, block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_NETWORKTOTAL],
+                UlongToPtr(block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_NETWORKTOTAL]));
+            block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_NETWORKTOTALBYTES] = PhAddListViewGroupItem(
+                listViewHandle, block->ListViewGroupCache[ET_PROCESS_STATISTICS_CATEGORY_NETWORK], MAXINT, L"Total bytes", NULL);
+            PhSetListViewItemParam(listViewHandle, block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_NETWORKTOTALBYTES],
+                UlongToPtr(block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_NETWORKTOTALBYTES]));
+            block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_NETWORKTOTALBYTESDELTA] = PhAddListViewGroupItem(
+                listViewHandle, block->ListViewGroupCache[ET_PROCESS_STATISTICS_CATEGORY_NETWORK], MAXINT, L"Total bytes delta", NULL);
+            PhSetListViewItemParam(listViewHandle, block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_NETWORKTOTALBYTESDELTA],
+                UlongToPtr(block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_NETWORKTOTALBYTESDELTA]));
+
+            block->ListViewGroupCache[ET_PROCESS_STATISTICS_CATEGORY_NPU] = PhAddListViewGroup(
+                listViewHandle, (INT)ListView_GetGroupCount(listViewHandle), L"NPU");
+            block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_NPUTOTALDEDICATED] = PhAddListViewGroupItem(
+                listViewHandle, block->ListViewGroupCache[ET_PROCESS_STATISTICS_CATEGORY_NPU], MAXINT, L"Dedicated memory", NULL);
+            PhSetListViewItemParam(listViewHandle, block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_NPUTOTALDEDICATED],
+                UlongToPtr(block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_NPUTOTALDEDICATED]));
+            block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_NPUTOTALSHARED] = PhAddListViewGroupItem(
+                listViewHandle, block->ListViewGroupCache[ET_PROCESS_STATISTICS_CATEGORY_NPU], MAXINT, L"Shared memory", NULL);
+            PhSetListViewItemParam(listViewHandle, block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_NPUTOTALSHARED],
+                UlongToPtr(block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_NPUTOTALSHARED]));
+            block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_NPUTOTALCOMMIT] = PhAddListViewGroupItem(
+                listViewHandle, block->ListViewGroupCache[ET_PROCESS_STATISTICS_CATEGORY_NPU], MAXINT, L"Commit memory", NULL);
+            PhSetListViewItemParam(listViewHandle, block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_NPUTOTALCOMMIT],
+                UlongToPtr(block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_NPUTOTALCOMMIT]));
+            block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_NPUTOTAL] = PhAddListViewGroupItem(
+                listViewHandle, block->ListViewGroupCache[ET_PROCESS_STATISTICS_CATEGORY_NPU], MAXINT, L"Total memory", NULL);
+            PhSetListViewItemParam(listViewHandle, block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_NPUTOTAL],
+                UlongToPtr(block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_NPUTOTAL]));
         }
         break;
     case 2:
         {
-            HWND listViewHandle = event->Parameter;
+            NMLVDISPINFO* dispInfo = (NMLVDISPINFO*)event->Parameter;
             PET_PROCESS_BLOCK block;
-            WCHAR runningTimeString[PH_TIMESPAN_STR_LEN_1] = L"N/A";
 
             if (!(block = EtGetProcessBlock(event->ProcessItem)))
                 break;
 
-            PhPrintTimeSpan(runningTimeString, block->GpuRunningTimeDelta.Value * 10, PH_TIMESPAN_HMSM);
-            PhSetListViewSubItem(listViewHandle, block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_RUNNINGTIME], 1,
-                runningTimeString);
-            PhSetListViewSubItem(listViewHandle, block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_CONTEXTSWITCHES], 1,
-                PhaFormatUInt64(block->GpuContextSwitches, TRUE)->Buffer);
-            //PhSetListViewSubItem(listViewHandle, block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_TOTALNODES], 1,
-            //    PhaFormatUInt64(gpuStatistics.NodeCount, TRUE)->Buffer);
-            //PhSetListViewSubItem(listViewHandle, block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_TOTALSEGMENTS], 1,
-            //    PhaFormatUInt64(gpuStatistics.SegmentCount, TRUE)->Buffer);
-            PhSetListViewSubItem(listViewHandle, block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_TOTALDEDICATED], 1,
-                PhaFormatSize(block->GpuDedicatedUsage, ULONG_MAX)->Buffer);
-            PhSetListViewSubItem(listViewHandle, block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_TOTALSHARED], 1,
-                PhaFormatSize(block->GpuSharedUsage, ULONG_MAX)->Buffer);
-            PhSetListViewSubItem(listViewHandle, block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_TOTALCOMMIT], 1,
-                PhaFormatSize(block->GpuCommitUsage, ULONG_MAX)->Buffer);
+            if (dispInfo->item.iSubItem == 1)
+            {
+                if (dispInfo->item.mask & LVIF_TEXT)
+                {
+                    ULONG index = PtrToUlong((PVOID)dispInfo->item.lParam);
 
-            PhSetListViewSubItem(listViewHandle, block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_DISKREADS], 1,
-                PhaFormatUInt64(block->DiskReadCount, TRUE)->Buffer);
-            PhSetListViewSubItem(listViewHandle, block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_DISKREADBYTES], 1,
-                PhaFormatSize(block->DiskReadRawDelta.Value, ULONG_MAX)->Buffer);
-            PhSetListViewSubItem(listViewHandle, block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_DISKREADBYTESDELTA], 1,
-                PhaFormatSize(block->DiskReadRawDelta.Delta, ULONG_MAX)->Buffer);
-            PhSetListViewSubItem(listViewHandle, block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_DISKWRITES], 1,
-                PhaFormatUInt64(block->DiskWriteCount, TRUE)->Buffer);
-            PhSetListViewSubItem(listViewHandle, block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_DISKWRITEBYTES], 1,
-                PhaFormatSize(block->DiskWriteRawDelta.Value, ULONG_MAX)->Buffer);
-            PhSetListViewSubItem(listViewHandle, block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_DISKWRITEBYTESDELTA], 1,
-                PhaFormatSize(block->DiskWriteRawDelta.Delta, ULONG_MAX)->Buffer);
+                    if (index == block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_GPUTOTALDEDICATED])
+                    {
+                        PH_FORMAT format[1];
+                        WCHAR buffer[PH_INT64_STR_LEN_1];
 
-            PhSetListViewSubItem(listViewHandle, block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_NETWORKREADS], 1,
-                PhaFormatUInt64(block->NetworkReceiveCount, TRUE)->Buffer);
-            PhSetListViewSubItem(listViewHandle, block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_NETWORKREADBYTES], 1,
-                PhaFormatSize(block->NetworkReceiveRawDelta.Value, ULONG_MAX)->Buffer);
-            PhSetListViewSubItem(listViewHandle, block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_NETWORKREADBYTESDELTA], 1,
-                PhaFormatSize(block->NetworkReceiveRawDelta.Delta, ULONG_MAX)->Buffer);
-            PhSetListViewSubItem(listViewHandle, block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_NETWORKWRITES], 1,
-                PhaFormatUInt64(block->NetworkSendCount, TRUE)->Buffer);
-            PhSetListViewSubItem(listViewHandle, block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_NETWORKWRITEBYTES], 1,
-                PhaFormatSize(block->NetworkSendRawDelta.Value, ULONG_MAX)->Buffer);
-            PhSetListViewSubItem(listViewHandle, block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_NETWORKWRITEBYTESDELTA], 1,
-                PhaFormatSize(block->NetworkSendRawDelta.Delta, ULONG_MAX)->Buffer);
+                        PhInitFormatSize(&format[0], block->GpuDedicatedUsage);
+
+                        if (PhFormatToBuffer(format, RTL_NUMBER_OF(format), buffer, sizeof(buffer), NULL))
+                        {
+                            wcsncpy_s(dispInfo->item.pszText, dispInfo->item.cchTextMax, buffer, _TRUNCATE);
+                        }
+                    }
+                    else if (index == block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_GPUTOTALSHARED])
+                    {
+                        PH_FORMAT format[1];
+                        WCHAR buffer[PH_INT64_STR_LEN_1];
+
+                        PhInitFormatSize(&format[0], block->GpuSharedUsage);
+
+                        if (PhFormatToBuffer(format, RTL_NUMBER_OF(format), buffer, sizeof(buffer), NULL))
+                        {
+                            wcsncpy_s(dispInfo->item.pszText, dispInfo->item.cchTextMax, buffer, _TRUNCATE);
+                        }
+                    }
+                    else if (index == block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_GPUTOTALCOMMIT])
+                    {
+                        PH_FORMAT format[1];
+                        WCHAR buffer[PH_INT64_STR_LEN_1];
+
+                        PhInitFormatSize(&format[0], block->GpuCommitUsage);
+
+                        if (PhFormatToBuffer(format, RTL_NUMBER_OF(format), buffer, sizeof(buffer), NULL))
+                        {
+                            wcsncpy_s(dispInfo->item.pszText, dispInfo->item.cchTextMax, buffer, _TRUNCATE);
+                        }
+                    }
+                    else if (index == block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_GPUTOTAL])
+                    {
+                        PH_FORMAT format[1];
+                        WCHAR buffer[PH_INT64_STR_LEN_1];
+
+                        PhInitFormatSize(&format[0], block->GpuDedicatedUsage + block->GpuSharedUsage + block->GpuCommitUsage);
+
+                        if (PhFormatToBuffer(format, RTL_NUMBER_OF(format), buffer, sizeof(buffer), NULL))
+                        {
+                            wcsncpy_s(dispInfo->item.pszText, dispInfo->item.cchTextMax, buffer, _TRUNCATE);
+                        }
+                    }
+                    else if (index == block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_DISKREADS])
+                    {
+                        PH_FORMAT format[1];
+                        WCHAR buffer[PH_INT64_STR_LEN_1];
+
+                        PhInitFormatI64U(&format[0], block->DiskReadCount);
+
+                        if (PhFormatToBuffer(format, RTL_NUMBER_OF(format), buffer, sizeof(buffer), NULL))
+                        {
+                            wcsncpy_s(dispInfo->item.pszText, dispInfo->item.cchTextMax, buffer, _TRUNCATE);
+                        }
+                    }
+                    else if (index == block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_DISKREADBYTES])
+                    {
+                        PH_FORMAT format[1];
+                        WCHAR buffer[PH_INT64_STR_LEN_1];
+
+                        PhInitFormatSize(&format[0], block->DiskReadRawDelta.Value);
+
+                        if (PhFormatToBuffer(format, RTL_NUMBER_OF(format), buffer, sizeof(buffer), NULL))
+                        {
+                            wcsncpy_s(dispInfo->item.pszText, dispInfo->item.cchTextMax, buffer, _TRUNCATE);
+                        }
+                    }
+                    else if (index == block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_DISKREADBYTESDELTA])
+                    {
+                        PH_FORMAT format[1];
+                        WCHAR buffer[PH_INT64_STR_LEN_1];
+
+                        PhInitFormatSize(&format[0], block->DiskReadRawDelta.Delta);
+
+                        if (PhFormatToBuffer(format, RTL_NUMBER_OF(format), buffer, sizeof(buffer), NULL))
+                        {
+                            wcsncpy_s(dispInfo->item.pszText, dispInfo->item.cchTextMax, buffer, _TRUNCATE);
+                        }
+                    }
+                    else if (index == block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_DISKWRITES])
+                    {
+                        PH_FORMAT format[1];
+                        WCHAR buffer[PH_INT64_STR_LEN_1];
+
+                        PhInitFormatI64U(&format[0], block->DiskWriteCount);
+
+                        if (PhFormatToBuffer(format, RTL_NUMBER_OF(format), buffer, sizeof(buffer), NULL))
+                        {
+                            wcsncpy_s(dispInfo->item.pszText, dispInfo->item.cchTextMax, buffer, _TRUNCATE);
+                        }
+                    }
+                    else if (index == block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_DISKWRITEBYTES])
+                    {
+                        PH_FORMAT format[1];
+                        WCHAR buffer[PH_INT64_STR_LEN_1];
+
+                        PhInitFormatSize(&format[0], block->DiskWriteRawDelta.Value);
+
+                        if (PhFormatToBuffer(format, RTL_NUMBER_OF(format), buffer, sizeof(buffer), NULL))
+                        {
+                            wcsncpy_s(dispInfo->item.pszText, dispInfo->item.cchTextMax, buffer, _TRUNCATE);
+                        }
+                    }
+                    else if (index == block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_DISKWRITEBYTESDELTA])
+                    {
+                        PH_FORMAT format[1];
+                        WCHAR buffer[PH_INT64_STR_LEN_1];
+
+                        PhInitFormatSize(&format[0], block->DiskWriteRawDelta.Delta);
+
+                        if (PhFormatToBuffer(format, RTL_NUMBER_OF(format), buffer, sizeof(buffer), NULL))
+                        {
+                            wcsncpy_s(dispInfo->item.pszText, dispInfo->item.cchTextMax, buffer, _TRUNCATE);
+                        }
+                    }
+                    else if (index == block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_DISKTOTAL])
+                    {
+                        PH_FORMAT format[1];
+                        WCHAR buffer[PH_INT64_STR_LEN_1];
+
+                        PhInitFormatI64U(&format[0], block->DiskReadCount + block->DiskWriteCount);
+
+                        if (PhFormatToBuffer(format, RTL_NUMBER_OF(format), buffer, sizeof(buffer), NULL))
+                        {
+                            wcsncpy_s(dispInfo->item.pszText, dispInfo->item.cchTextMax, buffer, _TRUNCATE);
+                        }
+                    }
+                    else if (index == block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_DISKTOTALBYTES])
+                    {
+                        PH_FORMAT format[1];
+                        WCHAR buffer[PH_INT64_STR_LEN_1];
+
+                        PhInitFormatSize(&format[0], block->DiskReadRawDelta.Value + block->DiskWriteRawDelta.Value);
+
+                        if (PhFormatToBuffer(format, RTL_NUMBER_OF(format), buffer, sizeof(buffer), NULL))
+                        {
+                            wcsncpy_s(dispInfo->item.pszText, dispInfo->item.cchTextMax, buffer, _TRUNCATE);
+                        }
+                    }
+                    else if (index == block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_DISKTOTALBYTESDELTA])
+                    {
+                        PH_FORMAT format[1];
+                        WCHAR buffer[PH_INT64_STR_LEN_1];
+
+                        PhInitFormatSize(&format[0], block->DiskReadRawDelta.Delta + block->DiskWriteRawDelta.Delta);
+
+                        if (PhFormatToBuffer(format, RTL_NUMBER_OF(format), buffer, sizeof(buffer), NULL))
+                        {
+                            wcsncpy_s(dispInfo->item.pszText, dispInfo->item.cchTextMax, buffer, _TRUNCATE);
+                        }
+                    }
+                    else if (index == block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_NETWORKREADS])
+                    {
+                        PH_FORMAT format[1];
+                        WCHAR buffer[PH_INT64_STR_LEN_1];
+
+                        PhInitFormatI64U(&format[0], block->NetworkReceiveCount);
+
+                        if (PhFormatToBuffer(format, RTL_NUMBER_OF(format), buffer, sizeof(buffer), NULL))
+                        {
+                            wcsncpy_s(dispInfo->item.pszText, dispInfo->item.cchTextMax, buffer, _TRUNCATE);
+                        }
+                    }
+                    else if (index == block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_NETWORKREADBYTES])
+                    {
+                        PH_FORMAT format[1];
+                        WCHAR buffer[PH_INT64_STR_LEN_1];
+
+                        PhInitFormatSize(&format[0], block->NetworkReceiveRawDelta.Value);
+
+                        if (PhFormatToBuffer(format, RTL_NUMBER_OF(format), buffer, sizeof(buffer), NULL))
+                        {
+                            wcsncpy_s(dispInfo->item.pszText, dispInfo->item.cchTextMax, buffer, _TRUNCATE);
+                        }
+                    }
+                    else if (index == block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_NETWORKREADBYTESDELTA])
+                    {
+                        PH_FORMAT format[1];
+                        WCHAR buffer[PH_INT64_STR_LEN_1];
+
+                        PhInitFormatSize(&format[0], block->NetworkReceiveRawDelta.Delta);
+
+                        if (PhFormatToBuffer(format, RTL_NUMBER_OF(format), buffer, sizeof(buffer), NULL))
+                        {
+                            wcsncpy_s(dispInfo->item.pszText, dispInfo->item.cchTextMax, buffer, _TRUNCATE);
+                        }
+                    }
+                    else if (index == block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_NETWORKWRITES])
+                    {
+                        PH_FORMAT format[1];
+                        WCHAR buffer[PH_INT64_STR_LEN_1];
+
+                        PhInitFormatI64U(&format[0], block->NetworkSendCount);
+
+                        if (PhFormatToBuffer(format, RTL_NUMBER_OF(format), buffer, sizeof(buffer), NULL))
+                        {
+                            wcsncpy_s(dispInfo->item.pszText, dispInfo->item.cchTextMax, buffer, _TRUNCATE);
+                        }
+                    }
+                    else if (index == block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_NETWORKWRITEBYTES])
+                    {
+                        PH_FORMAT format[1];
+                        WCHAR buffer[PH_INT64_STR_LEN_1];
+
+                        PhInitFormatSize(&format[0], block->NetworkSendRawDelta.Value);
+
+                        if (PhFormatToBuffer(format, RTL_NUMBER_OF(format), buffer, sizeof(buffer), NULL))
+                        {
+                            wcsncpy_s(dispInfo->item.pszText, dispInfo->item.cchTextMax, buffer, _TRUNCATE);
+                        }
+                    }
+                    else if (index == block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_NETWORKWRITEBYTESDELTA])
+                    {
+                        PH_FORMAT format[1];
+                        WCHAR buffer[PH_INT64_STR_LEN_1];
+
+                        PhInitFormatSize(&format[0], block->NetworkSendRawDelta.Delta);
+
+                        if (PhFormatToBuffer(format, RTL_NUMBER_OF(format), buffer, sizeof(buffer), NULL))
+                        {
+                            wcsncpy_s(dispInfo->item.pszText, dispInfo->item.cchTextMax, buffer, _TRUNCATE);
+                        }
+                    }
+                    else if (index == block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_NETWORKTOTAL])
+                    {
+                        PH_FORMAT format[1];
+                        WCHAR buffer[PH_INT64_STR_LEN_1];
+
+                        PhInitFormatI64U(&format[0], block->NetworkReceiveCount + block->NetworkSendCount);
+
+                        if (PhFormatToBuffer(format, RTL_NUMBER_OF(format), buffer, sizeof(buffer), NULL))
+                        {
+                            wcsncpy_s(dispInfo->item.pszText, dispInfo->item.cchTextMax, buffer, _TRUNCATE);
+                        }
+                    }
+                    else if (index == block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_NETWORKTOTALBYTES])
+                    {
+                        PH_FORMAT format[1];
+                        WCHAR buffer[PH_INT64_STR_LEN_1];
+
+                        PhInitFormatSize(&format[0], block->NetworkReceiveRawDelta.Value + block->NetworkSendRawDelta.Value);
+
+                        if (PhFormatToBuffer(format, RTL_NUMBER_OF(format), buffer, sizeof(buffer), NULL))
+                        {
+                            wcsncpy_s(dispInfo->item.pszText, dispInfo->item.cchTextMax, buffer, _TRUNCATE);
+                        }
+                    }
+                    else if (index == block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_NETWORKTOTALBYTESDELTA])
+                    {
+                        PH_FORMAT format[1];
+                        WCHAR buffer[PH_INT64_STR_LEN_1];
+
+                        PhInitFormatSize(&format[0], block->NetworkReceiveRawDelta.Delta + block->NetworkSendRawDelta.Delta);
+
+                        if (PhFormatToBuffer(format, RTL_NUMBER_OF(format), buffer, sizeof(buffer), NULL))
+                        {
+                            wcsncpy_s(dispInfo->item.pszText, dispInfo->item.cchTextMax, buffer, _TRUNCATE);
+                        }
+                    }
+                    else if (index == block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_NPUTOTALDEDICATED])
+                    {
+                        PH_FORMAT format[1];
+                        WCHAR buffer[PH_INT64_STR_LEN_1];
+
+                        PhInitFormatSize(&format[0], block->NpuDedicatedUsage);
+
+                        if (PhFormatToBuffer(format, RTL_NUMBER_OF(format), buffer, sizeof(buffer), NULL))
+                        {
+                            wcsncpy_s(dispInfo->item.pszText, dispInfo->item.cchTextMax, buffer, _TRUNCATE);
+                        }
+                    }
+                    else if (index == block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_NPUTOTALSHARED])
+                    {
+                        PH_FORMAT format[1];
+                        WCHAR buffer[PH_INT64_STR_LEN_1];
+
+                        PhInitFormatSize(&format[0], block->NpuSharedUsage);
+
+                        if (PhFormatToBuffer(format, RTL_NUMBER_OF(format), buffer, sizeof(buffer), NULL))
+                        {
+                            wcsncpy_s(dispInfo->item.pszText, dispInfo->item.cchTextMax, buffer, _TRUNCATE);
+                        }
+                    }
+                    else if (index == block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_NPUTOTALCOMMIT])
+                    {
+                        PH_FORMAT format[1];
+                        WCHAR buffer[PH_INT64_STR_LEN_1];
+
+                        PhInitFormatSize(&format[0], block->NpuCommitUsage);
+
+                        if (PhFormatToBuffer(format, RTL_NUMBER_OF(format), buffer, sizeof(buffer), NULL))
+                        {
+                            wcsncpy_s(dispInfo->item.pszText, dispInfo->item.cchTextMax, buffer, _TRUNCATE);
+                        }
+                    }
+                    else if (index == block->ListViewRowCache[ET_PROCESS_STATISTICS_INDEX_NPUTOTAL])
+                    {
+                        PH_FORMAT format[1];
+                        WCHAR buffer[PH_INT64_STR_LEN_1];
+
+                        PhInitFormatSize(&format[0], block->NpuDedicatedUsage + block->NpuSharedUsage + block->NpuCommitUsage);
+
+                        if (PhFormatToBuffer(format, RTL_NUMBER_OF(format), buffer, sizeof(buffer), NULL))
+                        {
+                            wcsncpy_s(dispInfo->item.pszText, dispInfo->item.cchTextMax, buffer, _TRUNCATE);
+                        }
+                    }
+                }
+            }
         }
         break;
     }
+}
+
+VOID EtLoadSettings(
+    VOID
+    )
+{
+    EtUpdateInterval = PhGetIntegerSetting(L"UpdateInterval");
+    EtMaxPrecisionUnit = (USHORT)PhGetIntegerSetting(L"MaxPrecisionUnit");
+    EtGraphShowText = !!PhGetIntegerSetting(L"GraphShowText");
+    EtEnableScaleGraph = !!PhGetIntegerSetting(L"EnableGraphMaxScale");
+    EtEnableScaleText = !!PhGetIntegerSetting(L"EnableGraphMaxText");
+    EtPropagateCpuUsage = !!PhGetIntegerSetting(L"PropagateCpuUsage");
+    EtEnableAvxSupport = !!PhGetIntegerSetting(L"EnableAvxSupport");
+    EtTrayIconTransparencyEnabled = !!PhGetIntegerSetting(L"IconTransparencyEnabled");
+    EtGpuFahrenheitEnabled = !!PhGetIntegerSetting(SETTING_NAME_ENABLE_FAHRENHEIT);
+    EtNpuFahrenheitEnabled = EtGpuFahrenheitEnabled;
+}
+
+VOID NTAPI SettingsUpdatedCallback(
+    _In_opt_ PVOID Parameter,
+    _In_opt_ PVOID Context
+    )
+{
+    EtLoadSettings();
 }
 
 PET_PROCESS_BLOCK EtGetProcessBlock(
@@ -574,26 +1078,43 @@ VOID EtInitializeProcessBlock(
     _In_ PPH_PROCESS_ITEM ProcessItem
     )
 {
-    ULONG sampleCount;
-
     memset(Block, 0, sizeof(ET_PROCESS_BLOCK));
     Block->ProcessItem = ProcessItem;
     PhInitializeQueuedLock(&Block->TextCacheLock);
 
-    sampleCount = PhGetIntegerSetting(L"SampleCount");
-    PhInitializeCircularBuffer_ULONG64(&Block->DiskReadHistory, sampleCount);
-    PhInitializeCircularBuffer_ULONG64(&Block->DiskWriteHistory, sampleCount);
-    PhInitializeCircularBuffer_ULONG64(&Block->NetworkSendHistory, sampleCount);
-    PhInitializeCircularBuffer_ULONG64(&Block->NetworkReceiveHistory, sampleCount);
+    PhInitializeCircularBuffer_ULONG64(&Block->DiskReadHistory, EtSampleCount);
+    PhInitializeCircularBuffer_ULONG64(&Block->DiskWriteHistory, EtSampleCount);
+    PhInitializeCircularBuffer_ULONG64(&Block->NetworkSendHistory, EtSampleCount);
+    PhInitializeCircularBuffer_ULONG64(&Block->NetworkReceiveHistory, EtSampleCount);
 
-    PhInitializeCircularBuffer_FLOAT(&Block->GpuHistory, sampleCount);
-    PhInitializeCircularBuffer_ULONG(&Block->MemoryHistory, sampleCount);
-    PhInitializeCircularBuffer_ULONG(&Block->MemorySharedHistory, sampleCount);
-    PhInitializeCircularBuffer_ULONG(&Block->GpuCommittedHistory, sampleCount);
+    PhInitializeCircularBuffer_FLOAT(&Block->GpuHistory, EtSampleCount);
+    PhInitializeCircularBuffer_ULONG(&Block->GpuMemoryHistory, EtSampleCount);
+    PhInitializeCircularBuffer_ULONG(&Block->GpuMemorySharedHistory, EtSampleCount);
+    PhInitializeCircularBuffer_ULONG(&Block->GpuCommittedHistory, EtSampleCount);
 
     //Block->GpuTotalRunningTimeDelta = PhAllocate(sizeof(PH_UINT64_DELTA) * EtGpuTotalNodeCount);
     //memset(Block->GpuTotalRunningTimeDelta, 0, sizeof(PH_UINT64_DELTA) * EtGpuTotalNodeCount);
     //Block->GpuTotalNodesHistory = PhAllocate(sizeof(PH_CIRCULAR_BUFFER_FLOAT) * EtGpuTotalNodeCount);
+
+    PhInitializeCircularBuffer_FLOAT(&Block->NpuHistory, EtSampleCount);
+    PhInitializeCircularBuffer_ULONG(&Block->NpuMemoryHistory, EtSampleCount);
+    PhInitializeCircularBuffer_ULONG(&Block->NpuMemorySharedHistory, EtSampleCount);
+    PhInitializeCircularBuffer_ULONG(&Block->NpuCommittedHistory, EtSampleCount);
+
+    //Block->GpuTotalRunningTimeDelta = PhAllocate(sizeof(PH_UINT64_DELTA) * EtNpuTotalNodeCount);
+    //memset(Block->GpuTotalRunningTimeDelta, 0, sizeof(PH_UINT64_DELTA) * EtNpuTotalNodeCount);
+    //Block->GpuTotalNodesHistory = PhAllocate(sizeof(PH_CIRCULAR_BUFFER_FLOAT) * EtNpuTotalNodeCount);
+
+    if (EtFramesEnabled)
+    {
+        PhInitializeCircularBuffer_FLOAT(&Block->FramesPerSecondHistory, EtSampleCount);
+        PhInitializeCircularBuffer_FLOAT(&Block->FramesLatencyHistory, EtSampleCount);
+        PhInitializeCircularBuffer_FLOAT(&Block->FramesDisplayLatencyHistory, EtSampleCount);
+        PhInitializeCircularBuffer_FLOAT(&Block->FramesMsBetweenPresentsHistory, EtSampleCount);
+        PhInitializeCircularBuffer_FLOAT(&Block->FramesMsInPresentApiHistory, EtSampleCount);
+        PhInitializeCircularBuffer_FLOAT(&Block->FramesMsUntilRenderCompleteHistory, EtSampleCount);
+        PhInitializeCircularBuffer_FLOAT(&Block->FramesMsUntilDisplayedHistory, EtSampleCount);
+    }
 
     InsertTailList(&EtProcessBlockListHead, &Block->ListEntry);
 }
@@ -602,20 +1123,31 @@ VOID EtDeleteProcessBlock(
     _In_ PET_PROCESS_BLOCK Block
     )
 {
-    for (ULONG i = 1; i <= ETPRTNC_MAXIMUM; i++)
-    {
-        PhClearReference(&Block->TextCache[i]);
-    }
-
     PhDeleteCircularBuffer_ULONG64(&Block->DiskReadHistory);
     PhDeleteCircularBuffer_ULONG64(&Block->DiskWriteHistory);
     PhDeleteCircularBuffer_ULONG64(&Block->NetworkSendHistory);
     PhDeleteCircularBuffer_ULONG64(&Block->NetworkReceiveHistory);
 
     PhDeleteCircularBuffer_ULONG(&Block->GpuCommittedHistory);
-    PhDeleteCircularBuffer_ULONG(&Block->MemorySharedHistory);
-    PhDeleteCircularBuffer_ULONG(&Block->MemoryHistory);
+    PhDeleteCircularBuffer_ULONG(&Block->GpuMemorySharedHistory);
+    PhDeleteCircularBuffer_ULONG(&Block->GpuMemoryHistory);
     PhDeleteCircularBuffer_FLOAT(&Block->GpuHistory);
+
+    PhDeleteCircularBuffer_ULONG(&Block->NpuCommittedHistory);
+    PhDeleteCircularBuffer_ULONG(&Block->NpuMemorySharedHistory);
+    PhDeleteCircularBuffer_ULONG(&Block->NpuMemoryHistory);
+    PhDeleteCircularBuffer_FLOAT(&Block->NpuHistory);
+
+    if (EtFramesEnabled)
+    {
+        PhDeleteCircularBuffer_FLOAT(&Block->FramesPerSecondHistory);
+        PhDeleteCircularBuffer_FLOAT(&Block->FramesLatencyHistory);
+        PhDeleteCircularBuffer_FLOAT(&Block->FramesDisplayLatencyHistory);
+        PhDeleteCircularBuffer_FLOAT(&Block->FramesMsBetweenPresentsHistory);
+        PhDeleteCircularBuffer_FLOAT(&Block->FramesMsInPresentApiHistory);
+        PhDeleteCircularBuffer_FLOAT(&Block->FramesMsUntilRenderCompleteHistory);
+        PhDeleteCircularBuffer_FLOAT(&Block->FramesMsUntilDisplayedHistory);
+    }
 
     RemoveEntryList(&Block->ListEntry);
 }
@@ -635,11 +1167,6 @@ VOID EtDeleteNetworkBlock(
     _In_ PET_NETWORK_BLOCK Block
     )
 {
-    for (ULONG i = 1; i <= ETNETNC_MAXIMUM; i++)
-    {
-        PhClearReference(&Block->TextCache[i]);
-    }
-
     RemoveEntryList(&Block->ListEntry);
 }
 
@@ -659,6 +1186,36 @@ VOID NTAPI ProcessItemDeleteCallback(
     )
 {
     EtDeleteProcessBlock(Extension);
+}
+
+VOID NTAPI ProcessNodeCreateCallback(
+    _In_ PVOID Object,
+    _In_ PH_EM_OBJECT_TYPE ObjectType,
+    _In_ PVOID Extension
+    )
+{
+    PPH_PROCESS_NODE processNode = Object;
+    PET_PROCESS_BLOCK block;
+
+    if (block = EtGetProcessBlock(processNode->ProcessItem))
+    {
+        block->ProcessNode = processNode;
+    }
+}
+
+VOID NTAPI ProcessNodeDeleteCallback(
+    _In_ PVOID Object,
+    _In_ PH_EM_OBJECT_TYPE ObjectType,
+    _In_ PVOID Extension
+    )
+{
+    PPH_PROCESS_NODE processNode = Object;
+    PET_PROCESS_BLOCK block;
+
+    if (block = EtGetProcessBlock(processNode->ProcessItem))
+    {
+        block->ProcessNode = NULL;
+    }
 }
 
 VOID NTAPI NetworkItemCreateCallback(
@@ -694,13 +1251,14 @@ LOGICAL DllMain(
             {
                 { StringSettingType, SETTING_NAME_DISK_TREE_LIST_COLUMNS, L"" },
                 { IntegerPairSettingType, SETTING_NAME_DISK_TREE_LIST_SORT, L"4,2" }, // 4, DescendingSortOrder
-                { IntegerSettingType, SETTING_NAME_ENABLE_D3DKMT, L"1" },
-                { IntegerSettingType, SETTING_NAME_ENABLE_DISKEXT, L"1" },
+                { IntegerSettingType, SETTING_NAME_ENABLE_GPUPERFCOUNTERS, L"1" },
+                { IntegerSettingType, SETTING_NAME_ENABLE_NPUPERFCOUNTERS, L"1" },
+                { IntegerSettingType, SETTING_NAME_ENABLE_DISKPERFCOUNTERS, L"1" },
                 { IntegerSettingType, SETTING_NAME_ENABLE_ETW_MONITOR, L"1" },
                 { IntegerSettingType, SETTING_NAME_ENABLE_GPU_MONITOR, L"1" },
+                { IntegerSettingType, SETTING_NAME_ENABLE_NPU_MONITOR, L"1" },
+                { IntegerSettingType, SETTING_NAME_ENABLE_FPS_MONITOR, L"0" },
                 { IntegerSettingType, SETTING_NAME_ENABLE_SYSINFO_GRAPHS, L"1" },
-                { StringSettingType, SETTING_NAME_GPU_NODE_BITMAP, L"01000000" },
-                { IntegerSettingType, SETTING_NAME_GPU_LAST_NODE_COUNT, L"0" },
                 { IntegerPairSettingType, SETTING_NAME_UNLOADED_WINDOW_POSITION, L"0,0" },
                 { ScalableIntegerPairSettingType, SETTING_NAME_UNLOADED_WINDOW_SIZE, L"@96|350,270" },
                 { StringSettingType, SETTING_NAME_UNLOADED_COLUMNS, L"" },
@@ -709,11 +1267,47 @@ LOGICAL DllMain(
                 { StringSettingType, SETTING_NAME_MODULE_SERVICES_COLUMNS, L"" },
                 { IntegerPairSettingType, SETTING_NAME_GPU_NODES_WINDOW_POSITION, L"0,0" },
                 { ScalableIntegerPairSettingType, SETTING_NAME_GPU_NODES_WINDOW_SIZE, L"@96|850,490" },
+                { IntegerPairSettingType, SETTING_NAME_NPU_NODES_WINDOW_POSITION, L"0,0" },
+                { ScalableIntegerPairSettingType, SETTING_NAME_NPU_NODES_WINDOW_SIZE, L"@96|850,490" },
                 { IntegerPairSettingType, SETTING_NAME_WSWATCH_WINDOW_POSITION, L"0,0" },
                 { ScalableIntegerPairSettingType, SETTING_NAME_WSWATCH_WINDOW_SIZE, L"@96|325,266" },
                 { StringSettingType, SETTING_NAME_WSWATCH_COLUMNS, L"" },
                 { StringSettingType, SETTING_NAME_TRAYICON_GUIDS, L"" },
-                { IntegerSettingType, SETTING_NAME_ENABLE_FAHRENHEIT, L"0" }
+                { IntegerSettingType, SETTING_NAME_ENABLE_FAHRENHEIT, L"0" },
+                { StringSettingType, SETTING_NAME_FW_TREE_LIST_COLUMNS, L"" },
+                { IntegerPairSettingType, SETTING_NAME_FW_TREE_LIST_SORT, L"12,2" },
+                { IntegerSettingType, SETTING_NAME_FW_IGNORE_PORTSCAN, L"0" },
+                { IntegerSettingType, SETTING_NAME_FW_IGNORE_LOOPBACK, L"1" },
+                { IntegerSettingType, SETTING_NAME_FW_IGNORE_ALLOW, L"0" },
+                { StringSettingType, SETTING_NAME_FW_SESSION_GUID, L"" },
+                { IntegerSettingType, SETTING_NAME_SHOWSYSINFOGRAPH, L"1" },
+                { StringSettingType, SETTING_NAME_WCT_TREE_LIST_COLUMNS, L"" },
+                { IntegerPairSettingType, SETTING_NAME_WCT_WINDOW_POSITION, L"0,0" },
+                { ScalableIntegerPairSettingType, SETTING_NAME_WCT_WINDOW_SIZE, L"@96|690,540" },
+                { IntegerPairSettingType, SETTING_NAME_REPARSE_WINDOW_POSITION, L"0,0" },
+                { ScalableIntegerPairSettingType, SETTING_NAME_REPARSE_WINDOW_SIZE, L"@96|510,380" },
+                { StringSettingType, SETTING_NAME_REPARSE_LISTVIEW_COLUMNS, L"" },
+                { StringSettingType, SETTING_NAME_REPARSE_OBJECTID_LISTVIEW_COLUMNS, L"" },
+                { StringSettingType, SETTING_NAME_REPARSE_SD_LISTVIEW_COLUMNS, L"" },
+                { IntegerPairSettingType, SETTING_NAME_PIPE_ENUM_WINDOW_POSITION, L"0,0" },
+                { ScalableIntegerPairSettingType, SETTING_NAME_PIPE_ENUM_WINDOW_SIZE, L"@96|510,380" },
+                { StringSettingType, SETTING_NAME_PIPE_ENUM_LISTVIEW_COLUMNS, L"" },
+                { StringSettingType, SETTING_NAME_PIPE_ENUM_LISTVIEW_COLUMNS_WITH_KSI, L"" },
+                { IntegerPairSettingType, SETTING_NAME_FIRMWARE_WINDOW_POSITION, L"0,0" },
+                { ScalableIntegerPairSettingType, SETTING_NAME_FIRMWARE_WINDOW_SIZE, L"@96|490,340" },
+                { StringSettingType, SETTING_NAME_FIRMWARE_LISTVIEW_COLUMNS, L"" },
+                { IntegerPairSettingType, SETTING_NAME_OBJMGR_WINDOW_POSITION, L"0,0" },
+                { ScalableIntegerPairSettingType, SETTING_NAME_OBJMGR_WINDOW_SIZE, L"@96|1065,627" },
+                { StringSettingType, SETTING_NAME_OBJMGR_COLUMNS, L"" },
+                { IntegerPairSettingType, SETTING_NAME_POOL_WINDOW_POSITION, L"0,0" },
+                { ScalableIntegerPairSettingType, SETTING_NAME_POOL_WINDOW_SIZE, L"@96|510,380" },
+                { StringSettingType, SETTING_NAME_POOL_TREE_LIST_COLUMNS, L"" },
+                { IntegerPairSettingType, SETTING_NAME_POOL_TREE_LIST_SORT, L"0,0" },
+                { IntegerPairSettingType, SETTING_NAME_BIGPOOL_WINDOW_POSITION, L"0,0" },
+                { ScalableIntegerPairSettingType, SETTING_NAME_BIGPOOL_WINDOW_SIZE, L"@96|510,380" },
+                { IntegerPairSettingType, SETTING_NAME_TPM_WINDOW_POSITION, L"0,0" },
+                { ScalableIntegerPairSettingType, SETTING_NAME_TPM_WINDOW_SIZE, L"@96|490,340" },
+                { StringSettingType, SETTING_NAME_TPM_LISTVIEW_COLUMNS, L"" },
             };
 
             PluginInstance = PhRegisterPlugin(PLUGIN_NAME, Instance, &info);
@@ -723,8 +1317,8 @@ LOGICAL DllMain(
 
             info->DisplayName = L"Extended Tools";
             info->Author = L"dmex, wj32";
-            info->Description = L"Extended functionality for Windows 7 and above, including ETW monitoring, GPU monitoring and a Disk tab.";
-            info->Url = L"https://wj32.org/processhacker/forums/viewtopic.php?t=1114";
+            info->Description = L"Extended functionality for Windows 7 and above, including ETW, GPU, Disk and Firewall monitoring tabs.";
+            info->Interface = &PluginInterface;
 
             PhRegisterCallback(
                 PhGetPluginCallback(PluginInstance, PluginCallbackLoad),
@@ -763,6 +1357,12 @@ LOGICAL DllMain(
                 &PluginPhSvcRequestCallbackRegistration
                 );
 
+            PhRegisterCallback(
+                PhGetGeneralCallback(GeneralCallbackMainMenuInitializing),
+                MainMenuInitializingCallback,
+                NULL,
+                &MainMenuInitializingCallbackRegistration
+                );
             PhRegisterCallback(
                 PhGetGeneralCallback(GeneralCallbackMainWindowShowing),
                 MainWindowShowingCallback,
@@ -858,12 +1458,26 @@ LOGICAL DllMain(
                 &ProcessStatsEventCallbackRegistration
                 );
 
+            PhRegisterCallback(
+                PhGetGeneralCallback(GeneralCallbackSettingsUpdated),
+                SettingsUpdatedCallback,
+                NULL,
+                &SettingsUpdatedCallbackRegistration
+                );
+
             PhPluginSetObjectExtension(
                 PluginInstance,
                 EmProcessItemType,
                 sizeof(ET_PROCESS_BLOCK),
                 ProcessItemCreateCallback,
                 ProcessItemDeleteCallback
+                );
+            PhPluginSetObjectExtension(
+                PluginInstance,
+                EmProcessNodeType,
+                0,
+                ProcessNodeCreateCallback,
+                ProcessNodeDeleteCallback
                 );
             PhPluginSetObjectExtension(
                 PluginInstance,

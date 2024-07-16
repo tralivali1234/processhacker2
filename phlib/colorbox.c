@@ -1,37 +1,35 @@
 /*
- * Process Hacker -
- *   color picker
+ * Copyright (c) 2022 Winsider Seminars & Solutions, Inc.  All rights reserved.
  *
- * Copyright (C) 2010 wj32
+ * This file is part of System Informer.
  *
- * This file is part of Process Hacker.
+ * Authors:
  *
- * Process Hacker is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
+ *     wj32    2010
+ *     dmex    2017-2023
  *
- * Process Hacker is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with Process Hacker.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include <ph.h>
 #include <colorbox.h>
+#include <guisup.h>
 
 #include <commdlg.h>
-
-#include <guisup.h>
 
 typedef struct _PHP_COLORBOX_CONTEXT
 {
     COLORREF SelectedColor;
-    BOOLEAN Hot;
-    BOOLEAN HasFocus;
+    union
+    {
+        BOOLEAN Flags;
+        struct
+        {
+            BOOLEAN Hot : 1;
+            BOOLEAN HasFocus : 1;
+            BOOLEAN EnableThemeSupport : 1;
+            BOOLEAN Spare : 5;
+        };
+    };
 } PHP_COLORBOX_CONTEXT, *PPHP_COLORBOX_CONTEXT;
 
 LRESULT CALLBACK PhpColorBoxWndProc(
@@ -53,7 +51,7 @@ BOOLEAN PhColorBoxInitialization(
     c.cbWndExtra = sizeof(PVOID);
     c.hInstance = PhInstanceHandle;
     c.hIcon = NULL;
-    c.hCursor = LoadCursor(NULL, IDC_ARROW);
+    c.hCursor = PhLoadCursor(NULL, IDC_ARROW);
     c.hbrBackground = NULL;
     c.lpszMenuName = NULL;
     c.lpszClassName = PH_COLORBOX_CLASSNAME;
@@ -83,6 +81,36 @@ VOID PhpFreeColorBoxContext(
     PhFree(Context);
 }
 
+UINT_PTR CALLBACK PhpColorBoxDlgHookProc(
+    _In_ HWND hwndDlg,
+    _In_ UINT uMsg,
+    _In_ WPARAM wParam,
+    _In_ LPARAM lParam
+    )
+{
+    switch (uMsg)
+    {
+    case WM_INITDIALOG:
+        {
+            LPCHOOSECOLOR chooseColor = (LPCHOOSECOLOR)lParam;
+            PPHP_COLORBOX_CONTEXT context = (PPHP_COLORBOX_CONTEXT)chooseColor->lCustData;
+
+            PhCenterWindow(hwndDlg, GetParent(hwndDlg));
+
+            PhInitializeWindowTheme(hwndDlg, context->EnableThemeSupport);
+        }
+        break;
+    case WM_CTLCOLORBTN:
+        return HANDLE_WM_CTLCOLORBTN(hwndDlg, wParam, lParam, PhWindowThemeControlColor);
+    case WM_CTLCOLORDLG:
+        return HANDLE_WM_CTLCOLORDLG(hwndDlg, wParam, lParam, PhWindowThemeControlColor);
+    case WM_CTLCOLORSTATIC:
+        return HANDLE_WM_CTLCOLORSTATIC(hwndDlg, wParam, lParam, PhWindowThemeControlColor);
+    }
+
+    return FALSE;
+}
+
 VOID PhpChooseColor(
     _In_ HWND hwnd,
     _In_ PPHP_COLORBOX_CONTEXT Context
@@ -94,7 +122,9 @@ VOID PhpChooseColor(
     chooseColor.hwndOwner = hwnd;
     chooseColor.rgbResult = Context->SelectedColor;
     chooseColor.lpCustColors = customColors;
-    chooseColor.Flags = CC_ANYCOLOR | CC_FULLOPEN | CC_RGBINIT;
+    chooseColor.lCustData = (LPARAM)Context;
+    chooseColor.lpfnHook = PhpColorBoxDlgHookProc;
+    chooseColor.Flags = CC_ANYCOLOR | CC_ENABLEHOOK | CC_FULLOPEN | CC_RGBINIT;
 
     if (ChooseColor(&chooseColor))
     {
@@ -112,12 +142,12 @@ LRESULT CALLBACK PhpColorBoxWndProc(
 {
     PPHP_COLORBOX_CONTEXT context;
 
-    context = (PPHP_COLORBOX_CONTEXT)GetWindowLongPtr(hwnd, 0);
+    context = PhGetWindowContextEx(hwnd);
 
     if (uMsg == WM_CREATE)
     {
         PhpCreateColorBoxContext(&context);
-        SetWindowLongPtr(hwnd, 0, (LONG_PTR)context);
+        PhSetWindowContextEx(hwnd, context);
     }
 
     if (!context)
@@ -132,7 +162,7 @@ LRESULT CALLBACK PhpColorBoxWndProc(
         break;
     case WM_DESTROY:
         {
-            SetWindowLongPtr(hwnd, 0, (LONG_PTR)NULL);
+            PhRemoveWindowContextEx(hwnd);
             PhpFreeColorBoxContext(context);
         }
         break;
@@ -224,6 +254,9 @@ LRESULT CALLBACK PhpColorBoxWndProc(
         return TRUE;
     case CBCM_GETCOLOR:
         return (LRESULT)context->SelectedColor;
+    case CBCM_THEMESUPPORT:
+        context->EnableThemeSupport = (BOOLEAN)wParam;
+        return TRUE;
     }
 
     return DefWindowProc(hwnd, uMsg, wParam, lParam);

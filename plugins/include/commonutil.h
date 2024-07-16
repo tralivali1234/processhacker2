@@ -1,23 +1,11 @@
 /*
- * Process Hacker Plugins - 
- *   CommonUtil Plugin
+ * Copyright (c) 2022 Winsider Seminars & Solutions, Inc.  All rights reserved.
  *
- * Copyright (C) 2016 dmex
+ * This file is part of System Informer.
  *
- * This file is part of Process Hacker.
+ * Authors:
  *
- * Process Hacker is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * Process Hacker is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with Process Hacker.  If not, see <http://www.gnu.org/licenses/>.
+ *     dmex    2016
  *
  */
 
@@ -51,57 +39,5 @@ CommonBitmapToIcon(
 
     return icon;
 }
-
-/**
- * Creates a Ansi string using format specifiers.
- *
- * \param Format The format-control string.
- * \param ArgPtr A pointer to the list of arguments.
- */
-FORCEINLINE
-PPH_BYTES 
-FormatAnsiString_V(
-    _In_ _Printf_format_string_ PSTR Format,
-    _In_ va_list ArgPtr
-    )
-{
-    PPH_BYTES string;
-    int length;
-
-    length = _vscprintf(Format, ArgPtr);
-
-    if (length == -1)
-        return NULL;
-
-    string = PhCreateBytesEx(NULL, length * sizeof(CHAR));
-
-    _vsnprintf(
-        string->Buffer,
-        length,
-        Format, ArgPtr
-        );
-
-    return string;
-}
-
-/**
- * Creates a Ansi string using format specifiers.
- *
- * \param Format The format-control string.
- */
-FORCEINLINE
-PPH_BYTES 
-FormatAnsiString(
-    _In_ _Printf_format_string_ PSTR Format,
-    ...
-    )
-{
-    va_list argptr;
-
-    va_start(argptr, Format);
-
-    return FormatAnsiString_V(Format, argptr);
-}
-
 
 #endif

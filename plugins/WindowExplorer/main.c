@@ -1,30 +1,17 @@
 /*
- * Process Hacker Window Explorer -
- *   main program
+ * Copyright (c) 2022 Winsider Seminars & Solutions, Inc.  All rights reserved.
  *
- * Copyright (C) 2011 wj32
- * Copyright (C) 2017 dmex
+ * This file is part of System Informer.
  *
- * This file is part of Process Hacker.
+ * Authors:
  *
- * Process Hacker is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
+ *     wj32    2011-2016
+ *     dmex    2017-2023
  *
- * Process Hacker is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with Process Hacker.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include "wndexp.h"
-#include "resource.h"
 
-BOOLEAN IsHookClient;
 PPH_PLUGIN PluginInstance;
 PH_CALLBACK_REGISTRATION PluginLoadCallbackRegistration;
 PH_CALLBACK_REGISTRATION PluginUnloadCallbackRegistration;
@@ -60,14 +47,11 @@ static BOOL CALLBACK WepEnumDesktopProc(
 }
 
 VOID NTAPI MenuItemCallback(
-    _In_opt_ PVOID Parameter,
-    _In_opt_ PVOID Context
+    _In_ PVOID Parameter,
+    _In_ PVOID Context
     )
 {
     PPH_PLUGIN_MENU_ITEM menuItem = Parameter;
-
-    if (!menuItem)
-        return;
 
     switch (menuItem->Id)
     {
@@ -76,7 +60,7 @@ VOID NTAPI MenuItemCallback(
             WE_WINDOW_SELECTOR selector;
 
             selector.Type = WeWindowSelectorAll;
-            WeShowWindowsDialog(WE_PhMainWndHandle, &selector);
+            WeShowWindowsDialog(WeGetMainWindowHandle(), &selector);
         }
         break;
     case ID_VIEW_DESKTOPWINDOWS:
@@ -88,7 +72,7 @@ VOID NTAPI MenuItemCallback(
             EnumDesktops(GetProcessWindowStation(), WepEnumDesktopProc, (LPARAM)desktopNames);
 
             if (PhaChoiceDialog(
-                WE_PhMainWndHandle,
+                WeGetMainWindowHandle(),
                 L"Desktop Windows",
                 L"Display windows for the following desktop:",
                 (PWSTR *)desktopNames->Items,
@@ -104,7 +88,7 @@ VOID NTAPI MenuItemCallback(
 
                 selector.Type = WeWindowSelectorDesktop;
                 PhSetReference(&selector.Desktop.DesktopName, selectedChoice);
-                WeShowWindowsDialog(WE_PhMainWndHandle, &selector);
+                WeShowWindowsDialog(WeGetMainWindowHandle(), &selector);
             }
         }
         break;
@@ -114,7 +98,7 @@ VOID NTAPI MenuItemCallback(
 
             selector.Type = WeWindowSelectorProcess;
             selector.Process.ProcessId = ((PPH_PROCESS_ITEM)menuItem->Context)->ProcessId;
-            WeShowWindowsDialog(WE_PhMainWndHandle, &selector);
+            WeShowWindowsDialog(WeGetMainWindowHandle(), &selector);
         }
         break;
     case ID_THREAD_WINDOWS:
@@ -123,23 +107,20 @@ VOID NTAPI MenuItemCallback(
 
             selector.Type = WeWindowSelectorThread;
             selector.Thread.ThreadId = ((PPH_THREAD_ITEM)menuItem->Context)->ThreadId;
-            WeShowWindowsDialog(WE_PhMainWndHandle, &selector);
+            WeShowWindowsDialog(WeGetMainWindowHandle(), &selector);
         }
         break;
     }
 }
 
 VOID NTAPI MainMenuInitializingCallback(
-    _In_opt_ PVOID Parameter,
-    _In_opt_ PVOID Context
+    _In_ PVOID Parameter,
+    _In_ PVOID Context
     )
 {
     PPH_PLUGIN_MENU_INFORMATION menuInfo = Parameter;
     ULONG insertIndex;
     PPH_EMENU_ITEM menuItem;
-
-    if (!menuInfo)
-        return;
 
     if (menuInfo->u.MainMenu.SubMenuIndex != PH_MENU_ITEM_LOCATION_VIEW)
         return;
@@ -160,17 +141,14 @@ VOID NTAPI MainMenuInitializingCallback(
 }
 
 VOID NTAPI ProcessPropertiesInitializingCallback(
-    _In_opt_ PVOID Parameter,
-    _In_opt_ PVOID Context
+    _In_ PVOID Parameter,
+    _In_ PVOID Context
     )
 {
     PPH_PLUGIN_PROCESS_PROPCONTEXT propContext = Parameter;
 
-    if (!propContext)
-        return;
-
     if (
-        propContext->ProcessItem->ProcessId != SYSTEM_IDLE_PROCESS_ID && 
+        propContext->ProcessItem->ProcessId != SYSTEM_IDLE_PROCESS_ID &&
         propContext->ProcessItem->ProcessId != SYSTEM_PROCESS_ID
         )
     {
@@ -183,17 +161,14 @@ VOID NTAPI ProcessPropertiesInitializingCallback(
 }
 
 VOID NTAPI ThreadMenuInitializingCallback(
-    _In_opt_ PVOID Parameter,
-    _In_opt_ PVOID Context
+    _In_ PVOID Parameter,
+    _In_ PVOID Context
     )
 {
     PPH_PLUGIN_MENU_INFORMATION menuInfo = Parameter;
     PPH_THREAD_ITEM threadItem;
     ULONG insertIndex;
     PPH_EMENU_ITEM menuItem;
-
-    if (!menuInfo)
-        return;
 
     if (menuInfo->u.Thread.NumberOfThreads == 1)
         threadItem = menuInfo->u.Thread.Threads[0];
@@ -208,7 +183,10 @@ VOID NTAPI ThreadMenuInitializingCallback(
     menuItem = PhPluginCreateEMenuItem(PluginInstance, 0, ID_THREAD_WINDOWS, L"&Windows", threadItem);
     PhInsertEMenuItem(menuInfo->Menu, menuItem, insertIndex);
 
-    if (!threadItem) menuItem->Flags |= PH_EMENU_DISABLED;
+    if (!threadItem)
+        PhSetDisabledEMenuItem(menuItem);
+    if (menuInfo->u.Thread.ProcessId == SYSTEM_IDLE_PROCESS_ID)
+        PhSetDisabledEMenuItem(menuItem);
 }
 
 LOGICAL DllMain(
@@ -233,6 +211,10 @@ LOGICAL DllMain(
                 { ScalableIntegerPairSettingType, SETTING_NAME_WINDOWS_PROPERTY_SIZE, L"@96|690,540" },
                 { StringSettingType, SETTING_NAME_WINDOWS_PROPLIST_COLUMNS, L"" },
                 { StringSettingType, SETTING_NAME_WINDOWS_PROPSTORAGE_COLUMNS, L"" },
+                { IntegerSettingType, SETTING_NAME_WINDOW_ENUM_ALTERNATE, L"1" },
+                { IntegerSettingType, SETTING_NAME_WINDOW_ENABLE_ICONS, L"1" },
+                { IntegerSettingType, SETTING_NAME_WINDOW_ENABLE_ICONS_INTERNAL, L"0" },
+                { IntegerSettingType, SETTING_NAME_WINDOW_ENABLE_PREVIEW, L"0" },
             };
 
             PluginInstance = PhRegisterPlugin(PLUGIN_NAME, Instance, &info);
@@ -243,21 +225,19 @@ LOGICAL DllMain(
             info->DisplayName = L"Window Explorer";
             info->Author = L"dmex, wj32";
             info->Description = L"View and manipulate windows.";
-            info->Url = L"https://wj32.org/processhacker/forums/viewtopic.php?t=1116";
-            info->HasOptions = FALSE;
 
-            PhRegisterCallback(
-                PhGetPluginCallback(PluginInstance, PluginCallbackLoad),
-                LoadCallback,
-                NULL,
-                &PluginLoadCallbackRegistration
-                );
-            PhRegisterCallback(
-                PhGetPluginCallback(PluginInstance, PluginCallbackUnload),
-                UnloadCallback,
-                NULL,
-                &PluginUnloadCallbackRegistration
-                );
+            //PhRegisterCallback(
+            //    PhGetPluginCallback(PluginInstance, PluginCallbackLoad),
+            //    LoadCallback,
+            //    NULL,
+            //    &PluginLoadCallbackRegistration
+            //    );
+            //PhRegisterCallback(
+            //    PhGetPluginCallback(PluginInstance, PluginCallbackUnload),
+            //    UnloadCallback,
+            //    NULL,
+            //    &PluginUnloadCallbackRegistration
+            //    );
             PhRegisterCallback(
                 PhGetPluginCallback(PluginInstance, PluginCallbackMenuItem),
                 MenuItemCallback,
@@ -284,7 +264,7 @@ LOGICAL DllMain(
                 &ThreadMenuInitializingCallbackRegistration
                 );
 
-            PhAddSettings(settings, RTL_NUMBER_OF(settings));    
+            PhAddSettings(settings, RTL_NUMBER_OF(settings));
         }
         break;
     }

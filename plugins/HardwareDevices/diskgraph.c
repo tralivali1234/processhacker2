@@ -1,108 +1,143 @@
-﻿/*
- * Process Hacker Plugins -
- *   Hardware Devices Plugin
+/*
+ * Copyright (c) 2022 Winsider Seminars & Solutions, Inc.  All rights reserved.
  *
- * Copyright (C) 2015-2016 dmex
+ * This file is part of System Informer.
  *
- * This file is part of Process Hacker.
+ * Authors:
  *
- * Process Hacker is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
+ *     dmex    2015-2024
  *
- * Process Hacker is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with Process Hacker.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include "devices.h"
 
-VOID DiskDriveUpdateGraphs(
+VOID DiskDeviceUpdatePanel(
     _Inout_ PDV_DISK_SYSINFO_CONTEXT Context
     )
 {
-    Context->GraphState.Valid = FALSE;
-    Context->GraphState.TooltipIndex = -1;
-    Graph_MoveGrid(Context->GraphHandle, 1);
-    Graph_Draw(Context->GraphHandle);
-    Graph_UpdateTooltip(Context->GraphHandle);
-    InvalidateRect(Context->GraphHandle, NULL, FALSE);
-}
+    PH_FORMAT format[3];
+    WCHAR formatBuffer[256];
 
-VOID DiskDriveUpdatePanel(
-    _Inout_ PDV_DISK_SYSINFO_CONTEXT Context
-    )
-{
-    PhSetDialogItemText(Context->PanelWindowHandle, IDC_STAT_BREAD, PhaFormatSize(Context->DiskEntry->BytesReadDelta.Value, ULONG_MAX)->Buffer);
-    PhSetDialogItemText(Context->PanelWindowHandle, IDC_STAT_BWRITE, PhaFormatSize(Context->DiskEntry->BytesWrittenDelta.Value, ULONG_MAX)->Buffer);
-    PhSetDialogItemText(Context->PanelWindowHandle, IDC_STAT_BTOTAL, PhaFormatSize(Context->DiskEntry->BytesReadDelta.Value + Context->DiskEntry->BytesWrittenDelta.Value, ULONG_MAX)->Buffer);
+    PhInitFormatSize(&format[0], Context->DiskEntry->BytesReadDelta.Value);
 
-    PhSetDialogItemText(Context->PanelWindowHandle, IDC_STAT_ACTIVE,
-        PhaFormatString(L"%.0f%%", Context->DiskEntry->ActiveTime)->Buffer
-        );
-    PhSetDialogItemText(Context->PanelWindowHandle, IDC_STAT_RESPONSETIME,
-        PhaFormatString(L"%.1f ms", Context->DiskEntry->ResponseTime / PH_TICKS_PER_MS)->Buffer
-        );
-    PhSetDialogItemText(Context->PanelWindowHandle, IDC_STAT_QUEUELENGTH,
-        PhaFormatString(L"%s/s", PhaFormatSize(Context->DiskEntry->BytesReadDelta.Delta + Context->DiskEntry->BytesWrittenDelta.Delta, ULONG_MAX)->Buffer)->Buffer
-        );
-}
-
-VOID UpdateDiskDriveDialog(
-    _Inout_ PDV_DISK_SYSINFO_CONTEXT Context
-    )
-{
-    if (!PhIsNullOrEmptyString(Context->DiskEntry->DiskName))
-        PhSetDialogItemText(Context->WindowHandle, IDC_DISKNAME, PhGetString(Context->DiskEntry->DiskName));
+    if (PhFormatToBuffer(format, 1, formatBuffer, sizeof(formatBuffer), NULL))
+        PhSetWindowText(Context->DiskDevicePanelReadLabel, formatBuffer);
     else
-        PhSetDialogItemText(Context->WindowHandle, IDC_DISKNAME, L"Unknown disk");
+        PhSetWindowText(Context->DiskDevicePanelReadLabel, PhaFormatSize(Context->DiskEntry->BytesReadDelta.Value, ULONG_MAX)->Buffer);
 
-    if (!PhIsNullOrEmptyString(Context->DiskEntry->DiskIndexName))
-        PhSetDialogItemText(Context->WindowHandle, IDC_DISKMOUNTPATH, PhGetString(Context->DiskEntry->DiskIndexName));
+    PhInitFormatSize(&format[0], Context->DiskEntry->BytesWrittenDelta.Value);
+
+    if (PhFormatToBuffer(format, 1, formatBuffer, sizeof(formatBuffer), NULL))
+        PhSetWindowText(Context->DiskDevicePanelWriteLabel, formatBuffer);
     else
-        PhSetDialogItemText(Context->WindowHandle, IDC_DISKMOUNTPATH, L"Unknown disk");
+        PhSetWindowText(Context->DiskDevicePanelWriteLabel, PhaFormatSize(Context->DiskEntry->BytesWrittenDelta.Value, ULONG_MAX)->Buffer);
 
-    DiskDriveUpdateGraphs(Context);
-    DiskDriveUpdatePanel(Context);
+    PhInitFormatSize(&format[0], Context->DiskEntry->BytesReadDelta.Value + Context->DiskEntry->BytesWrittenDelta.Value);
+
+    if (PhFormatToBuffer(format, 1, formatBuffer, sizeof(formatBuffer), NULL))
+        PhSetWindowText(Context->DiskDevicePanelTotalLabel, formatBuffer);
+    else
+        PhSetWindowText(Context->DiskDevicePanelTotalLabel, PhaFormatSize(Context->DiskEntry->BytesReadDelta.Value + Context->DiskEntry->BytesWrittenDelta.Value, ULONG_MAX)->Buffer);
+
+    PhInitFormatF(&format[0], Context->DiskEntry->ActiveTime, 0);
+    PhInitFormatC(&format[1], L'%');
+
+    if (PhFormatToBuffer(format, 2, formatBuffer, sizeof(formatBuffer), NULL))
+        PhSetWindowText(Context->DiskDevicePanelActiveLabel, formatBuffer);
+    else
+        PhSetWindowText(Context->DiskDevicePanelActiveLabel, PhaFormatString(L"%.0f%%", Context->DiskEntry->ActiveTime)->Buffer);
+
+    PhInitFormatF(&format[0], Context->DiskEntry->ResponseTime / PH_TICKS_PER_MS, 1);
+    PhInitFormatS(&format[1], L" ms");
+
+    if (PhFormatToBuffer(format, 2, formatBuffer, sizeof(formatBuffer), NULL))
+        PhSetWindowText(Context->DiskDevicePanelTimeLabel, formatBuffer);
+    else
+        PhSetWindowText(Context->DiskDevicePanelTimeLabel, PhaFormatString(L"%.1f ms", Context->DiskEntry->ResponseTime / PH_TICKS_PER_MS)->Buffer);
+
+    PhInitFormatSize(&format[0], Context->DiskEntry->BytesReadDelta.Delta + Context->DiskEntry->BytesWrittenDelta.Delta);
+    PhInitFormatS(&format[1], L"/s");
+
+    if (PhFormatToBuffer(format, 2, formatBuffer, sizeof(formatBuffer), NULL))
+        PhSetWindowText(Context->DiskDevicePanelBytesLabel, formatBuffer);
+    else
+        PhSetWindowText(Context->DiskDevicePanelBytesLabel, PhaFormatString(L"%s/s", PhaFormatSize(Context->DiskEntry->BytesReadDelta.Delta + Context->DiskEntry->BytesWrittenDelta.Delta, ULONG_MAX)->Buffer)->Buffer);
+
+    PhInitFormatI64UGroupDigits(&format[0], Context->DiskEntry->QueueDepth);
+    PhInitFormatS(&format[1], L" | ");
+    PhInitFormatI64UGroupDigits(&format[2], Context->DiskEntry->ReadCountDelta.Delta + Context->DiskEntry->WriteCountDelta.Delta);
+
+    if (PhFormatToBuffer(format, 3, formatBuffer, sizeof(formatBuffer), NULL))
+        PhSetWindowText(GetDlgItem(Context->PanelWindowHandle, IDC_STAT_QUEUELENGTH), formatBuffer);
+    else
+        PhSetWindowText(GetDlgItem(Context->PanelWindowHandle, IDC_STAT_QUEUELENGTH), PhaFormatString(L"%lu | %lu", Context->DiskEntry->QueueDepth, Context->DiskEntry->ReadCountDelta.Delta + Context->DiskEntry->WriteCountDelta.Delta)->Buffer);
+
+    PhInitFormatI64UGroupDigits(&format[0], Context->DiskEntry->SplitCount);
+
+    if (PhFormatToBuffer(format, 1, formatBuffer, sizeof(formatBuffer), NULL))
+        PhSetWindowText(GetDlgItem(Context->PanelWindowHandle, IDC_STAT_SPLITCOUNT), formatBuffer);
+    else
+        PhSetWindowText(GetDlgItem(Context->PanelWindowHandle, IDC_STAT_SPLITCOUNT), PhaFormatString(L"%lu", Context->DiskEntry->SplitCount)->Buffer);
 }
 
-VOID UpdateDiskIndexText(
-    _Inout_ PDV_DISK_SYSINFO_CONTEXT Context
+VOID DiskDeviceUpdateTitle(
+    _In_ PDV_DISK_SYSINFO_CONTEXT Context
     )
 {
-    // If our delayed lookup of the disk name, index and type hasn't fired then query the information now.
-    DiskDriveUpdateDeviceInfo(NULL, Context->DiskEntry);
+    if (Context->DiskEntry->PendingQuery)
+    {
+        if (Context->DiskPathLabel)
+            PhSetWindowText(Context->DiskPathLabel, L"Pending...");
+        if (Context->DiskNameLabel)
+            PhSetWindowText(Context->DiskNameLabel, L"Pending...");
+    }
+    else
+    {
+        if (Context->DiskPathLabel)
+            PhSetWindowText(Context->DiskPathLabel, PhGetStringOrDefault(Context->DiskEntry->DiskIndexName, L"Unknown"));
+        if (Context->DiskNameLabel)
+            PhSetWindowText(Context->DiskNameLabel, PhGetStringOrDefault(Context->DiskEntry->DiskName, L"Unknown"));
+    }
+}
 
-    // TODO: Move into DiskDriveUpdateDeviceInfo.
-    if (Context->DiskEntry->DiskIndex != ULONG_MAX && !Context->DiskEntry->DiskIndexName)
+VOID DiskDeviceUpdateDeviceMountPoints(
+    _In_ PDV_DISK_ENTRY DiskEntry
+    )
+{
+    DiskDeviceUpdateDeviceInfo(NULL, DiskEntry);
+
+    if (DiskEntry->DiskIndex != ULONG_MAX)
     {
         // Query the disk DosDevices mount points.
-        PPH_STRING diskMountPoints = PH_AUTO_T(PH_STRING, DiskDriveQueryDosMountPoints(Context->DiskEntry->DiskIndex));
+        PPH_STRING diskMountPoints = PH_AUTO_T(PH_STRING, DiskDriveQueryDosMountPoints(DiskEntry->DiskIndex));
 
         if (!PhIsNullOrEmptyString(diskMountPoints))
         {
-            PhMoveReference(&Context->DiskEntry->DiskIndexName, PhFormatString(
-                L"Disk %lu (%s)",
-                Context->DiskEntry->DiskIndex,
-                PhGetString(diskMountPoints)
-                ));
+            PH_FORMAT format[5];
+
+            // Disk %lu (%s)
+            PhInitFormatS(&format[0], L"Disk ");
+            PhInitFormatU(&format[1], DiskEntry->DiskIndex);
+            PhInitFormatS(&format[2], L" (");
+            PhInitFormatSR(&format[3], diskMountPoints->sr);
+            PhInitFormatC(&format[4], L')');
+
+            PhMoveReference(&DiskEntry->DiskIndexName, PhFormat(format, RTL_NUMBER_OF(format), 0));
         }
         else
         {
-            PhMoveReference(&Context->DiskEntry->DiskIndexName, PhFormatString(
-                L"Disk %lu",
-                Context->DiskEntry->DiskIndex
-                ));
+            PH_FORMAT format[2];
+
+            // Disk %lu
+            PhInitFormatS(&format[0], L"Disk ");
+            PhInitFormatU(&format[1], DiskEntry->DiskIndex);
+
+            PhMoveReference(&DiskEntry->DiskIndexName, PhFormat(format, RTL_NUMBER_OF(format), 0));
         }
     }
 }
 
-INT_PTR CALLBACK DiskDrivePanelDialogProc(
+INT_PTR CALLBACK DiskDevicePanelDialogProc(
     _In_ HWND hwndDlg,
     _In_ UINT uMsg,
     _In_ WPARAM wParam,
@@ -120,11 +155,6 @@ INT_PTR CALLBACK DiskDrivePanelDialogProc(
     else
     {
         context = PhGetWindowContext(hwndDlg, PH_WINDOW_CONTEXT_DEFAULT);
-
-        if (uMsg == WM_NCDESTROY)
-        {
-            PhRemoveWindowContext(hwndDlg, PH_WINDOW_CONTEXT_DEFAULT);
-        }
     }
 
     if (context == NULL)
@@ -132,22 +162,369 @@ INT_PTR CALLBACK DiskDrivePanelDialogProc(
 
     switch (uMsg)
     {
+    case WM_INITDIALOG:
+        {
+            context->DiskDevicePanelReadLabel = GetDlgItem(hwndDlg, IDC_STAT_BREAD);
+            context->DiskDevicePanelWriteLabel = GetDlgItem(hwndDlg, IDC_STAT_BWRITE);
+            context->DiskDevicePanelTotalLabel = GetDlgItem(hwndDlg, IDC_STAT_BTOTAL);
+            context->DiskDevicePanelActiveLabel = GetDlgItem(hwndDlg, IDC_STAT_ACTIVE);
+            context->DiskDevicePanelTimeLabel = GetDlgItem(hwndDlg, IDC_STAT_RESPONSETIME);
+            context->DiskDevicePanelBytesLabel = GetDlgItem(hwndDlg, IDC_STAT_BYTESDELTA);
+        }
+        break;
+    case WM_NCDESTROY:
+        {
+            PhRemoveWindowContext(hwndDlg, PH_WINDOW_CONTEXT_DEFAULT);
+        }
+        break;
     case WM_COMMAND:
         {
             switch (GET_WM_COMMAND_ID(wParam, lParam))
             {
             case IDC_DETAILS:
-                ShowDiskDriveDetailsDialog(context);
+                ShowDiskDeviceDetailsDialog(context);
                 break;
             }
         }
         break;
+    case WM_CTLCOLORBTN:
+        return HANDLE_WM_CTLCOLORBTN(hwndDlg, wParam, lParam, PhWindowThemeControlColor);
+    case WM_CTLCOLORDLG:
+        return HANDLE_WM_CTLCOLORDLG(hwndDlg, wParam, lParam, PhWindowThemeControlColor);
+    case WM_CTLCOLORSTATIC:
+        return HANDLE_WM_CTLCOLORSTATIC(hwndDlg, wParam, lParam, PhWindowThemeControlColor);
     }
 
     return FALSE;
 }
 
-INT_PTR CALLBACK DiskDriveDialogProc(
+VOID DiskDeviceUpdateDialogDpi(
+    _In_ PDV_DISK_SYSINFO_CONTEXT Context
+    )
+{
+    Context->GraphPadding = PhGetDpi(RAPL_GRAPH_PADDING, Context->SysinfoSection->Parameters->WindowDpi);
+}
+
+VOID DiskDeviceCreateGraphs(
+    _Inout_ PDV_DISK_SYSINFO_CONTEXT Context
+    )
+{
+    PhInitializeGraphState(&Context->GraphReadState);
+    PhInitializeGraphState(&Context->GraphWriteState);
+
+    Context->GraphReadHandle = CreateWindow(
+        PH_GRAPH_CLASSNAME,
+        NULL,
+        WS_VISIBLE | WS_CHILD | WS_BORDER,
+        0,
+        0,
+        3,
+        3,
+        Context->WindowHandle,
+        NULL,
+        NULL,
+        NULL
+        );
+    Graph_SetTooltip(Context->GraphReadHandle, TRUE);
+
+    Context->GraphWriteHandle = CreateWindow(
+        PH_GRAPH_CLASSNAME,
+        NULL,
+        WS_VISIBLE | WS_CHILD | WS_BORDER,
+        0,
+        0,
+        3,
+        3,
+        Context->WindowHandle,
+        NULL,
+        NULL,
+        NULL
+        );
+    Graph_SetTooltip(Context->GraphWriteHandle, TRUE);
+
+    Context->LabelReadHandle = GetDlgItem(Context->WindowHandle, IDC_UP_L);
+    Context->LabelWriteHandle = GetDlgItem(Context->WindowHandle, IDC_DOWN_L);
+}
+
+VOID DiskDeviceUpdateGraphs(
+    _Inout_ PDV_DISK_SYSINFO_CONTEXT Context
+    )
+{
+    Context->GraphReadState.Valid = FALSE;
+    Context->GraphReadState.TooltipIndex = ULONG_MAX;
+    Graph_MoveGrid(Context->GraphWriteHandle, 1);
+    Graph_Draw(Context->GraphWriteHandle);
+    Graph_UpdateTooltip(Context->GraphWriteHandle);
+    InvalidateRect(Context->GraphWriteHandle, NULL, FALSE);
+
+    Context->GraphWriteState.Valid = FALSE;
+    Context->GraphWriteState.TooltipIndex = ULONG_MAX;
+    Graph_MoveGrid(Context->GraphReadHandle, 1);
+    Graph_Draw(Context->GraphReadHandle);
+    Graph_UpdateTooltip(Context->GraphReadHandle);
+    InvalidateRect(Context->GraphReadHandle, NULL, FALSE);
+}
+
+VOID DiskDeviceLayoutGraphs(
+    _Inout_ PDV_DISK_SYSINFO_CONTEXT Context
+    )
+{
+    RECT clientRect;
+    RECT labelRect;
+    RECT margin;
+    ULONG graphWidth;
+    ULONG graphHeight;
+    HDWP deferHandle;
+    ULONG y;
+
+    Context->GraphReadState.Valid = FALSE;
+    Context->GraphReadState.TooltipIndex = ULONG_MAX;
+    Context->GraphWriteState.Valid = FALSE;
+    Context->GraphWriteState.TooltipIndex = ULONG_MAX;
+
+    margin = Context->GraphMargin;
+    PhGetSizeDpiValue(&margin, Context->SysinfoSection->Parameters->WindowDpi, TRUE);
+
+    GetClientRect(Context->WindowHandle, &clientRect);
+    GetClientRect(Context->LabelWriteHandle, &labelRect);
+    graphWidth = clientRect.right - margin.left - margin.right;
+    graphHeight = (clientRect.bottom - margin.top - margin.bottom - labelRect.bottom * 2 - Context->GraphPadding * 3) / 2;
+
+    deferHandle = BeginDeferWindowPos(4);
+    y = margin.top;
+
+    deferHandle = DeferWindowPos(
+        deferHandle,
+        Context->LabelReadHandle,
+        NULL,
+        margin.left,
+        y,
+        0,
+        0,
+        SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOZORDER
+        );
+    y += labelRect.bottom + Context->GraphPadding;
+
+    deferHandle = DeferWindowPos(
+        deferHandle,
+        Context->GraphReadHandle,
+        NULL,
+        margin.left,
+        y,
+        graphWidth,
+        graphHeight,
+        SWP_NOACTIVATE | SWP_NOZORDER
+        );
+    y += graphHeight + Context->GraphPadding;
+
+    deferHandle = DeferWindowPos(
+        deferHandle,
+        Context->LabelWriteHandle,
+        NULL,
+        margin.left,
+        y,
+        0,
+        0,
+        SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOZORDER
+        );
+    y += labelRect.bottom + Context->GraphPadding;
+
+    deferHandle = DeferWindowPos(
+        deferHandle,
+        Context->GraphWriteHandle,
+        NULL,
+        margin.left,
+        y,
+        graphWidth,
+        graphHeight,
+        SWP_NOACTIVATE | SWP_NOZORDER
+        );
+    y += graphHeight + Context->GraphPadding;
+
+    EndDeferWindowPos(deferHandle);
+}
+
+VOID DiskDeviceNotifyReadGraph(
+    _Inout_ PDV_DISK_SYSINFO_CONTEXT Context,
+    _In_ NMHDR *Header
+    )
+{
+    switch (Header->code)
+    {
+    case GCN_GETDRAWINFO:
+        {
+            PPH_GRAPH_GETDRAWINFO getDrawInfo = (PPH_GRAPH_GETDRAWINFO)Header;
+            PPH_GRAPH_DRAW_INFO drawInfo = getDrawInfo->DrawInfo;
+
+            drawInfo->Flags = PH_GRAPH_USE_GRID_X | PH_GRAPH_USE_GRID_Y | PH_GRAPH_LABEL_MAX_Y;
+            Context->SysinfoSection->Parameters->ColorSetupFunction(drawInfo, PhGetIntegerSetting(L"ColorIoReadOther"), 0, Context->SysinfoSection->Parameters->WindowDpi);
+
+            PhGraphStateGetDrawInfo(
+                &Context->GraphWriteState,
+                getDrawInfo,
+                Context->DiskEntry->ReadBuffer.Count
+                );
+
+            if (!Context->GraphWriteState.Valid)
+            {
+                ULONG i;
+                FLOAT max = 4 * 1024; // Minimum scaling 4KB
+
+                for (i = 0; i < drawInfo->LineDataCount; i++)
+                {
+                    FLOAT data1;
+
+                    Context->GraphWriteState.Data1[i] = data1 = (FLOAT)PhGetItemCircularBuffer_ULONG64(&Context->DiskEntry->ReadBuffer, i);
+
+                    if (max < data1)
+                        max = data1;
+                }
+
+                if (max != 0)
+                {
+                    // Scale the data.
+
+                    PhDivideSinglesBySingle(
+                        Context->GraphWriteState.Data1,
+                        max,
+                        drawInfo->LineDataCount
+                        );
+                }
+
+                drawInfo->LabelYFunction = PhSiSizeLabelYFunction;
+                drawInfo->LabelYFunctionParameter = max;
+
+                Context->GraphWriteState.Valid = TRUE;
+            }
+        }
+        break;
+    case GCN_GETTOOLTIPTEXT:
+        {
+            PPH_GRAPH_GETTOOLTIPTEXT getTooltipText = (PPH_GRAPH_GETTOOLTIPTEXT)Header;
+
+            if (getTooltipText->Index < getTooltipText->TotalCount)
+            {
+                if (Context->GraphWriteState.TooltipIndex != getTooltipText->Index)
+                {
+                    ULONG64 value;
+                    PH_FORMAT format[4];
+
+                    value = PhGetItemCircularBuffer_ULONG64(
+                        &Context->DiskEntry->ReadBuffer,
+                        getTooltipText->Index
+                        );
+
+                    // R: %s\nW: %s\n%s
+                    PhInitFormatS(&format[0], L"R: ");
+                    PhInitFormatSize(&format[1], value);
+                    PhInitFormatC(&format[2], L'\n');
+                    PhInitFormatSR(&format[3], PH_AUTO_T(PH_STRING, PhGetStatisticsTimeString(NULL, getTooltipText->Index))->sr);
+
+                    PhMoveReference(&Context->GraphWriteState.TooltipText, PhFormat(format, RTL_NUMBER_OF(format), 0));
+                }
+
+                getTooltipText->Text = PhGetStringRef(Context->GraphWriteState.TooltipText);
+            }
+        }
+        break;
+    }
+}
+
+VOID DiskDeviceNotifyWriteGraph(
+    _Inout_ PDV_DISK_SYSINFO_CONTEXT Context,
+    _In_ NMHDR *Header
+    )
+{
+    switch (Header->code)
+    {
+    case GCN_GETDRAWINFO:
+        {
+            PPH_GRAPH_GETDRAWINFO getDrawInfo = (PPH_GRAPH_GETDRAWINFO)Header;
+            PPH_GRAPH_DRAW_INFO drawInfo = getDrawInfo->DrawInfo;
+
+            drawInfo->Flags = PH_GRAPH_USE_GRID_X | PH_GRAPH_USE_GRID_Y | PH_GRAPH_LABEL_MAX_Y;
+            Context->SysinfoSection->Parameters->ColorSetupFunction(drawInfo, PhGetIntegerSetting(L"ColorIoWrite"), 0, Context->SysinfoSection->Parameters->WindowDpi);
+
+            PhGraphStateGetDrawInfo(
+                &Context->GraphReadState,
+                getDrawInfo,
+                Context->DiskEntry->WriteBuffer.Count
+                );
+
+            if (!Context->GraphReadState.Valid)
+            {
+                ULONG i;
+                FLOAT max = 4 * 1024; // Minimum scaling 4KB
+
+                for (i = 0; i < drawInfo->LineDataCount; i++)
+                {
+                    FLOAT data1;
+
+                    Context->GraphReadState.Data1[i] = data1 = (FLOAT)PhGetItemCircularBuffer_ULONG64(&Context->DiskEntry->WriteBuffer, i);
+
+                    if (max < data1)
+                        max = data1;
+                }
+
+                if (max != 0)
+                {
+                    // Scale the data.
+
+                    PhDivideSinglesBySingle(
+                        Context->GraphReadState.Data1,
+                        max,
+                        drawInfo->LineDataCount
+                        );
+                }
+
+                drawInfo->LabelYFunction = PhSiSizeLabelYFunction;
+                drawInfo->LabelYFunctionParameter = max;
+
+                Context->GraphReadState.Valid = TRUE;
+            }
+        }
+        break;
+    case GCN_GETTOOLTIPTEXT:
+        {
+            PPH_GRAPH_GETTOOLTIPTEXT getTooltipText = (PPH_GRAPH_GETTOOLTIPTEXT)Header;
+
+            if (getTooltipText->Index < getTooltipText->TotalCount)
+            {
+                if (Context->GraphReadState.TooltipIndex != getTooltipText->Index)
+                {
+                    ULONG64 value;
+                    PH_FORMAT format[4];
+
+                    value = PhGetItemCircularBuffer_ULONG64(
+                        &Context->DiskEntry->WriteBuffer,
+                        getTooltipText->Index
+                        );
+
+                    // R: %s\nW: %s\n%s
+                    PhInitFormatS(&format[0], L"W: ");
+                    PhInitFormatSize(&format[1], value);
+                    PhInitFormatC(&format[2], L'\n');
+                    PhInitFormatSR(&format[3], PH_AUTO_T(PH_STRING, PhGetStatisticsTimeString(NULL, getTooltipText->Index))->sr);
+
+                    PhMoveReference(&Context->GraphReadState.TooltipText, PhFormat(format, RTL_NUMBER_OF(format), 0));
+                }
+
+                getTooltipText->Text = PhGetStringRef(Context->GraphReadState.TooltipText);
+            }
+        }
+        break;
+    }
+}
+
+VOID DiskDeviceTickDialog(
+    _Inout_ PDV_DISK_SYSINFO_CONTEXT Context
+    )
+{
+    DiskDeviceUpdateGraphs(Context);
+    DiskDeviceUpdatePanel(Context);
+}
+
+INT_PTR CALLBACK DiskDeviceDialogProc(
     _In_ HWND hwndDlg,
     _In_ UINT uMsg,
     _In_ WPARAM wParam,
@@ -165,20 +542,6 @@ INT_PTR CALLBACK DiskDriveDialogProc(
     else
     {
         context = PhGetWindowContext(hwndDlg, PH_WINDOW_CONTEXT_DEFAULT);
-
-        if (uMsg == WM_DESTROY)
-        {
-            PhDeleteLayoutManager(&context->LayoutManager);
-            PhDeleteGraphState(&context->GraphState);
-
-            if (context->GraphHandle)
-                DestroyWindow(context->GraphHandle);
-
-            if (context->PanelWindowHandle)
-                DestroyWindow(context->PanelWindowHandle);
-
-            PhRemoveWindowContext(hwndDlg, PH_WINDOW_CONTEXT_DEFAULT);
-        }
     }
 
     if (context == NULL)
@@ -192,167 +555,134 @@ INT_PTR CALLBACK DiskDriveDialogProc(
             PPH_LAYOUT_ITEM panelItem;
 
             context->WindowHandle = hwndDlg;
+            context->DiskPathLabel = GetDlgItem(hwndDlg, IDC_TITLE);
+            context->DiskNameLabel = GetDlgItem(hwndDlg, IDC_DEVICENAME);
 
-            PhInitializeGraphState(&context->GraphState);
             PhInitializeLayoutManager(&context->LayoutManager, hwndDlg);
-
-            PhAddLayoutItem(&context->LayoutManager, GetDlgItem(hwndDlg, IDC_DISKMOUNTPATH), NULL, PH_ANCHOR_LEFT | PH_ANCHOR_TOP | PH_ANCHOR_RIGHT | PH_LAYOUT_FORCE_INVALIDATE);
-            PhAddLayoutItem(&context->LayoutManager, GetDlgItem(hwndDlg, IDC_DISKNAME), NULL, PH_ANCHOR_RIGHT | PH_ANCHOR_TOP | PH_LAYOUT_FORCE_INVALIDATE);
+            PhAddLayoutItem(&context->LayoutManager, context->DiskPathLabel, NULL, PH_ANCHOR_LEFT | PH_ANCHOR_TOP | PH_ANCHOR_RIGHT | PH_LAYOUT_FORCE_INVALIDATE);
+            PhAddLayoutItem(&context->LayoutManager, context->DiskNameLabel, NULL, PH_ANCHOR_RIGHT | PH_ANCHOR_TOP | PH_LAYOUT_FORCE_INVALIDATE);
             graphItem = PhAddLayoutItem(&context->LayoutManager, GetDlgItem(hwndDlg, IDC_GRAPH_LAYOUT), NULL, PH_ANCHOR_ALL);
-            panelItem = PhAddLayoutItem(&context->LayoutManager, GetDlgItem(hwndDlg, IDC_LAYOUT), NULL, PH_ANCHOR_LEFT | PH_ANCHOR_RIGHT | PH_ANCHOR_BOTTOM);
+            panelItem = PhAddLayoutItem(&context->LayoutManager, GetDlgItem(hwndDlg, IDC_PANEL_LAYOUT), NULL, PH_ANCHOR_LEFT | PH_ANCHOR_RIGHT | PH_ANCHOR_BOTTOM);
+            context->GraphMargin = graphItem->Margin;
 
-            SetWindowFont(GetDlgItem(hwndDlg, IDC_DISKMOUNTPATH), context->SysinfoSection->Parameters->LargeFont, FALSE);
-            SetWindowFont(GetDlgItem(hwndDlg, IDC_DISKNAME), context->SysinfoSection->Parameters->MediumFont, FALSE);
+            SetWindowFont(context->DiskPathLabel, context->SysinfoSection->Parameters->LargeFont, FALSE);
+            SetWindowFont(context->DiskNameLabel, context->SysinfoSection->Parameters->MediumFont, FALSE);
+            PhSetWindowText(context->DiskPathLabel, PhGetStringOrDefault(context->DiskEntry->DiskIndexName, L"Unknown"));
+            PhSetWindowText(context->DiskNameLabel, PhGetStringOrDefault(context->DiskEntry->DiskName, L"Unknown"));
 
-            if (context->DiskEntry->DiskIndexName)
-                PhSetDialogItemText(hwndDlg, IDC_DISKMOUNTPATH, context->DiskEntry->DiskIndexName->Buffer);
-            else
-                PhSetDialogItemText(hwndDlg, IDC_DISKMOUNTPATH, L"Unknown disk");
-
-            if (context->DiskEntry->DiskName)
-                PhSetDialogItemText(hwndDlg, IDC_DISKNAME, context->DiskEntry->DiskName->Buffer);
-            else
-                PhSetDialogItemText(hwndDlg, IDC_DISKNAME, L"Unknown disk");
-
-            context->PanelWindowHandle = CreateDialogParam(PluginInstance->DllBase, MAKEINTRESOURCE(IDD_DISKDRIVE_PANEL), hwndDlg, DiskDrivePanelDialogProc, (LPARAM)context);
+            context->PanelWindowHandle = PhCreateDialog(PluginInstance->DllBase, MAKEINTRESOURCE(IDD_DISKDRIVE_PANEL), hwndDlg, DiskDevicePanelDialogProc, context);
             ShowWindow(context->PanelWindowHandle, SW_SHOW);
             PhAddLayoutItemEx(&context->LayoutManager, context->PanelWindowHandle, NULL, PH_ANCHOR_LEFT | PH_ANCHOR_RIGHT | PH_ANCHOR_BOTTOM, panelItem->Margin);
 
-            // Create the graph control.
-            context->GraphHandle = CreateWindow(
-                PH_GRAPH_CLASSNAME,
-                NULL,
-                WS_VISIBLE | WS_CHILD | WS_BORDER,
-                0,
-                0,
-                3,
-                3,
-                hwndDlg,
-                NULL,
-                NULL,
-                NULL
-                );
-            Graph_SetTooltip(context->GraphHandle, TRUE);
+            DiskDeviceUpdateDialogDpi(context);
+            DiskDeviceUpdateTitle(context);
+            DiskDeviceCreateGraphs(context);
+            DiskDeviceUpdateGraphs(context);
+            DiskDeviceUpdatePanel(context);
+        }
+        break;
+    case WM_DESTROY:
+        {
+            PhDeleteLayoutManager(&context->LayoutManager);
 
-            PhAddLayoutItemEx(&context->LayoutManager, context->GraphHandle, NULL, PH_ANCHOR_ALL, graphItem->Margin);
+            PhDeleteGraphState(&context->GraphWriteState);
+            PhDeleteGraphState(&context->GraphReadState);
 
-            UpdateDiskDriveDialog(context);
+            if (context->GraphReadHandle)
+                DestroyWindow(context->GraphReadHandle);
+            if (context->GraphWriteHandle)
+                DestroyWindow(context->GraphWriteHandle);
+            if (context->PanelWindowHandle)
+                DestroyWindow(context->PanelWindowHandle);
+        }
+        break;
+    case WM_NCDESTROY:
+        {
+            PhRemoveWindowContext(hwndDlg, PH_WINDOW_CONTEXT_DEFAULT);
+        }
+        break;
+    case WM_DPICHANGED_AFTERPARENT:
+        {
+            DiskDeviceUpdateDialogDpi(context);
+
+            if (context->SysinfoSection->Parameters->LargeFont)
+            {
+                SetWindowFont(context->DiskPathLabel, context->SysinfoSection->Parameters->LargeFont, FALSE);
+            }
+
+            if (context->SysinfoSection->Parameters->MediumFont)
+            {
+                SetWindowFont(context->DiskNameLabel, context->SysinfoSection->Parameters->MediumFont, FALSE);
+            }
+
+            PhLayoutManagerLayout(&context->LayoutManager);
+            DiskDeviceLayoutGraphs(context);
         }
         break;
     case WM_SIZE:
-        PhLayoutManagerLayout(&context->LayoutManager);
+        {
+            PhLayoutManagerLayout(&context->LayoutManager);
+            DiskDeviceLayoutGraphs(context);
+        }
         break;
     case WM_NOTIFY:
         {
             NMHDR* header = (NMHDR*)lParam;
 
-            if (header->hwndFrom == context->GraphHandle)
+            if (header->hwndFrom == context->GraphReadHandle)
             {
-                switch (header->code)
-                {
-                case GCN_GETDRAWINFO:
-                    {
-                        PPH_GRAPH_GETDRAWINFO getDrawInfo = (PPH_GRAPH_GETDRAWINFO)header;
-                        PPH_GRAPH_DRAW_INFO drawInfo = getDrawInfo->DrawInfo;
-
-                        drawInfo->Flags = PH_GRAPH_USE_GRID_X | PH_GRAPH_USE_GRID_Y | PH_GRAPH_LABEL_MAX_Y | PH_GRAPH_USE_LINE_2;
-                        context->SysinfoSection->Parameters->ColorSetupFunction(drawInfo, PhGetIntegerSetting(L"ColorIoReadOther"), PhGetIntegerSetting(L"ColorIoWrite"));
-
-                        PhGraphStateGetDrawInfo(
-                            &context->GraphState,
-                            getDrawInfo,
-                            context->DiskEntry->ReadBuffer.Count
-                            );
-
-                        if (!context->GraphState.Valid)
-                        {
-                            FLOAT max = 1024 * 1024; // minimum scaling of 1 MB.
-
-                            for (ULONG i = 0; i < drawInfo->LineDataCount; i++)
-                            {
-                                FLOAT data1;
-                                FLOAT data2;
-
-                                context->GraphState.Data1[i] = data1 = (FLOAT)PhGetItemCircularBuffer_ULONG64(&context->DiskEntry->ReadBuffer, i);
-                                context->GraphState.Data2[i] = data2 = (FLOAT)PhGetItemCircularBuffer_ULONG64(&context->DiskEntry->WriteBuffer, i);
-
-                                if (max < data1 + data2)
-                                    max = data1 + data2;
-                            }
-
-                            if (max != 0)
-                            {
-                                // Scale the data.
-                                PhDivideSinglesBySingle(
-                                    context->GraphState.Data1,
-                                    max,
-                                    drawInfo->LineDataCount
-                                    );
-
-                                // Scale the data.
-                                PhDivideSinglesBySingle(
-                                    context->GraphState.Data2,
-                                    max,
-                                    drawInfo->LineDataCount
-                                    );
-                            }
-
-                            drawInfo->LabelYFunction = PhSiSizeLabelYFunction;
-                            drawInfo->LabelYFunctionParameter = max;
-
-                            context->GraphState.Valid = TRUE;
-                        }
-                    }
-                    break;
-                case GCN_GETTOOLTIPTEXT:
-                    {
-                        PPH_GRAPH_GETTOOLTIPTEXT getTooltipText = (PPH_GRAPH_GETTOOLTIPTEXT)header;
-
-                        if (getTooltipText->Index < getTooltipText->TotalCount)
-                        {
-                            if (context->GraphState.TooltipIndex != getTooltipText->Index)
-                            {
-                                ULONG64 diskReadValue = PhGetItemCircularBuffer_ULONG64(
-                                    &context->DiskEntry->ReadBuffer,
-                                    getTooltipText->Index
-                                    );
-
-                                ULONG64 diskWriteValue = PhGetItemCircularBuffer_ULONG64(
-                                    &context->DiskEntry->WriteBuffer,
-                                    getTooltipText->Index
-                                    );
-
-                                PhMoveReference(&context->GraphState.TooltipText, PhFormatString(
-                                    L"R: %s\nW: %s\n%s",
-                                    PhaFormatSize(diskReadValue, ULONG_MAX)->Buffer,
-                                    PhaFormatSize(diskWriteValue, ULONG_MAX)->Buffer,
-                                    ((PPH_STRING)PH_AUTO(PhGetStatisticsTimeString(NULL, getTooltipText->Index)))->Buffer
-                                    ));
-                            }
-
-                            getTooltipText->Text = context->GraphState.TooltipText->sr;
-                        }
-                    }
-                    break;
-                }
+                DiskDeviceNotifyReadGraph(context, header);
+            }
+            else if (header->hwndFrom == context->GraphWriteHandle)
+            {
+                DiskDeviceNotifyWriteGraph(context, header);
             }
         }
         break;
-    case UPDATE_MSG:
-        {
-            UpdateDiskDriveDialog(context);
-        }
-        break;
+    case WM_CTLCOLORBTN:
+        return HANDLE_WM_CTLCOLORBTN(hwndDlg, wParam, lParam, PhWindowThemeControlColor);
+    case WM_CTLCOLORDLG:
+        return HANDLE_WM_CTLCOLORDLG(hwndDlg, wParam, lParam, PhWindowThemeControlColor);
+    case WM_CTLCOLORSTATIC:
+        return HANDLE_WM_CTLCOLORSTATIC(hwndDlg, wParam, lParam, PhWindowThemeControlColor);
     }
 
     return FALSE;
 }
 
-BOOLEAN DiskDriveSectionCallback(
+NTSTATUS DiskDeviceQueryNameWorkQueueItem(
+    _In_ PDV_DISK_ENTRY DiskEntry
+    )
+{
+    // Update the device index and mount points (dmex)
+    DiskDeviceUpdateDeviceMountPoints(DiskEntry);
+
+#ifdef FORCE_DELAY_LABEL_WORKQUEUE
+    PhDelayExecution(4000);
+#endif
+
+    InterlockedExchange(&DiskEntry->JustProcessed, TRUE);
+    DiskEntry->PendingQuery = FALSE;
+
+    PhDereferenceObject(DiskEntry);
+    return STATUS_SUCCESS;
+}
+
+VOID DiskDeviceQueueNameUpdate(
+    _In_ PDV_DISK_ENTRY DiskEntry
+    )
+{
+    DiskEntry->PendingQuery = TRUE;
+
+    PhReferenceObject(DiskEntry);
+    PhQueueItemWorkQueue(PhGetGlobalWorkQueue(), DiskDeviceQueryNameWorkQueueItem, DiskEntry);
+}
+
+BOOLEAN DiskDeviceSectionCallback(
     _In_ PPH_SYSINFO_SECTION Section,
     _In_ PH_SYSINFO_SECTION_MESSAGE Message,
-    _In_opt_ PVOID Parameter1,
-    _In_opt_ PVOID Parameter2
+    _In_ PVOID Parameter1,
+    _In_ PVOID Parameter2
     )
 {
     PDV_DISK_SYSINFO_CONTEXT context = (PDV_DISK_SYSINFO_CONTEXT)Section->Context;
@@ -361,34 +691,59 @@ BOOLEAN DiskDriveSectionCallback(
     {
     case SysInfoCreate:
         {
-            UpdateDiskIndexText(context);
+            DiskDeviceQueueNameUpdate(context->DiskEntry);
         }
         return TRUE;
     case SysInfoDestroy:
         {
             PhDereferenceObject(context->DiskEntry);
-            PhDereferenceObject(context->SectionName);
             PhFree(context);
         }
         return TRUE;
     case SysInfoTick:
         {
-            UpdateDiskIndexText(context);
-
             if (context->WindowHandle)
-                PostMessage(context->WindowHandle, UPDATE_MSG, 0, 0);
+            {
+                if (context->DiskEntry->JustProcessed)
+                {
+                    DiskDeviceUpdateTitle(context);
+                    InterlockedExchange(&context->DiskEntry->JustProcessed, FALSE);
+                }
+
+                DiskDeviceTickDialog(context);
+            }
+        }
+        return TRUE;
+    case SysInfoViewChanging:
+        {
+            PH_SYSINFO_VIEW_TYPE view = (PH_SYSINFO_VIEW_TYPE)PtrToUlong(Parameter1);
+            PPH_SYSINFO_SECTION section = (PPH_SYSINFO_SECTION)Parameter2;
+
+            if (view == SysInfoSummaryView || section != Section)
+                return TRUE;
+
+            if (context->GraphReadHandle)
+            {
+                context->GraphReadState.Valid = FALSE;
+                context->GraphReadState.TooltipIndex = ULONG_MAX;
+                Graph_Draw(context->GraphReadHandle);
+            }
+
+            if (context->GraphWriteHandle)
+            {
+                context->GraphWriteState.Valid = FALSE;
+                context->GraphWriteState.TooltipIndex = ULONG_MAX;
+                Graph_Draw(context->GraphWriteHandle);
+            }
         }
         return TRUE;
     case SysInfoCreateDialog:
         {
             PPH_SYSINFO_CREATE_DIALOG createDialog = (PPH_SYSINFO_CREATE_DIALOG)Parameter1;
 
-            if (!createDialog)
-                break;
-
             createDialog->Instance = PluginInstance->DllBase;
             createDialog->Template = MAKEINTRESOURCE(IDD_DISKDRIVE_DIALOG);
-            createDialog->DialogProc = DiskDriveDialogProc;
+            createDialog->DialogProc = DiskDeviceDialogProc;
             createDialog->Parameter = context;
         }
         return TRUE;
@@ -396,11 +751,8 @@ BOOLEAN DiskDriveSectionCallback(
         {
             PPH_GRAPH_DRAW_INFO drawInfo = (PPH_GRAPH_DRAW_INFO)Parameter1;
 
-            if (!drawInfo)
-                break;
-
             drawInfo->Flags = PH_GRAPH_USE_GRID_X | PH_GRAPH_USE_GRID_Y | PH_GRAPH_LABEL_MAX_Y | PH_GRAPH_USE_LINE_2;
-            Section->Parameters->ColorSetupFunction(drawInfo, PhGetIntegerSetting(L"ColorIoReadOther"), PhGetIntegerSetting(L"ColorIoWrite"));
+            Section->Parameters->ColorSetupFunction(drawInfo, PhGetIntegerSetting(L"ColorIoReadOther"), PhGetIntegerSetting(L"ColorIoWrite"), context->SysinfoSection->Parameters->WindowDpi);
             PhGetDrawInfoGraphBuffers(&Section->GraphState.Buffers, drawInfo, context->DiskEntry->ReadBuffer.Count);
 
             if (!Section->GraphState.Valid)
@@ -448,9 +800,7 @@ BOOLEAN DiskDriveSectionCallback(
             PPH_SYSINFO_GRAPH_GET_TOOLTIP_TEXT getTooltipText = (PPH_SYSINFO_GRAPH_GET_TOOLTIP_TEXT)Parameter1;
             ULONG64 diskReadValue;
             ULONG64 diskWriteValue;
-
-            if (!getTooltipText)
-                break;
+            PH_FORMAT format[6];
 
             diskReadValue = PhGetItemCircularBuffer_ULONG64(
                 &context->DiskEntry->ReadBuffer,
@@ -462,32 +812,38 @@ BOOLEAN DiskDriveSectionCallback(
                 getTooltipText->Index
                 );
 
-            PhMoveReference(&Section->GraphState.TooltipText, PhFormatString(
-                L"R: %s\nW: %s\n%s",
-                PhaFormatSize(diskReadValue, ULONG_MAX)->Buffer,
-                PhaFormatSize(diskWriteValue, ULONG_MAX)->Buffer,
-                ((PPH_STRING)PH_AUTO(PhGetStatisticsTimeString(NULL, getTooltipText->Index)))->Buffer
-                ));
+            // R: %s\nW: %s\n%s
+            PhInitFormatS(&format[0], L"R: ");
+            PhInitFormatSize(&format[1], diskReadValue);
+            PhInitFormatS(&format[2], L"\nW: ");
+            PhInitFormatSize(&format[3], diskWriteValue);
+            PhInitFormatC(&format[4], L'\n');
+            PhInitFormatSR(&format[5], PH_AUTO_T(PH_STRING, PhGetStatisticsTimeString(NULL, getTooltipText->Index))->sr);
 
+            PhMoveReference(&Section->GraphState.TooltipText, PhFormat(format, RTL_NUMBER_OF(format), 0));
             getTooltipText->Text = PhGetStringRef(Section->GraphState.TooltipText);
         }
         return TRUE;
     case SysInfoGraphDrawPanel:
         {
             PPH_SYSINFO_DRAW_PANEL drawPanel = (PPH_SYSINFO_DRAW_PANEL)Parameter1;
+            PH_FORMAT format[4];
 
-            if (!drawPanel)
-                break;
-
-            PhSetReference(&drawPanel->Title, context->DiskEntry->DiskIndexName);
-            drawPanel->SubTitle = PhFormatString(
-                L"R: %s\nW: %s",
-                PhaFormatSize(context->DiskEntry->BytesReadDelta.Delta, ULONG_MAX)->Buffer,
-                PhaFormatSize(context->DiskEntry->BytesWrittenDelta.Delta, ULONG_MAX)->Buffer
-                );
+            if (context->DiskEntry->PendingQuery)
+                PhMoveReference(&drawPanel->Title, PhCreateString(L"Pending..."));
+            else
+                PhSetReference(&drawPanel->Title, context->DiskEntry->DiskIndexName);
 
             if (!drawPanel->Title)
-                drawPanel->Title = PhCreateString(L"Unknown disk");
+                drawPanel->Title = PhCreateString(L"Unknown");
+
+            // R: %s\nW: %s
+            PhInitFormatS(&format[0], L"R: ");
+            PhInitFormatSize(&format[1], context->DiskEntry->BytesReadDelta.Delta);
+            PhInitFormatS(&format[2], L"\nW: ");
+            PhInitFormatSize(&format[3], context->DiskEntry->BytesWrittenDelta.Delta);
+
+            drawPanel->SubTitle = PhFormat(format, RTL_NUMBER_OF(format), 0);
         }
         return TRUE;
     }
@@ -495,24 +851,23 @@ BOOLEAN DiskDriveSectionCallback(
     return FALSE;
 }
 
-VOID DiskDriveSysInfoInitializing(
+VOID DiskDeviceSysInfoInitializing(
     _In_ PPH_PLUGIN_SYSINFO_POINTERS Pointers,
     _In_ _Assume_refs_(1) PDV_DISK_ENTRY DiskEntry
     )
 {
-    PH_SYSINFO_SECTION section;
+    static PH_STRINGREF text = PH_STRINGREF_INIT(L"Unknown");
     PDV_DISK_SYSINFO_CONTEXT context;
+    PH_SYSINFO_SECTION section;
 
-    context = (PDV_DISK_SYSINFO_CONTEXT)PhAllocate(sizeof(DV_DISK_SYSINFO_CONTEXT));
-    memset(context, 0, sizeof(DV_DISK_SYSINFO_CONTEXT));
+    context = PhAllocateZero(sizeof(DV_DISK_SYSINFO_CONTEXT));
+    context->DiskEntry = PhReferenceObject(DiskEntry);
+    context->DiskEntry->PendingQuery = TRUE;
+
     memset(&section, 0, sizeof(PH_SYSINFO_SECTION));
-
-    context->DiskEntry = DiskEntry;
-    context->SectionName = PhConcatStrings2(L"Disk ", DiskEntry->Id.DevicePath->Buffer);
-
     section.Context = context;
-    section.Callback = DiskDriveSectionCallback;
-    section.Name = context->SectionName->sr;
+    section.Callback = DiskDeviceSectionCallback;
+    section.Name = text;
 
     context->SysinfoSection = Pointers->CreateSection(&section);
 }

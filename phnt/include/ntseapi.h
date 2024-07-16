@@ -1,21 +1,7 @@
 /*
- * Process Hacker -
- *   Authorization functions
+ * Authorization functions
  *
- * This file is part of Process Hacker.
- *
- * Process Hacker is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * Process Hacker is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with Process Hacker.  If not, see <http://www.gnu.org/licenses/>.
+ * This file is part of System Informer.
  */
 
 #ifndef _NTSEAPI_H
@@ -65,6 +51,114 @@
 // Authz
 
 // begin_rev
+
+#if (PHNT_MODE == PHNT_MODE_KERNEL)
+typedef enum _TOKEN_INFORMATION_CLASS
+{
+    TokenUser = 1, // q: TOKEN_USER, SE_TOKEN_USER
+    TokenGroups, // q: TOKEN_GROUPS
+    TokenPrivileges, // q: TOKEN_PRIVILEGES
+    TokenOwner, // q; s: TOKEN_OWNER
+    TokenPrimaryGroup, // q; s: TOKEN_PRIMARY_GROUP
+    TokenDefaultDacl, // q; s: TOKEN_DEFAULT_DACL
+    TokenSource, // q: TOKEN_SOURCE
+    TokenType, // q: TOKEN_TYPE
+    TokenImpersonationLevel, // q: SECURITY_IMPERSONATION_LEVEL
+    TokenStatistics, // q: TOKEN_STATISTICS // 10
+    TokenRestrictedSids, // q: TOKEN_GROUPS
+    TokenSessionId, // q; s: ULONG (requires SeTcbPrivilege)
+    TokenGroupsAndPrivileges, // q: TOKEN_GROUPS_AND_PRIVILEGES
+    TokenSessionReference, // s: ULONG (requires SeTcbPrivilege)
+    TokenSandBoxInert, // q: ULONG
+    TokenAuditPolicy, // q; s: TOKEN_AUDIT_POLICY (requires SeSecurityPrivilege/SeTcbPrivilege)
+    TokenOrigin, // q; s: TOKEN_ORIGIN (requires SeTcbPrivilege)
+    TokenElevationType, // q: TOKEN_ELEVATION_TYPE
+    TokenLinkedToken, // q; s: TOKEN_LINKED_TOKEN (requires SeCreateTokenPrivilege)
+    TokenElevation, // q: TOKEN_ELEVATION // 20
+    TokenHasRestrictions, // q: ULONG
+    TokenAccessInformation, // q: TOKEN_ACCESS_INFORMATION
+    TokenVirtualizationAllowed, // q; s: ULONG (requires SeCreateTokenPrivilege)
+    TokenVirtualizationEnabled, // q; s: ULONG
+    TokenIntegrityLevel, // q; s: TOKEN_MANDATORY_LABEL
+    TokenUIAccess, // q; s: ULONG (requires SeTcbPrivilege)
+    TokenMandatoryPolicy, // q; s: TOKEN_MANDATORY_POLICY (requires SeTcbPrivilege)
+    TokenLogonSid, // q: TOKEN_GROUPS
+    TokenIsAppContainer, // q: ULONG // since WIN8
+    TokenCapabilities, // q: TOKEN_GROUPS // 30
+    TokenAppContainerSid, // q: TOKEN_APPCONTAINER_INFORMATION
+    TokenAppContainerNumber, // q: ULONG
+    TokenUserClaimAttributes, // q: CLAIM_SECURITY_ATTRIBUTES_INFORMATION
+    TokenDeviceClaimAttributes, // q: CLAIM_SECURITY_ATTRIBUTES_INFORMATION
+    TokenRestrictedUserClaimAttributes, // q: CLAIM_SECURITY_ATTRIBUTES_INFORMATION
+    TokenRestrictedDeviceClaimAttributes, // q: CLAIM_SECURITY_ATTRIBUTES_INFORMATION
+    TokenDeviceGroups, // q: TOKEN_GROUPS
+    TokenRestrictedDeviceGroups, // q: TOKEN_GROUPS
+    TokenSecurityAttributes, // q; s: TOKEN_SECURITY_ATTRIBUTES_[AND_OPERATION_]INFORMATION (requires SeTcbPrivilege)
+    TokenIsRestricted, // q: ULONG // 40
+    TokenProcessTrustLevel, // q: TOKEN_PROCESS_TRUST_LEVEL // since WINBLUE
+    TokenPrivateNameSpace, // q; s: ULONG  (requires SeTcbPrivilege) // since THRESHOLD
+    TokenSingletonAttributes, // q: TOKEN_SECURITY_ATTRIBUTES_INFORMATION // since REDSTONE
+    TokenBnoIsolation, // q: TOKEN_BNO_ISOLATION_INFORMATION // since REDSTONE2
+    TokenChildProcessFlags, // s: ULONG  (requires SeTcbPrivilege) // since REDSTONE3
+    TokenIsLessPrivilegedAppContainer, // q: ULONG // since REDSTONE5
+    TokenIsSandboxed, // q: ULONG // since 19H1
+    TokenIsAppSilo, // q: ULONG // since WIN11 22H2 // previously TokenOriginatingProcessTrustLevel // q: TOKEN_PROCESS_TRUST_LEVEL
+    TokenLoggingInformation, // TOKEN_LOGGING_INFORMATION // since 24H2
+    MaxTokenInfoClass
+} TOKEN_INFORMATION_CLASS, *PTOKEN_INFORMATION_CLASS;
+#else
+#define TOKEN_INFORMATION_CLASS ULONG
+//#define TokenUser 1 // q: TOKEN_USER, SE_TOKEN_USER
+//#define TokenGroups 2 // q: TOKEN_GROUPS
+//#define TokenPrivileges 3 // q: TOKEN_PRIVILEGES
+//#define TokenOwner 4 // q; s: TOKEN_OWNER
+#define TokenPrimaryGroup 5 // q; s: TOKEN_PRIMARY_GROUP
+#define TokenDefaultDacl 6 // q; s: TOKEN_DEFAULT_DACL
+#define TokenSource 7 // q: TOKEN_SOURCE
+//#define TokenType 8 // q: TOKEN_TYPE
+#define TokenImpersonationLevel 9 // q: SECURITY_IMPERSONATION_LEVEL
+#define TokenStatistics 10 // q: TOKEN_STATISTICS // 10
+#define TokenRestrictedSids 11 // q: TOKEN_GROUPS
+#define TokenSessionId 12 // q; s: ULONG (requires SeTcbPrivilege)
+#define TokenGroupsAndPrivileges 13 // q: TOKEN_GROUPS_AND_PRIVILEGES
+#define TokenSessionReference 14 // s: ULONG (requires SeTcbPrivilege)
+#define TokenSandBoxInert 15 // q: ULONG
+#define TokenAuditPolicy 16 // q; s: TOKEN_AUDIT_POLICY (requires SeSecurityPrivilege/SeTcbPrivilege)
+#define TokenOrigin 17 // q; s: TOKEN_ORIGIN (requires SeTcbPrivilege)
+#define TokenElevationType 18 // q: TOKEN_ELEVATION_TYPE
+#define TokenLinkedToken 19 // q; s: TOKEN_LINKED_TOKEN (requires SeCreateTokenPrivilege)
+#define TokenElevation 20 // q: TOKEN_ELEVATION // 20
+#define TokenHasRestrictions 21 // q: ULONG
+#define TokenAccessInformation 22 // q: TOKEN_ACCESS_INFORMATION
+#define TokenVirtualizationAllowed 23 // q; s: ULONG (requires SeCreateTokenPrivilege)
+#define TokenVirtualizationEnabled 24 // q; s: ULONG
+#define TokenIntegrityLevel 25 // q; s: TOKEN_MANDATORY_LABEL
+#define TokenUIAccess 26 // q; s: ULONG (requires SeTcbPrivilege)
+#define TokenMandatoryPolicy 27 // q; s: TOKEN_MANDATORY_POLICY (requires SeTcbPrivilege)
+#define TokenLogonSid 28 // q: TOKEN_GROUPS
+#define TokenIsAppContainer 29 // q: ULONG // since WIN8
+#define TokenCapabilities 30 // q: TOKEN_GROUPS // 30
+//#define TokenAppContainerSid 31 // q: TOKEN_APPCONTAINER_INFORMATION
+#define TokenAppContainerNumber 32 // q: ULONG
+#define TokenUserClaimAttributes 33 // q: CLAIM_SECURITY_ATTRIBUTES_INFORMATION
+#define TokenDeviceClaimAttributes 34 // q: CLAIM_SECURITY_ATTRIBUTES_INFORMATION
+#define TokenRestrictedUserClaimAttributes 35 // q: CLAIM_SECURITY_ATTRIBUTES_INFORMATION
+#define TokenRestrictedDeviceClaimAttributes 36 // q: CLAIM_SECURITY_ATTRIBUTES_INFORMATION
+#define TokenDeviceGroups 37 // q: TOKEN_GROUPS
+#define TokenRestrictedDeviceGroups 38 // q: TOKEN_GROUPS
+#define TokenSecurityAttributes 39 // q; s: TOKEN_SECURITY_ATTRIBUTES_[AND_OPERATION_]INFORMATION (requires SeTcbPrivilege)
+#define TokenIsRestricted 40 // q: ULONG // 40
+#define TokenProcessTrustLevel 41 // q: TOKEN_PROCESS_TRUST_LEVEL // since WINBLUE
+#define TokenPrivateNameSpace 42// q; s: ULONG  (requires SeTcbPrivilege) // since THRESHOLD
+#define TokenSingletonAttributes 43 // q: TOKEN_SECURITY_ATTRIBUTES_INFORMATION // since REDSTONE
+#define TokenBnoIsolation 44 // q: TOKEN_BNO_ISOLATION_INFORMATION // since REDSTONE2
+#define TokenChildProcessFlags 45 // s: ULONG  (requires SeTcbPrivilege) // since REDSTONE3
+#define TokenIsLessPrivilegedAppContainer 46 // q: ULONG // since REDSTONE5
+#define TokenIsSandboxed 47 // q: ULONG // since 19H1
+#define TokenIsAppSilo 48 // q: ULONG // since 22H2 // previously TokenOriginatingProcessTrustLevel // q: TOKEN_PROCESS_TRUST_LEVEL
+#define TokenLoggingInformation 49 // TOKEN_LOGGING_INFORMATION // since 24H2
+#define MaxTokenInfoClass 50
+#endif
 
 // Types
 
@@ -148,6 +242,23 @@ typedef struct _TOKEN_SECURITY_ATTRIBUTES_INFORMATION
     } Attribute;
 } TOKEN_SECURITY_ATTRIBUTES_INFORMATION, *PTOKEN_SECURITY_ATTRIBUTES_INFORMATION;
 
+// private
+typedef enum _TOKEN_SECURITY_ATTRIBUTE_OPERATION
+{
+    TOKEN_SECURITY_ATTRIBUTE_OPERATION_NONE,
+    TOKEN_SECURITY_ATTRIBUTE_OPERATION_REPLACE_ALL,
+    TOKEN_SECURITY_ATTRIBUTE_OPERATION_ADD,
+    TOKEN_SECURITY_ATTRIBUTE_OPERATION_DELETE,
+    TOKEN_SECURITY_ATTRIBUTE_OPERATION_REPLACE
+} TOKEN_SECURITY_ATTRIBUTE_OPERATION, *PTOKEN_SECURITY_ATTRIBUTE_OPERATION;
+
+// private
+typedef struct _TOKEN_SECURITY_ATTRIBUTES_AND_OPERATION_INFORMATION
+{
+    PTOKEN_SECURITY_ATTRIBUTES_INFORMATION Attributes;
+    PTOKEN_SECURITY_ATTRIBUTE_OPERATION Operations;
+} TOKEN_SECURITY_ATTRIBUTES_AND_OPERATION_INFORMATION, *PTOKEN_SECURITY_ATTRIBUTES_AND_OPERATION_INFORMATION;
+
 // rev
 typedef struct _TOKEN_PROCESS_TRUST_LEVEL
 {
@@ -163,7 +274,7 @@ NtCreateToken(
     _Out_ PHANDLE TokenHandle,
     _In_ ACCESS_MASK DesiredAccess,
     _In_opt_ POBJECT_ATTRIBUTES ObjectAttributes,
-    _In_ TOKEN_TYPE TokenType,
+    _In_ TOKEN_TYPE Type,
     _In_ PLUID AuthenticationId,
     _In_ PLARGE_INTEGER ExpirationTime,
     _In_ PTOKEN_USER User,
@@ -172,7 +283,7 @@ NtCreateToken(
     _In_opt_ PTOKEN_OWNER Owner,
     _In_ PTOKEN_PRIMARY_GROUP PrimaryGroup,
     _In_opt_ PTOKEN_DEFAULT_DACL DefaultDacl,
-    _In_ PTOKEN_SOURCE TokenSource
+    _In_ PTOKEN_SOURCE Source
     );
 
 #if (PHNT_VERSION >= PHNT_WIN8)
@@ -200,7 +311,7 @@ NtCreateTokenEx(
     _Out_ PHANDLE TokenHandle,
     _In_ ACCESS_MASK DesiredAccess,
     _In_opt_ POBJECT_ATTRIBUTES ObjectAttributes,
-    _In_ TOKEN_TYPE TokenType,
+    _In_ TOKEN_TYPE Type,
     _In_ PLUID AuthenticationId,
     _In_ PLARGE_INTEGER ExpirationTime,
     _In_ PTOKEN_USER User,
@@ -209,11 +320,11 @@ NtCreateTokenEx(
     _In_opt_ PTOKEN_SECURITY_ATTRIBUTES_INFORMATION UserAttributes,
     _In_opt_ PTOKEN_SECURITY_ATTRIBUTES_INFORMATION DeviceAttributes,
     _In_opt_ PTOKEN_GROUPS DeviceGroups,
-    _In_opt_ PTOKEN_MANDATORY_POLICY TokenMandatoryPolicy,
+    _In_opt_ PTOKEN_MANDATORY_POLICY MandatoryPolicy,
     _In_opt_ PTOKEN_OWNER Owner,
     _In_ PTOKEN_PRIMARY_GROUP PrimaryGroup,
     _In_opt_ PTOKEN_DEFAULT_DACL DefaultDacl,
-    _In_ PTOKEN_SOURCE TokenSource
+    _In_ PTOKEN_SOURCE Source
     );
 #endif
 
@@ -263,9 +374,9 @@ NTAPI
 NtDuplicateToken(
     _In_ HANDLE ExistingTokenHandle,
     _In_ ACCESS_MASK DesiredAccess,
-    _In_ POBJECT_ATTRIBUTES ObjectAttributes,
+    _In_opt_ POBJECT_ATTRIBUTES ObjectAttributes,
     _In_ BOOLEAN EffectiveOnly,
-    _In_ TOKEN_TYPE TokenType,
+    _In_ TOKEN_TYPE Type,
     _Out_ PHANDLE NewTokenHandle
     );
 
@@ -275,7 +386,7 @@ NTAPI
 NtQueryInformationToken(
     _In_ HANDLE TokenHandle,
     _In_ TOKEN_INFORMATION_CLASS TokenInformationClass,
-    _Out_writes_bytes_(TokenInformationLength) PVOID TokenInformation,
+    _Out_writes_bytes_to_opt_(TokenInformationLength, *ReturnLength) PVOID TokenInformation,
     _In_ ULONG TokenInformationLength,
     _Out_ PULONG ReturnLength
     );
@@ -464,7 +575,7 @@ NtAccessCheckByTypeResultList(
 
 // Signing
 
-#if (PHNT_VERSION >= PHNT_THRESHOLD)
+#if (PHNT_VERSION >= PHNT_WIN8)
 
 NTSYSCALLAPI
 NTSTATUS
@@ -487,6 +598,51 @@ NtGetCachedSigningLevel(
     _Out_writes_bytes_to_opt_(*ThumbprintSize, *ThumbprintSize) PUCHAR Thumbprint,
     _Inout_opt_ PULONG ThumbprintSize,
     _Out_opt_ PULONG ThumbprintAlgorithm
+    );
+
+#endif
+
+#if (PHNT_VERSION >= PHNT_REDSTONE)
+
+// rev
+typedef struct _SE_FILE_CACHE_CLAIM_INFORMATION
+{
+    ULONG Size;
+    PVOID Claim;
+} SE_FILE_CACHE_CLAIM_INFORMATION, *PSE_FILE_CACHE_CLAIM_INFORMATION;
+
+// rev
+typedef struct _SE_SET_FILE_CACHE_INFORMATION
+{
+    ULONG Size;
+    UNICODE_STRING CatalogDirectoryPath;
+    SE_FILE_CACHE_CLAIM_INFORMATION OriginClaimInfo;
+} SE_SET_FILE_CACHE_INFORMATION, *PSE_SET_FILE_CACHE_INFORMATION;
+
+// rev
+NTSYSCALLAPI
+NTSTATUS
+NTAPI
+NtSetCachedSigningLevel2(
+    _In_ ULONG Flags,
+    _In_ SE_SIGNING_LEVEL InputSigningLevel,
+    _In_reads_(SourceFileCount) PHANDLE SourceFiles,
+    _In_ ULONG SourceFileCount,
+    _In_opt_ HANDLE TargetFile,
+    _In_opt_ SE_SET_FILE_CACHE_INFORMATION* CacheInformation
+    );
+
+#endif
+
+#if (PHNT_VERSION >= PHNT_REDSTONE2)
+
+// rev
+NTSYSCALLAPI
+NTSTATUS
+NTAPI
+NtCompareSigningLevels(
+    _In_ SE_SIGNING_LEVEL FirstSigningLevel,
+    _In_ SE_SIGNING_LEVEL SecondSigningLevel
     );
 
 #endif

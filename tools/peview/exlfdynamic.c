@@ -1,23 +1,12 @@
 /*
- * Process Hacker -
- *   PE viewer
+ * Copyright (c) 2022 Winsider Seminars & Solutions, Inc.  All rights reserved.
  *
- * Copyright (C) 2019 dmex
+ * This file is part of System Informer.
  *
- * This file is part of Process Hacker.
+ * Authors:
  *
- * Process Hacker is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
+ *     dmex    2019
  *
- * Process Hacker is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with Process Hacker.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include <peview.h>
@@ -146,14 +135,13 @@ VOID PvpProcessElfDynamic(
     {
         PPH_ELF_IMAGE_DYNAMIC_ENTRY dynamic = dynamics->Items[i];
         INT lvItemIndex;
-        WCHAR number[PH_INT32_STR_LEN_1];
-        WCHAR pointer[PH_PTR_STR_LEN_1];
+        WCHAR value[PH_PTR_STR_LEN_1];
 
-        PhPrintUInt32(number, ++count);
-        lvItemIndex = PhAddListViewItem(ListViewHandle, MAXINT, number, NULL);
+        PhPrintUInt32(value, ++count);
+        lvItemIndex = PhAddListViewItem(ListViewHandle, MAXINT, value, NULL);
 
-        PhPrintPointer(pointer, (PVOID)dynamic->Tag);
-        PhSetListViewSubItem(ListViewHandle, lvItemIndex, 1, pointer);
+        PhPrintPointer(value, (PVOID)dynamic->Tag);
+        PhSetListViewSubItem(ListViewHandle, lvItemIndex, 1, value);
         //PhSetListViewSubItem(ListViewHandle, lvItemIndex, 1, PhaFormatString(L"0x%016llx", (PVOID)dynamic->Tag)->Buffer);
         PhSetListViewSubItem(ListViewHandle, lvItemIndex, 2, PvpGetDynamicTagName(dynamic->Tag));
         PhSetListViewSubItem(ListViewHandle, lvItemIndex, 3, PhGetStringOrEmpty(dynamic->Value));
@@ -193,8 +181,8 @@ INT_PTR CALLBACK PvpExlfDynamicDlgProc(
 
             PvpProcessElfDynamic(lvHandle);
             ExtendedListView_SortItems(lvHandle);
-            
-            EnableThemeDialogTexture(hwndDlg, ETDT_ENABLETAB);
+
+            PhInitializeWindowTheme(hwndDlg, PhEnableThemeSupport);
         }
         break;
     case WM_DESTROY:
@@ -210,7 +198,6 @@ INT_PTR CALLBACK PvpExlfDynamicDlgProc(
 
                 dialogItem = PvAddPropPageLayoutItem(hwndDlg, hwndDlg, PH_PROP_PAGE_TAB_CONTROL_PARENT, PH_ANCHOR_ALL);
                 PvAddPropPageLayoutItem(hwndDlg, GetDlgItem(hwndDlg, IDC_LIST), dialogItem, PH_ANCHOR_ALL);
-
                 PvDoPropPageLayout(hwndDlg);
 
                 propPageContext->LayoutInitialized = TRUE;

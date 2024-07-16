@@ -1,24 +1,13 @@
 /*
- * Process Hacker .NET Tools -
- *   phsvc extensions
+ * Copyright (c) 2022 Winsider Seminars & Solutions, Inc.  All rights reserved.
  *
- * Copyright (C) 2015 wj32
- * Copyright (C) 2018 dmex
+ * This file is part of System Informer.
  *
- * This file is part of Process Hacker.
+ * Authors:
  *
- * Process Hacker is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
+ *     wj32    2015
+ *     dmex    2016-2021
  *
- * Process Hacker is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with Process Hacker.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #ifndef SVCEXT_H
@@ -30,7 +19,9 @@ typedef enum _DN_API_NUMBER
 {
     DnGetRuntimeNameByAddressApiNumber = 1,
     DnPredictAddressesFromClrDataApiNumber = 2,
-    DnGetGetClrWow64ThreadAppDomainApiNumber = 3
+    DnGetGetClrWow64ThreadAppDomainApiNumber = 3,
+    DnGetFileNameByAddressApiNumber = 4,
+    DnGetGetClrWow64AppdomainDataApiNumber = 5,
 } DN_API_NUMBER;
 
 typedef union _DN_API_GETRUNTIMENAMEBYADDRESS
@@ -81,8 +72,39 @@ typedef union _DN_API_GETWOW64THREADAPPDOMAIN
     } o;
 } DN_API_GETWOW64THREADAPPDOMAIN, *PDN_API_GETWOW64THREADAPPDOMAIN;
 
+typedef union _DN_API_GETFILENAMEBYADDRESS
+{
+    struct
+    {
+        ULONG ProcessId;
+        ULONG Reserved;
+        ULONG64 Address;
+        PH_RELATIVE_STRINGREF Name; // out
+    } i;
+    struct
+    {
+        ULONG NameLength;
+    } o;
+} DN_API_GETFILENAMEBYADDRESS, *PDN_API_GETFILENAMEBYADDRESS;
+
+typedef union _DN_API_GETAPPDOMAINASSEMBLYDATA
+{
+    struct
+    {
+        ULONG ProcessId;
+        ULONG Reserved;
+        PH_RELATIVE_STRINGREF Name; // out
+    } i;
+    struct
+    {
+        ULONG NameLength;
+    } o;
+} DN_API_GETAPPDOMAINASSEMBLYDATA, *PDN_API_GETAPPDOMAINASSEMBLYDATA;
+
+
 // Calls
 
+_Success_(return != NULL)
 PPH_STRING CallGetRuntimeNameByAddress(
     _In_ HANDLE ProcessId,
     _In_ ULONG64 Address,
@@ -103,6 +125,15 @@ VOID CallPredictAddressesFromClrData(
 PPH_STRING CallGetClrThreadAppDomain(
     _In_ HANDLE ProcessId,
     _In_ HANDLE ThreadId
+    );
+
+PPH_STRING CallGetFileNameByAddress(
+    _In_ HANDLE ProcessId,
+    _In_ ULONG64 Address
+    );
+
+PPH_LIST CallGetClrAppDomainAssemblyList(
+    _In_ HANDLE ProcessId
     );
 
 #endif

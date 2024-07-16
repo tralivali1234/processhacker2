@@ -1,23 +1,12 @@
 /*
- * Process Hacker -
- *   object manager
+ * Copyright (c) 2022 Winsider Seminars & Solutions, Inc.  All rights reserved.
  *
- * Copyright (C) 2009-2016 wj32
+ * This file is part of System Informer.
  *
- * This file is part of Process Hacker.
+ * Authors:
  *
- * Process Hacker is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
+ *     wj32    2009-2016
  *
- * Process Hacker is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with Process Hacker.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include <phbase.h>
@@ -47,7 +36,7 @@ PPH_CREATE_OBJECT_HOOK PhDbgCreateObjectHook = NULL;
 /**
  * Initializes the object manager module.
  */
-NTSTATUS PhRefInitialization(
+BOOLEAN PhRefInitialization(
     VOID
     )
 {
@@ -57,7 +46,7 @@ NTSTATUS PhRefInitialization(
     InitializeListHead(&PhDbgObjectListHead);
 #endif
 
-    RtlInitializeSListHead(&PhObjectDeferDeleteListHead);
+    PhInitializeSListHead(&PhObjectDeferDeleteListHead);
     PhInitializeFreeList(
         &PhObjectSmallFreeList,
         PhAddObjectHeaderSize(PH_OBJECT_SMALL_OBJECT_SIZE),
@@ -79,12 +68,12 @@ NTSTATUS PhRefInitialization(
     PhAllocType = PhCreateObjectType(L"Alloc", 0, NULL);
 
     // Reserve a slot for the auto pool.
-    PhpAutoPoolTlsIndex = TlsAlloc();
+    PhpAutoPoolTlsIndex = PhTlsAlloc();
 
     if (PhpAutoPoolTlsIndex == TLS_OUT_OF_INDEXES)
-        return STATUS_INSUFFICIENT_RESOURCES;
+        return FALSE;
 
-    return STATUS_SUCCESS;
+    return TRUE;
 }
 
 /**
@@ -100,7 +89,6 @@ _May_raise_ PVOID PhCreateObject(
     _In_ PPH_OBJECT_TYPE ObjectType
     )
 {
-    NTSTATUS status = STATUS_SUCCESS;
     PPH_OBJECT_HEADER objectHeader;
 
     // Allocate storage for the object. Note that this includes the object header followed by the
@@ -310,37 +298,17 @@ _May_raise_ VOID PhDereferenceObjectEx(
 }
 
 /**
- * References an array of objects.
+ * Gets an object's reference count.
  *
- * \param Objects An array of objects.
- * \param NumberOfObjects The number of elements in \a Objects.
+ * \param Object A pointer to an object.
+ *
+ * \return The object's reference count.
  */
-VOID PhReferenceObjects(
-    _In_reads_(NumberOfObjects) PVOID *Objects,
-    _In_ ULONG NumberOfObjects
+ULONG PhGetObjectRefCount(
+    _In_ PVOID Object
     )
 {
-    ULONG i;
-
-    for (i = 0; i < NumberOfObjects; i++)
-        PhReferenceObject(Objects[i]);
-}
-
-/**
- * Dereferences an array of objects.
- *
- * \param Objects An array of objects.
- * \param NumberOfObjects The number of elements in \a Objects.
- */
-VOID PhDereferenceObjects(
-    _In_reads_(NumberOfObjects) PVOID *Objects,
-    _In_ ULONG NumberOfObjects
-    )
-{
-    ULONG i;
-
-    for (i = 0; i < NumberOfObjects; i++)
-        PhDereferenceObject(Objects[i]);
+    return PhObjectToObjectHeader(Object)->RefCount;
 }
 
 /**
@@ -403,7 +371,6 @@ PPH_OBJECT_TYPE PhCreateObjectTypeEx(
     _In_opt_ PPH_OBJECT_TYPE_PARAMETERS Parameters
     )
 {
-    NTSTATUS status = STATUS_SUCCESS;
     PPH_OBJECT_TYPE objectType;
 
     // Check the flags.
@@ -422,10 +389,9 @@ PPH_OBJECT_TYPE PhCreateObjectTypeEx(
     objectType->DeleteProcedure = DeleteProcedure;
     objectType->Name = Name;
 
-    if (objectType->TypeIndex < PH_OBJECT_TYPE_TABLE_SIZE)
-        PhObjectTypeTable[objectType->TypeIndex] = objectType;
-    else
-        PhRaiseStatus(STATUS_UNSUCCESSFUL);
+    assert(PhObjectTypeCount < PH_OBJECT_TYPE_TABLE_SIZE);
+
+    PhObjectTypeTable[objectType->TypeIndex] = objectType;
 
     if (Parameters)
     {
@@ -621,7 +587,7 @@ FORCEINLINE PPH_AUTO_POOL PhpGetCurrentAutoPool(
     VOID
     )
 {
-    return (PPH_AUTO_POOL)TlsGetValue(PhpAutoPoolTlsIndex);
+    return (PPH_AUTO_POOL)PhTlsGetValue(PhpAutoPoolTlsIndex);
 }
 
 /**
@@ -631,7 +597,7 @@ _May_raise_ FORCEINLINE VOID PhpSetCurrentAutoPool(
     _In_ PPH_AUTO_POOL AutoPool
     )
 {
-    if (!TlsSetValue(PhpAutoPoolTlsIndex, AutoPool))
+    if (!NT_SUCCESS(PhTlsSetValue(PhpAutoPoolTlsIndex, AutoPool)))
         PhRaiseStatus(STATUS_UNSUCCESSFUL);
 
 #ifdef DEBUG
@@ -705,20 +671,12 @@ VOID PhDrainAutoPool(
     _In_ PPH_AUTO_POOL AutoPool
     )
 {
-    ULONG i;
-
-    for (i = 0; i < AutoPool->StaticCount; i++)
-        PhDereferenceObject(AutoPool->StaticObjects[i]);
-
+    PhDereferenceObjects(AutoPool->StaticObjects, AutoPool->StaticCount);
     AutoPool->StaticCount = 0;
 
     if (AutoPool->DynamicObjects)
     {
-        for (i = 0; i < AutoPool->DynamicCount; i++)
-        {
-            PhDereferenceObject(AutoPool->DynamicObjects[i]);
-        }
-
+        PhDereferenceObjects(AutoPool->DynamicObjects, AutoPool->DynamicCount);
         AutoPool->DynamicCount = 0;
 
         if (AutoPool->DynamicAllocated > PH_AUTO_POOL_DYNAMIC_BIG_SIZE)

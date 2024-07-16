@@ -1,31 +1,20 @@
 /*
- * Process Hacker -
- *   property sheet 
+ * Copyright (c) 2022 Winsider Seminars & Solutions, Inc.  All rights reserved.
  *
- * Copyright (C) 2017 dmex
+ * This file is part of System Informer.
  *
- * This file is part of Process Hacker.
+ * Authors:
  *
- * Process Hacker is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
+ *     dmex    2017
  *
- * Process Hacker is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with Process Hacker.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-// NOTE: Copied from processhacker2\ProcessHacker\procprp.h
+// NOTE: Copied from processhacker\ProcessHacker\procprp.h
 
 #ifndef PV_PRP_H
 #define PV_PRP_H
 
-#define PV_PROPCONTEXT_MAXPAGES 20
+#define PV_PROPCONTEXT_MAXPAGES 40
 
 typedef struct _PV_PROPSHEETCONTEXT
 {
@@ -83,14 +72,6 @@ PPV_PROPPAGECONTEXT PvCreatePropPageContextEx(
     _In_opt_ PVOID Context
     );
 
-BOOLEAN PvPropPageDlgProcHeader(
-    _In_ HWND hwndDlg,
-    _In_ UINT uMsg,
-    _In_ LPARAM lParam,
-    _Out_ LPPROPSHEETPAGE *PropSheetPage,
-    _Out_ PPV_PROPPAGECONTEXT *PropPageContext
-    );
-
 #define PH_PROP_PAGE_TAB_CONTROL_PARENT ((PPH_LAYOUT_ITEM)0x1)
 
 PPH_LAYOUT_ITEM PvAddPropPageLayoutItem(
@@ -104,6 +85,7 @@ VOID PvDoPropPageLayout(
     _In_ HWND hwnd
     );
 
+_Success_(return)
 FORCEINLINE BOOLEAN PvPropPageDlgProcHeader(
     _In_ HWND hwndDlg,
     _In_ UINT uMsg,
@@ -120,7 +102,7 @@ FORCEINLINE BOOLEAN PvPropPageDlgProcHeader(
         PhSetWindowContext(hwndDlg, ULONG_MAX, (PVOID)lParam);
     }
 
-    propSheetPage = PhGetWindowContext(hwndDlg, ULONG_MAX);
+    propSheetPage = (LPPROPSHEETPAGE)PhGetWindowContext(hwndDlg, ULONG_MAX);
 
     if (!propSheetPage)
         return FALSE;

@@ -1,3 +1,15 @@
+/*
+ * Copyright (c) 2022 Winsider Seminars & Solutions, Inc.  All rights reserved.
+ *
+ * This file is part of System Informer.
+ *
+ * Authors:
+ *
+ *     wj32    2011-2013
+ *     dmex    2015-2023
+ *
+ */
+
 #ifndef WNDEXP_H
 #define WNDEXP_H
 
@@ -5,8 +17,7 @@
 #include <phapppub.h>
 #include <phappresource.h>
 #include <settings.h>
-
-#include <commonutil.h>
+#include <mapldr.h>
 
 #include "resource.h"
 #include "wndtree.h"
@@ -16,6 +27,10 @@ extern PPH_PLUGIN PluginInstance;
 
 #define PLUGIN_NAME L"ProcessHacker.WindowExplorer"
 #define SETTING_NAME_SHOW_DESKTOP_WINDOWS (PLUGIN_NAME L".ShowDesktopWindows")
+#define SETTING_NAME_WINDOW_ENUM_ALTERNATE (PLUGIN_NAME L".EnableAltEnumWindow")
+#define SETTING_NAME_WINDOW_ENABLE_ICONS (PLUGIN_NAME L".EnableIcons")
+#define SETTING_NAME_WINDOW_ENABLE_ICONS_INTERNAL (PLUGIN_NAME L".EnableIconsInternal")
+#define SETTING_NAME_WINDOW_ENABLE_PREVIEW (PLUGIN_NAME L".EnableWindowPreview")
 #define SETTING_NAME_WINDOW_TREE_LIST_COLUMNS (PLUGIN_NAME L".WindowTreeListColumns")
 #define SETTING_NAME_WINDOWS_WINDOW_POSITION (PLUGIN_NAME L".WindowsWindowPosition")
 #define SETTING_NAME_WINDOWS_WINDOW_SIZE (PLUGIN_NAME L".WindowsWindowSize")
@@ -24,6 +39,7 @@ extern PPH_PLUGIN PluginInstance;
 #define SETTING_NAME_WINDOWS_PROPERTY_SIZE (PLUGIN_NAME L".WindowsPropertySize")
 #define SETTING_NAME_WINDOWS_PROPLIST_COLUMNS (PLUGIN_NAME L".WindowsPropListColumns")
 #define SETTING_NAME_WINDOWS_PROPSTORAGE_COLUMNS (PLUGIN_NAME L".WindowsPropStorageColumns")
+
 // wnddlg
 
 typedef enum _WE_WINDOW_SELECTOR_TYPE
@@ -66,19 +82,30 @@ VOID WeShowWindowsPropPage(
 
 // wndprp
 
-VOID WeShowWindowProperties(
+BOOLEAN WeShowWindowProperties(
     _In_ HWND ParentWindowHandle,
+    _In_ HWND WindowHandle,
+    _In_ BOOLEAN MessageOnlyWindow,
+    _In_ PCLIENT_ID ClientId
+    );
+
+HICON WepGetInternalWindowIcon(
+    _In_ HWND WindowHandle,
+    _In_ UINT IconType
+    );
+
+HICON WepGetWindowIcon(
     _In_ HWND WindowHandle
     );
 
 // utils
 
-#define WE_PhMainWndHandle (*(HWND *)WeGetProcedureAddress("PhMainWndHandle"))
-#define WE_WindowsVersion (*(ULONG *)WeGetProcedureAddress("WindowsVersion"))
-#define WE_PhInstanceHandle (*(HINSTANCE *)WeGetProcedureAddress("PhInstanceHandle"))
+HWND WeGetMainWindowHandle(
+    VOID
+    );
 
 PVOID WeGetProcedureAddress(
-    _In_ PSTR Name
+    _In_ PCSTR Name
     );
 
 VOID WeInvertWindowBorder(

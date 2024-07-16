@@ -1,26 +1,15 @@
 /*
- * Process Hacker -
- *   property sheet 
+ * Copyright (c) 2022 Winsider Seminars & Solutions, Inc.  All rights reserved.
  *
- * Copyright (C) 2017 dmex
+ * This file is part of System Informer.
  *
- * This file is part of Process Hacker.
+ * Authors:
  *
- * Process Hacker is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
+ *     dmex    2017-2021
  *
- * Process Hacker is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with Process Hacker.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-// NOTE: Copied from processhacker2\ProcessHacker\procprp.c
+// NOTE: Copied from processhacker\ProcessHacker\procprp.c
 
 #include <peview.h>
 #include <secedit.h>
@@ -125,53 +114,6 @@ static HWND SecurityButton = NULL;
 static WNDPROC OldOptionsWndProc = NULL;
 static WNDPROC OldSecurityWndProc = NULL;
 
-INT_PTR CALLBACK PvpOptionsWndProc(
-    _In_ HWND hwndDlg,
-    _In_ UINT uMsg,
-    _In_ WPARAM wParam,
-    _In_ LPARAM lParam
-    )
-{
-    switch (uMsg)
-    {
-    case WM_INITDIALOG:
-        {
-            HWND comboBoxHandle;
-
-            SendMessage(hwndDlg, WM_SETICON, ICON_SMALL, (LPARAM)PvImageSmallIcon);
-            SendMessage(hwndDlg, WM_SETICON, ICON_BIG, (LPARAM)PvImageLargeIcon);
-
-            comboBoxHandle = GetDlgItem(hwndDlg, IDC_MAXSIZEUNIT);
-
-            PhCenterWindow(hwndDlg, GetParent(hwndDlg));
-
-            //PhSetDialogItemText(hwndDlg, IDC_DBGHELPSEARCHPATH, PhaGetStringSetting(L"DbgHelpSearchPath")->Buffer);
-
-            for (ULONG i = 0; i < RTL_NUMBER_OF(PhSizeUnitNames); i++)
-                ComboBox_AddString(comboBoxHandle, PhSizeUnitNames[i]);
-
-            if (PhMaxSizeUnit != ULONG_MAX)
-                ComboBox_SetCurSel(comboBoxHandle, PhMaxSizeUnit);
-            else
-                ComboBox_SetCurSel(comboBoxHandle, RTL_NUMBER_OF(PhSizeUnitNames) - 1);
-
-            //PhInitializeWindowThemeEx(hwndDlg);
-        }
-        break;
-    case WM_COMMAND:
-        {
-            switch (GET_WM_COMMAND_ID(wParam, lParam))
-            {
-            case IDCANCEL:
-                EndDialog(hwndDlg, IDCANCEL);
-                break;
-            }
-        }
-        break;
-    }
-
-    return FALSE;
-}
 LRESULT CALLBACK PvpButtonWndProc(
     _In_ HWND hwndDlg,
     _In_ UINT uMsg,
@@ -185,12 +127,7 @@ LRESULT CALLBACK PvpButtonWndProc(
         {
             if (GET_WM_COMMAND_HWND(wParam, lParam) == OptionsButton)
             {
-                DialogBox(
-                    PhInstanceHandle,
-                    MAKEINTRESOURCE(IDD_OPTIONS),
-                    hwndDlg,
-                    PvpOptionsWndProc
-                    );
+                PvShowOptionsWindow(hwndDlg);
             }
             else if (GET_WM_COMMAND_HWND(wParam, lParam) == SecurityButton)
             {
@@ -212,7 +149,7 @@ LRESULT CALLBACK PvpButtonWndProc(
 
 static HWND PvpCreateOptionsButton(
     _In_ HWND hwndDlg
-)
+    )
 {
     if (!OptionsButton)
     {
@@ -232,7 +169,7 @@ static HWND PvpCreateOptionsButton(
             WS_EX_NOPARENTNOTIFY,
             WC_BUTTON,
             L"Options",
-            WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_DISABLED, // TODO: Remove disabled flag
+            WS_CHILD | WS_VISIBLE | WS_TABSTOP,
             clientRect.right - rect.right,
             rect.top,
             rect.right - rect.left,
@@ -250,7 +187,7 @@ static HWND PvpCreateOptionsButton(
 
 static HWND PvpCreateSecurityButton(
     _In_ HWND hwndDlg
-)
+    )
 {
     if (!SecurityButton)
     {
@@ -289,6 +226,54 @@ static HWND PvpCreateSecurityButton(
 }
 
 
+static HFONT PvpCreateFont(
+    _In_ PWSTR Name,
+    _In_ ULONG Size,
+    _In_ ULONG Weight,
+    _In_ LONG dpiValue
+    )
+{
+    return CreateFont(
+        -(LONG)PhMultiplyDivide(Size, dpiValue, 72),
+        0,
+        0,
+        0,
+        Weight,
+        FALSE,
+        FALSE,
+        FALSE,
+        ANSI_CHARSET,
+        OUT_DEFAULT_PRECIS,
+        CLIP_DEFAULT_PRECIS,
+        DEFAULT_QUALITY,
+        DEFAULT_PITCH,
+        Name
+        );
+}
+
+VOID PvpInitializeFont(
+    _In_ HWND hwnd
+)
+{
+    NONCLIENTMETRICS metrics = { sizeof(metrics) };
+    LONG dpiValue;
+
+    dpiValue = PhGetWindowDpi(hwnd);
+
+    if (PhApplicationFont)
+        DeleteFont(PhApplicationFont);
+
+    if (
+        !(PhApplicationFont = PvpCreateFont(L"Microsoft Sans Serif", 8, FW_NORMAL, dpiValue)) &&
+        !(PhApplicationFont = PvpCreateFont(L"Tahoma", 8, FW_NORMAL, dpiValue))
+        )
+    {
+        if (PhGetSystemParametersInfo(SPI_GETNONCLIENTMETRICS, sizeof(metrics), &metrics, dpiValue))
+            PhApplicationFont = CreateFontIndirect(&metrics.lfMessageFont);
+        else
+            PhApplicationFont = NULL;
+    }
+}
 
 INT CALLBACK PvpPropSheetProc(
     _In_ HWND hwndDlg,
@@ -321,8 +306,9 @@ INT CALLBACK PvpPropSheetProc(
             HICON smallIcon;
             HICON largeIcon;
 
-            PhGetStockApplicationIcon(&smallIcon, &largeIcon);
+            PvpInitializeFont(hwndDlg);
 
+            PhGetStockApplicationIcon(&smallIcon, &largeIcon);
             SendMessage(hwndDlg, WM_SETICON, ICON_SMALL, (LPARAM)smallIcon);
             SendMessage(hwndDlg, WM_SETICON, ICON_BIG, (LPARAM)largeIcon);
 
@@ -345,6 +331,9 @@ INT CALLBACK PvpPropSheetProc(
                 MinimumSize = rect;
                 MinimumSize.left = 0;
             }
+
+            if (PhEnableThemeSupport)
+                PhInitializeWindowTheme(hwndDlg, TRUE);
         }
         break;
     }
@@ -380,7 +369,7 @@ LRESULT CALLBACK PvpPropSheetWndProc(
         {
             HWND tabControl;
             TCITEM tabItem;
-            WCHAR text[128];
+            WCHAR text[128] = L"";
 
             // Save the window position and size.
 
@@ -392,7 +381,7 @@ LRESULT CALLBACK PvpPropSheetWndProc(
 
             tabItem.mask = TCIF_TEXT;
             tabItem.pszText = text;
-            tabItem.cchTextMax = RTL_NUMBER_OF(text) - 1;
+            tabItem.cchTextMax = RTL_NUMBER_OF(text) - sizeof(UNICODE_NULL);
 
             if (TabCtrl_GetItem(tabControl, TabCtrl_GetCurSel(tabControl), &tabItem))
             {
@@ -407,6 +396,11 @@ LRESULT CALLBACK PvpPropSheetWndProc(
 
             PhDeleteLayoutManager(&propSheetContext->LayoutManager);
             PhFree(propSheetContext);
+        }
+        break;
+    case WM_DPICHANGED:
+        {
+            PvpInitializeFont(hWnd);
         }
         break;
     case WM_COMMAND:
@@ -478,9 +472,15 @@ VOID PhpInitializePropSheetLayoutStage2(
     )
 {
     PH_RECTANGLE windowRectangle;
+    LONG dpiValue;
+
+    dpiValue = PhGetWindowDpi(hwnd);
 
     windowRectangle.Position = PhGetIntegerPairSetting(L"MainWindowPosition");
-    windowRectangle.Size = PhGetScalableIntegerPairSetting(L"MainWindowSize", TRUE).Pair;
+    windowRectangle.Size = PhGetScalableIntegerPairSetting(L"MainWindowSize", TRUE, dpiValue).Pair;
+
+    if (!windowRectangle.Position.X)
+        return;
 
     if (windowRectangle.Size.X < MinimumSize.right)
         windowRectangle.Size.X = MinimumSize.right;

@@ -1,23 +1,12 @@
 /*
- * Process Hacker -
- *   internal object manager
+ * Copyright (c) 2022 Winsider Seminars & Solutions, Inc.  All rights reserved.
  *
- * Copyright (C) 2009-2016 wj32
+ * This file is part of System Informer.
  *
- * This file is part of Process Hacker.
+ * Authors:
  *
- * Process Hacker is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
+ *     wj32    2009-2016
  *
- * Process Hacker is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with Process Hacker.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #ifndef _PH_REF_H
@@ -88,7 +77,7 @@ extern PH_QUEUED_LOCK PhDbgObjectListLock;
 extern PPH_CREATE_OBJECT_HOOK PhDbgCreateObjectHook;
 #endif
 
-NTSTATUS PhRefInitialization(
+BOOLEAN PhRefInitialization(
     VOID
     );
 
@@ -148,20 +137,48 @@ PhDereferenceObjectEx(
     _In_ BOOLEAN DeferDelete
     );
 
-PHLIBAPI
+
+/**
+ * References an array of objects.
+ *
+ * \param Objects An array of objects.
+ * \param NumberOfObjects The number of elements in \a Objects.
+ */
+FORCEINLINE
 VOID
 NTAPI
 PhReferenceObjects(
-    _In_reads_(NumberOfObjects) PVOID *Objects,
+    _In_reads_(NumberOfObjects) const PVOID *Objects,
     _In_ ULONG NumberOfObjects
-    );
+    )
+{
+    for (ULONG i = 0; i < NumberOfObjects; i++)
+        PhReferenceObject(Objects[i]);
+}
 
-PHLIBAPI
+/**
+ * Dereferences an array of objects.
+ *
+ * \param Objects An array of objects.
+ * \param NumberOfObjects The number of elements in \a Objects.
+ */
+FORCEINLINE
 VOID
 NTAPI
 PhDereferenceObjects(
-    _In_reads_(NumberOfObjects) PVOID *Objects,
+    _In_reads_(NumberOfObjects) const PVOID *Objects,
     _In_ ULONG NumberOfObjects
+    )
+{
+    for (ULONG i = 0; i < NumberOfObjects; i++)
+        PhDereferenceObject(Objects[i]);
+}
+
+PHLIBAPI
+ULONG
+NTAPI
+PhGetObjectRefCount(
+    _In_ PVOID Object
     );
 
 PHLIBAPI

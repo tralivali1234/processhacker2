@@ -1,3 +1,14 @@
+/*
+ * Copyright (c) 2022 Winsider Seminars & Solutions, Inc.  All rights reserved.
+ *
+ * This file is part of System Informer.
+ *
+ * Authors:
+ *
+ *     wj32    2010-2016
+ *
+ */
+
 #ifndef _PH_HANDLEP_H
 #define _PH_HANDLEP_H
 
@@ -56,7 +67,7 @@ FORCEINLINE VOID PhpUnlockHandleTableShared(
     PhReleaseQueuedLockShared(&HandleTable->Locks[Index]);
 }
 
-// Handle values work by specifying indicies into each
+// Handle values work by specifying indices into each
 // level.
 //
 // Bits 0-7: level 0

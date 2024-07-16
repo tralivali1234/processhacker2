@@ -1,49 +1,61 @@
 /*
- * Process Hacker Toolchain -
- *   project setup
+ * Copyright (c) 2022 Winsider Seminars & Solutions, Inc.  All rights reserved.
  *
- * This file is part of Process Hacker.
+ * This file is part of System Informer.
  *
- * Process Hacker is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
+ * Authors:
  *
- * Process Hacker is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
+ *     dmex
  *
- * You should have received a copy of the GNU General Public License
- * along with Process Hacker.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include <setup.h>
+#include "setup.h"
 
 NTSTATUS SetupUpdateBuild(
     _In_ PPH_SETUP_CONTEXT Context
     )
 {
-    if (!ShutdownProcessHacker())
+    // Create the folder.
+    if (!NT_SUCCESS(PhCreateDirectoryWin32(&Context->SetupInstallPath->sr)))
     {
-        Context->ErrorCode = ERROR_INVALID_FUNCTION;
+        Context->ErrorCode = ERROR_INVALID_DATA;
         goto CleanupExit;
     }
 
+    // Stop the application.
+    if (!SetupShutdownApplication(Context))
+        goto CleanupExit;
+
+    // Stop the kernel driver.
+    if (!SetupUninstallDriver(Context))
+        goto CleanupExit;
+
+    // Upgrade the legacy settings file.
+    SetupUpgradeSettingsFile();
+
+    // Remove the previous installation.
+    //if (Context->SetupResetSettings)
+    //    PhDeleteDirectory(Context->SetupInstallPath);
+
+    // Create the uninstaller.
     if (!SetupCreateUninstallFile(Context))
         goto CleanupExit;
 
-    if (!SetupUninstallKph(Context))
-        goto CleanupExit;
+    // Create the ARP uninstall entries.
+    SetupCreateUninstallKey(Context);
 
-    if (!SetupExtractBuild(Context))
-        goto CleanupExit;
+    // Create autorun.
+    SetupCreateWindowsOptions(Context);
+
+    // Create shortcuts.
+    //SetupCreateShortcuts(Context);
 
     // Set the default image execution options.
-    SetupCreateImageFileExecutionOptions();
+    //SetupCreateImageFileExecutionOptions();
 
-    // Set the default KPH configuration.
-    SetupStartKph(Context, FALSE);
+    // Extract the updated files.
+    if (!SetupExtractBuild(Context))
+        goto CleanupExit;
 
     PostMessage(Context->DialogHandle, SETUP_SHOWUPDATEFINAL, 0, 0);
     return STATUS_SUCCESS;
@@ -71,7 +83,7 @@ HRESULT CALLBACK SetupUpdatingTaskDialogCallbackProc(
             SendMessage(hwndDlg, TDM_SET_MARQUEE_PROGRESS_BAR, TRUE, 0);
             SendMessage(hwndDlg, TDM_SET_PROGRESS_BAR_MARQUEE, TRUE, 1);
 
-            PhQueueItemWorkQueue(PhGetGlobalWorkQueue(), SetupUpdateBuild, context);
+            PhCreateThread2(SetupUpdateBuild, context);
         }
         break;
     }
@@ -95,7 +107,7 @@ HRESULT CALLBACK SetupCompletedTaskDialogCallbackProc(
         {
             if ((INT)wParam == IDCLOSE)
             {
-                SetupExecuteProcessHacker(context);
+                SetupExecuteApplication(context);
             }
         }
         break;
@@ -116,7 +128,14 @@ HRESULT CALLBACK SetupErrorTaskDialogCallbackProc(
 
     switch (uMsg)
     {
-    case TDN_NAVIGATED:
+    case TDN_BUTTON_CLICKED:
+        {
+            if ((INT)wParam == IDYES)
+            {
+                ShowUpdatePageDialog(context);
+                return S_FALSE;
+            }
+        }
         break;
     }
 
@@ -176,16 +195,22 @@ VOID ShowUpdateErrorPageDialog(
     _In_ PPH_SETUP_CONTEXT Context
     )
 {
+    static TASKDIALOG_BUTTON TaskDialogButtonArray[] =
+    {
+        { IDYES, L"Retry" },
+        { IDCLOSE, L"Close" },
+    };
     TASKDIALOGCONFIG config;
 
     memset(&config, 0, sizeof(TASKDIALOGCONFIG));
     config.cbSize = sizeof(TASKDIALOGCONFIG);
     config.dwFlags = TDF_USE_HICON_MAIN | TDF_ALLOW_DIALOG_CANCELLATION | TDF_CAN_BE_MINIMIZED;
-    config.dwCommonButtons = TDCBF_CLOSE_BUTTON;
+    //config.dwCommonButtons = TDCBF_CLOSE_BUTTON;
     config.hMainIcon = Context->IconLargeHandle;
     config.pfCallback = SetupErrorTaskDialogCallbackProc;
     config.lpCallbackData = (LONG_PTR)Context;
-
+    config.pButtons = TaskDialogButtonArray;
+    config.cButtons = ARRAYSIZE(TaskDialogButtonArray);
     config.cxWidth = 200;
     config.pszWindowTitle = PhApplicationName;
     config.pszMainInstruction = L"Error updating to the latest version.";
@@ -193,7 +218,7 @@ VOID ShowUpdateErrorPageDialog(
     if (Context->ErrorCode)
     {
         PPH_STRING errorString;
-        
+
         if (errorString = PhGetStatusMessage(0, Context->ErrorCode))
             config.pszContent = PhGetString(errorString);
     }

@@ -1,32 +1,21 @@
 /*
- * Process Hacker Plugins -
- *   Online Checks Plugin
+ * Copyright (c) 2022 Winsider Seminars & Solutions, Inc.  All rights reserved.
  *
- * Copyright (C) 2016 dmex
+ * This file is part of System Informer.
  *
- * This file is part of Process Hacker.
+ * Authors:
  *
- * Process Hacker is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
+ *     dmex    2016-2024
  *
- * Process Hacker is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with Process Hacker.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include "onlnchk.h"
 
 static TASKDIALOG_BUTTON TaskDialogButtonArray[] =
 {
-    { IDOK, L"Upload file\nUpload fresh sample to VirusTotal for analysis" },
-    { IDRETRY, L"Reanalyze file\nRescan the existing sample on VirusTotal" },
     { IDYES, L"View last analysis\nOpen the last VirusTotal analysis page" },
+    //{ IDRETRY, L"Reanalyze file\nRescan the existing sample on VirusTotal" },
+    { IDOK, L"Upload file\nUpload fresh sample to VirusTotal for analysis" },
 };
 
 HRESULT CALLBACK TaskDialogResultFoundProc(
@@ -45,7 +34,7 @@ HRESULT CALLBACK TaskDialogResultFoundProc(
         {
             if (context->TaskbarListClass)
             {
-                ITaskbarList3_SetProgressState(context->TaskbarListClass, PhMainWndHandle, TBPF_NOPROGRESS);
+                PhTaskbarListSetProgressState(context->TaskbarListClass, context->DialogHandle, TBPF_NOPROGRESS);
             }
         }
         break;
@@ -104,7 +93,7 @@ VOID ShowFileFoundDialog(
     config.cbSize = sizeof(TASKDIALOGCONFIG);
     config.dwFlags = TDF_USE_HICON_MAIN | TDF_ALLOW_DIALOG_CANCELLATION | TDF_CAN_BE_MINIMIZED | TDF_ENABLE_HYPERLINKS | TDF_USE_COMMAND_LINKS;
     config.dwCommonButtons = TDCBF_CLOSE_BUTTON;
-    config.hMainIcon = Context->IconLargeHandle;
+    config.hMainIcon = PhGetApplicationIcon(FALSE);
     config.pszMainInstruction = PhaFormatString(
         L"%s was last analyzed %s ago",
         PhGetStringOrEmpty(Context->BaseFileName),

@@ -1,27 +1,17 @@
 /*
- * Process Hacker Network Tools -
- *   Main program
+ * Copyright (c) 2022 Winsider Seminars & Solutions, Inc.  All rights reserved.
  *
- * Copyright (C) 2010-2011 wj32
- * Copyright (C) 2013-2018 dmex
+ * This file is part of System Informer.
  *
- * This file is part of Process Hacker.
+ * Authors:
  *
- * Process Hacker is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
+ *     wj32    2010-2011
+ *     dmex    2013-2024
  *
- * Process Hacker is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with Process Hacker.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include "nettools.h"
+#include <networktoolsintf.h>
 
 PPH_PLUGIN PluginInstance;
 PH_CALLBACK_REGISTRATION PluginLoadCallbackRegistration;
@@ -38,30 +28,33 @@ BOOLEAN NetworkExtensionEnabled = FALSE;
 LIST_ENTRY NetworkExtensionListHead = { &NetworkExtensionListHead, &NetworkExtensionListHead };
 PH_QUEUED_LOCK NetworkExtensionListLock = PH_QUEUED_LOCK_INIT;
 
+NETWORKTOOLS_INTERFACE PluginInterface =
+{
+    NETWORKTOOLS_INTERFACE_VERSION,
+    LookupCountryCode,
+    LookupCountryIcon,
+    LookupPortServiceName,
+    DrawCountryIcon,
+    ShowPingWindowFromAddress,
+    ShowTracertWindowFromAddress,
+    ShowWhoisWindowFromAddress
+};
+
 VOID NTAPI LoadCallback(
     _In_opt_ PVOID Parameter,
     _In_opt_ PVOID Context
     )
 {
-    // HACK: The GetPerTcpConnectionEStats function requires administrative privileges 
-    // but returns success instead of access denied.
-    if (PhGetOwnTokenAttributes().Elevated)
-    {
-        NetworkExtensionEnabled = !!PhGetIntegerSetting(SETTING_NAME_EXTENDED_TCP_STATS);
-    }
-
-    LoadGeoLiteDb();
+    GeoLiteDatabaseType = PhGetIntegerSetting(SETTING_NAME_GEOLITE_DB_TYPE);
+    NetworkExtensionEnabled = !!PhGetIntegerSetting(SETTING_NAME_EXTENDED_TCP_STATS);
 }
 
 VOID NTAPI ShowOptionsCallback(
-    _In_opt_ PVOID Parameter,
-    _In_opt_ PVOID Context
+    _In_ PVOID Parameter,
+    _In_ PVOID Context
     )
 {
     PPH_PLUGIN_OPTIONS_POINTERS optionsEntry = (PPH_PLUGIN_OPTIONS_POINTERS)Parameter;
-
-    if (!optionsEntry)
-        return;
 
     optionsEntry->CreateSection(
         L"NetworkTools",
@@ -75,12 +68,27 @@ VOID NTAPI ShowOptionsCallback(
 _Success_(return)
 static BOOLEAN ParseNetworkAddress(
     _In_ PWSTR AddressString,
-    _Out_ PPH_IP_ENDPOINT RemoteEndpoint  
+    _Out_ PPH_IP_ENDPOINT RemoteEndpoint
     )
 {
     NET_ADDRESS_INFO addressInfo;
 
     memset(&addressInfo, 0, sizeof(NET_ADDRESS_INFO));
+
+    if (NT_SUCCESS(RtlIpv4StringToAddressEx(
+        AddressString,
+        FALSE,
+        &addressInfo.Ipv4Address.sin_addr,
+        &addressInfo.Ipv4Address.sin_port
+        )))
+    {
+        // ParseNetworkString doesn't support legacy formats of IPv4 addressing, so we'll first
+        // try parsing the address with RtlIpv4StringToAddressEx since it does support these formats (dmex)
+        RemoteEndpoint->Address.InAddr.s_addr = addressInfo.Ipv4Address.sin_addr.s_addr;
+        RemoteEndpoint->Port = _byteswap_ushort(addressInfo.Ipv4Address.sin_port);
+        RemoteEndpoint->Address.Type = PH_IPV4_NETWORK_TYPE;
+        return TRUE;
+    }
 
     if (ParseNetworkString(
         AddressString,
@@ -99,7 +107,8 @@ static BOOLEAN ParseNetworkAddress(
         PADDRINFOT result;
         WSADATA wsaData;
 
-        WSAStartup(WINSOCK_VERSION, &wsaData);
+        if (WSAStartup(WINSOCK_VERSION, &wsaData))
+            return FALSE;
 
         if (GetAddrInfo(addressInfo.NamedAddress.Address, addressInfo.NamedAddress.Port, NULL, &result) == ERROR_SUCCESS)
         {
@@ -155,38 +164,32 @@ static BOOLEAN ParseNetworkAddress(
             );
         RemoteEndpoint->Port = _byteswap_ushort(addressInfo.Ipv6Address.sin6_port);
         RemoteEndpoint->Address.Type = PH_IPV6_NETWORK_TYPE;
-        return TRUE;      
+        return TRUE;
     }
 
     return FALSE;
 }
 
 VOID NTAPI MenuItemCallback(
-    _In_opt_ PVOID Parameter,
+    _In_ PVOID Parameter,
     _In_opt_ PVOID Context
     )
 {
     PPH_PLUGIN_MENU_ITEM menuItem = (PPH_PLUGIN_MENU_ITEM)Parameter;
-    PPH_NETWORK_ITEM networkItem;
-
-    if (!menuItem)
-        return;
-
-    networkItem = (PPH_NETWORK_ITEM)menuItem->Context;
 
     switch (menuItem->Id)
     {
     case NETWORK_ACTION_PING:
-        ShowPingWindow(networkItem);
+        ShowPingWindow(menuItem->OwnerWindow, (PPH_NETWORK_ITEM)menuItem->Context);
         break;
     case NETWORK_ACTION_TRACEROUTE:
-        ShowTracertWindow(networkItem);
+        ShowTracertWindow(menuItem->OwnerWindow, (PPH_NETWORK_ITEM)menuItem->Context);
         break;
     case NETWORK_ACTION_WHOIS:
-        ShowWhoisWindow(networkItem);
+        ShowWhoisWindow(menuItem->OwnerWindow, (PPH_NETWORK_ITEM)menuItem->Context);
         break;
     case MAINMENU_ACTION_PING:
-        {           
+        {
             PPH_STRING selectedChoice = NULL;
             PH_IP_ENDPOINT remoteEndpoint = { 0 };
 
@@ -205,7 +208,7 @@ VOID NTAPI MenuItemCallback(
             {
                 if (ParseNetworkAddress(selectedChoice->Buffer, &remoteEndpoint))
                 {
-                    ShowPingWindowFromAddress(remoteEndpoint);
+                    ShowPingWindowFromAddress(menuItem->OwnerWindow, remoteEndpoint);
                     break;
                 }
             }
@@ -231,7 +234,7 @@ VOID NTAPI MenuItemCallback(
             {
                 if (ParseNetworkAddress(selectedChoice->Buffer, &remoteEndpoint))
                 {
-                    ShowTracertWindowFromAddress(remoteEndpoint);
+                    ShowTracertWindowFromAddress(menuItem->OwnerWindow, remoteEndpoint);
                     break;
                 }
             }
@@ -257,33 +260,31 @@ VOID NTAPI MenuItemCallback(
             {
                 if (ParseNetworkAddress(selectedChoice->Buffer, &remoteEndpoint))
                 {
-                    ShowWhoisWindowFromAddress(remoteEndpoint);
+                    ShowWhoisWindowFromAddress(menuItem->OwnerWindow, remoteEndpoint);
                     break;
                 }
             }
         }
         break;
     case MAINMENU_ACTION_GEOIP_UPDATE:
-        ShowGeoIPUpdateDialog(NULL);
+        ShowGeoLiteUpdateDialog(menuItem->OwnerWindow);
         break;
     }
 }
 
 VOID NTAPI MainMenuInitializingCallback(
-    _In_opt_ PVOID Parameter,
+    _In_ PVOID Parameter,
     _In_opt_ PVOID Context
     )
 {
     PPH_PLUGIN_MENU_INFORMATION menuInfo = Parameter;
     PPH_EMENU_ITEM networkToolsMenu;
 
-    if (!menuInfo)
-        return;
     if (menuInfo->u.MainMenu.SubMenuIndex != PH_MENU_ITEM_LOCATION_TOOLS)
         return;
-  
-    networkToolsMenu = PhPluginCreateEMenuItem(PluginInstance, 0, 0, L"&Network Tools", NULL);    
-    PhInsertEMenuItem(networkToolsMenu, PhPluginCreateEMenuItem(PluginInstance, 0, MAINMENU_ACTION_GEOIP_UPDATE, L"&GeoIP database update...", NULL), ULONG_MAX);
+
+    networkToolsMenu = PhPluginCreateEMenuItem(PluginInstance, 0, 0, L"&Network Tools", NULL);
+    PhInsertEMenuItem(networkToolsMenu, PhPluginCreateEMenuItem(PluginInstance, 0, MAINMENU_ACTION_GEOIP_UPDATE, L"&GeoLite database update...", NULL), ULONG_MAX);
     PhInsertEMenuItem(networkToolsMenu, PhCreateEMenuSeparator(), ULONG_MAX);
     PhInsertEMenuItem(networkToolsMenu, PhPluginCreateEMenuItem(PluginInstance, 0, MAINMENU_ACTION_PING, L"&Ping address...", NULL), ULONG_MAX);
     PhInsertEMenuItem(networkToolsMenu, PhPluginCreateEMenuItem(PluginInstance, 0, MAINMENU_ACTION_TRACERT, L"&Traceroute address...", NULL), ULONG_MAX);
@@ -292,7 +293,7 @@ VOID NTAPI MainMenuInitializingCallback(
 }
 
 VOID NTAPI NetworkMenuInitializingCallback(
-    _In_opt_ PVOID Parameter,
+    _In_ PVOID Parameter,
     _In_opt_ PVOID Context
     )
 {
@@ -301,9 +302,6 @@ VOID NTAPI NetworkMenuInitializingCallback(
     PPH_EMENU_ITEM whoisMenu;
     PPH_EMENU_ITEM traceMenu;
     PPH_EMENU_ITEM pingMenu;
-
-    if (!menuInfo)
-        return;
 
     if (menuInfo->u.Network.NumberOfNetworkItems == 1)
         networkItem = menuInfo->u.Network.NetworkItems[0];
@@ -361,6 +359,13 @@ VOID NTAPI NetworkMenuInitializingCallback(
     }
 }
 
+PNETWORK_EXTENSION GetNetworkItemExtension(
+    _In_ PPH_NETWORK_ITEM NetworkItem
+    )
+{
+    return PhPluginGetObjectExtension(PluginInstance, NetworkItem, EmNetworkItemType);
+}
+
 LONG NTAPI NetworkServiceSortFunction(
     _In_ PVOID Node1,
     _In_ PVOID Node2,
@@ -371,43 +376,41 @@ LONG NTAPI NetworkServiceSortFunction(
 {
     PPH_NETWORK_NODE node1 = Node1;
     PPH_NETWORK_NODE node2 = Node2;
-    PNETWORK_EXTENSION extension1 = PhPluginGetObjectExtension(PluginInstance, node1->NetworkItem, EmNetworkItemType);
-    PNETWORK_EXTENSION extension2 = PhPluginGetObjectExtension(PluginInstance, node2->NetworkItem, EmNetworkItemType);
+    PNETWORK_EXTENSION extension1 = GetNetworkItemExtension(node1->NetworkItem);
+    PNETWORK_EXTENSION extension2 = GetNetworkItemExtension(node2->NetworkItem);
 
     switch (SubId)
     {
     case NETWORK_COLUMN_ID_REMOTE_COUNTRY:
-        return PhCompareStringWithNullSortOrder(extension1->RemoteCountryCode, extension2->RemoteCountryCode, SortOrder, TRUE);
+        return PhCompareStringWithNullSortOrder(extension1->RemoteCountryName, extension2->RemoteCountryName, SortOrder, TRUE);
     case NETWORK_COLUMN_ID_LOCAL_SERVICE:
-        return PhCompareStringWithNullSortOrder(extension1->LocalServiceName, extension2->LocalServiceName, SortOrder, TRUE);
+        return PhCompareStringRefWithNullSortOrder(extension1->LocalServiceName, extension2->LocalServiceName, SortOrder, TRUE);
     case NETWORK_COLUMN_ID_REMOTE_SERVICE:
-        return PhCompareStringWithNullSortOrder(extension1->RemoteServiceName, extension2->RemoteServiceName, SortOrder, TRUE);
+        return PhCompareStringRefWithNullSortOrder(extension1->RemoteServiceName, extension2->RemoteServiceName, SortOrder, TRUE);
     case NETWORK_COLUMN_ID_BYTES_IN:
         return uint64cmp(extension1->NumberOfBytesIn, extension2->NumberOfBytesIn);
     case NETWORK_COLUMN_ID_BYTES_OUT:
         return uint64cmp(extension1->NumberOfBytesOut, extension2->NumberOfBytesOut);
     case NETWORK_COLUMN_ID_PACKETLOSS:
         return uint64cmp(extension1->NumberOfLostPackets, extension2->NumberOfLostPackets);
+    case NETWORK_COLUMN_ID_JITTER:
+        return uintcmp(extension1->VarianceRtt, extension2->VarianceRtt);
     case NETWORK_COLUMN_ID_LATENCY:
-        return uint64cmp(extension1->SampleRtt, extension2->SampleRtt);
+        return uintcmp(extension1->SampleRtt, extension2->SampleRtt);
     }
 
     return 0;
 }
 
 VOID NTAPI NetworkTreeNewInitializingCallback(
-    _In_opt_ PVOID Parameter,
-    _In_opt_ PVOID Context
+    _In_ PVOID Parameter,
+    _In_ PVOID Context
     )
 {
     PPH_PLUGIN_TREENEW_INFORMATION info = Parameter;
     PH_TREENEW_COLUMN column;
 
-    if (!info)
-        return;
-
-    if (Context)
-        *(HWND*)Context = info->TreeNewHandle;
+    *(HWND*)Context = info->TreeNewHandle;
 
     memset(&column, 0, sizeof(PH_TREENEW_COLUMN));
     column.Text = L"Country";
@@ -447,6 +450,12 @@ VOID NTAPI NetworkTreeNewInitializingCallback(
     PhPluginAddTreeNewColumn(PluginInstance, info->CmData, &column, NETWORK_COLUMN_ID_PACKETLOSS, NULL, NetworkServiceSortFunction);
 
     memset(&column, 0, sizeof(PH_TREENEW_COLUMN));
+    column.Text = L"Jitter (ms)";
+    column.Width = 80;
+    column.Alignment = PH_ALIGN_LEFT;
+    PhPluginAddTreeNewColumn(PluginInstance, info->CmData, &column, NETWORK_COLUMN_ID_JITTER, NULL, NetworkServiceSortFunction);
+
+    memset(&column, 0, sizeof(PH_TREENEW_COLUMN));
     column.Text = L"Latency (ms)";
     column.Width = 80;
     column.Alignment = PH_ALIGN_LEFT;
@@ -457,15 +466,14 @@ VOID NTAPI NetworkItemCreateCallback(
     _In_ PVOID Object,
     _In_ PH_EM_OBJECT_TYPE ObjectType,
     _In_ PVOID Extension
-)
+    )
 {
     PPH_NETWORK_ITEM networkItem = Object;
     PNETWORK_EXTENSION extension = Extension;
 
     memset(extension, 0, sizeof(NETWORK_EXTENSION));
-
     extension->NetworkItem = networkItem;
-    extension->CountryIconIndex = INT_MAX;
+    extension->CountryIconIndex = INT_ERROR;
 
     if (NetworkExtensionEnabled)
     {
@@ -491,46 +499,42 @@ VOID NTAPI NetworkItemDeleteCallback(
         PhReleaseQueuedLockExclusive(&NetworkExtensionListLock);
     }
 
-    if (extension->LocalServiceName)
-        PhDereferenceObject(extension->LocalServiceName);
-    if (extension->RemoteServiceName)
-        PhDereferenceObject(extension->RemoteServiceName);
-    if (extension->RemoteCountryCode)
-        PhDereferenceObject(extension->RemoteCountryCode);
     if (extension->RemoteCountryName)
         PhDereferenceObject(extension->RemoteCountryName);
     if (extension->BytesIn)
         PhDereferenceObject(extension->BytesIn);
     if (extension->BytesOut)
         PhDereferenceObject(extension->BytesOut);
-    if (extension->PacketLossText)
-        PhDereferenceObject(extension->PacketLossText);
+    if (extension->LossText)
+        PhDereferenceObject(extension->LossText);
+    if (extension->JitterText)
+        PhDereferenceObject(extension->JitterText);
     if (extension->LatencyText)
         PhDereferenceObject(extension->LatencyText);
 }
 
-FORCEINLINE VOID PhpNetworkItemToRow(
+VOID PhpNetworkItemToRow(
     _Out_ PMIB_TCPROW Row,
      _In_ PPH_NETWORK_ITEM NetworkItem
     )
 {
-    Row->dwState = NetworkItem->State;
+    Row->State = NetworkItem->State;
     Row->dwLocalAddr = NetworkItem->LocalEndpoint.Address.Ipv4;
     Row->dwLocalPort = _byteswap_ushort((USHORT)NetworkItem->LocalEndpoint.Port);
     Row->dwRemoteAddr = NetworkItem->RemoteEndpoint.Address.Ipv4;
     Row->dwRemotePort = _byteswap_ushort((USHORT)NetworkItem->RemoteEndpoint.Port);
 }
 
-FORCEINLINE VOID PhpNetworkItemToRow6(
+VOID PhpNetworkItemToRow6(
     _Out_ PMIB_TCP6ROW Row,
     _In_ PPH_NETWORK_ITEM NetworkItem
     )
 {
     Row->State = NetworkItem->State;
-    memcpy(Row->LocalAddr.u.Byte, NetworkItem->LocalEndpoint.Address.Ipv6, 16);
+    memcpy_s(Row->LocalAddr.s6_addr, sizeof(Row->LocalAddr.s6_addr), NetworkItem->LocalEndpoint.Address.Ipv6, sizeof(NetworkItem->LocalEndpoint.Address.Ipv6));
     Row->dwLocalScopeId = NetworkItem->LocalScopeId;
     Row->dwLocalPort = _byteswap_ushort((USHORT)NetworkItem->LocalEndpoint.Port);
-    memcpy(Row->RemoteAddr.u.Byte, NetworkItem->RemoteEndpoint.Address.Ipv6, 16);
+    memcpy_s(Row->RemoteAddr.s6_addr, sizeof(Row->RemoteAddr.s6_addr), NetworkItem->RemoteEndpoint.Address.Ipv6, sizeof(NetworkItem->RemoteEndpoint.Address.Ipv6));
     Row->dwRemoteScopeId = NetworkItem->RemoteScopeId;
     Row->dwRemotePort = _byteswap_ushort((USHORT)NetworkItem->RemoteEndpoint.Port);
 }
@@ -542,21 +546,21 @@ VOID NTAPI NetworkNodeCreateCallback(
     )
 {
     PPH_NETWORK_NODE networkNode = Object;
-    PNETWORK_EXTENSION extension = PhPluginGetObjectExtension(PluginInstance, networkNode->NetworkItem, EmNetworkItemType);
+    PNETWORK_EXTENSION extension = GetNetworkItemExtension(networkNode->NetworkItem);
 
     if (!extension->CountryValid)
     {
-        PPH_STRING remoteCountryCode;
+        ULONG remoteCountryCode;
         PPH_STRING remoteCountryName;
 
         if (LookupCountryCode(
-            networkNode->NetworkItem->RemoteEndpoint.Address, 
-            &remoteCountryCode, 
+            networkNode->NetworkItem->RemoteEndpoint.Address,
+            &remoteCountryCode,
             &remoteCountryName
             ))
         {
-            PhMoveReference(&extension->RemoteCountryCode, remoteCountryCode);
             PhMoveReference(&extension->RemoteCountryName, remoteCountryName);
+            extension->CountryIconIndex = LookupCountryIcon(remoteCountryCode);
         }
 
         extension->CountryValid = TRUE;
@@ -612,14 +616,11 @@ VOID UpdateNetworkNode(
         {
             if (!Extension->LocalValid)
             {
-                for (ULONG x = 0; x < ARRAYSIZE(ResolvedPortsTable); x++)
+                PPH_STRINGREF localServiceName;
+
+                if (LookupPortServiceName(Node->NetworkItem->LocalEndpoint.Port, &localServiceName))
                 {
-                    if (Node->NetworkItem->LocalEndpoint.Port == ResolvedPortsTable[x].Port)
-                    {
-                        //PhAppendFormatStringBuilder(&stringBuilder, L"%s,", ResolvedPortsTable[x].Name);
-                        PhMoveReference(&Extension->LocalServiceName, PhCreateString(ResolvedPortsTable[x].Name));
-                        break;
-                    }
+                    Extension->LocalServiceName = localServiceName;
                 }
 
                 Extension->LocalValid = TRUE;
@@ -630,14 +631,11 @@ VOID UpdateNetworkNode(
         {
             if (!Extension->RemoteValid)
             {
-                for (ULONG x = 0; x < ARRAYSIZE(ResolvedPortsTable); x++)
+                PPH_STRINGREF remoteServiceName;
+
+                if (LookupPortServiceName(Node->NetworkItem->RemoteEndpoint.Port, &remoteServiceName))
                 {
-                    if (Node->NetworkItem->RemoteEndpoint.Port == ResolvedPortsTable[x].Port)
-                    {
-                        //PhAppendFormatStringBuilder(&stringBuilder, L"%s,", ResolvedPortsTable[x].Name);
-                        PhMoveReference(&Extension->RemoteServiceName, PhCreateString(ResolvedPortsTable[x].Name));
-                        break;
-                    }
+                    Extension->RemoteServiceName = remoteServiceName;
                 }
 
                 Extension->RemoteValid = TRUE;
@@ -665,10 +663,19 @@ VOID UpdateNetworkNode(
     case NETWORK_COLUMN_ID_PACKETLOSS:
         {
             if (Extension->NumberOfLostPackets)
-                PhMoveReference(&Extension->PacketLossText, PhFormatUInt64(Extension->NumberOfLostPackets, TRUE));
+                PhMoveReference(&Extension->LossText, PhFormatUInt64(Extension->NumberOfLostPackets, TRUE));
 
-            if (!NetworkExtensionEnabled && !Extension->PacketLossText && PhGetOwnTokenAttributes().Elevated)
-                PhMoveReference(&Extension->PacketLossText, PhCreateString(L"Extended TCP statisitics are disabled"));
+            if (!NetworkExtensionEnabled && !Extension->LossText && PhGetOwnTokenAttributes().Elevated)
+                PhMoveReference(&Extension->LossText, PhCreateString(L"Extended TCP statisitics are disabled"));
+        }
+        break;
+    case NETWORK_COLUMN_ID_JITTER:
+        {
+            if (Extension->VarianceRtt)
+                PhMoveReference(&Extension->JitterText, PhFormatUInt64(Extension->VarianceRtt, TRUE));
+
+            if (!NetworkExtensionEnabled && !Extension->JitterText && PhGetOwnTokenAttributes().Elevated)
+                PhMoveReference(&Extension->JitterText, PhCreateString(L"Extended TCP statisitics are disabled"));
         }
         break;
     case NETWORK_COLUMN_ID_LATENCY:
@@ -684,14 +691,11 @@ VOID UpdateNetworkNode(
 }
 
 VOID NTAPI TreeNewMessageCallback(
-    _In_opt_ PVOID Parameter,
-    _In_opt_ PVOID Context
+    _In_ PVOID Parameter,
+    _In_ PVOID Context
     )
 {
     PPH_PLUGIN_TREENEW_MESSAGE message = Parameter;
-
-    if (!message)
-        return;
 
     switch (message->Message)
     {
@@ -701,8 +705,8 @@ VOID NTAPI TreeNewMessageCallback(
             {
                 PPH_TREENEW_GET_CELL_TEXT getCellText = message->Parameter1;
                 PPH_NETWORK_NODE networkNode = (PPH_NETWORK_NODE)getCellText->Node;
-                PNETWORK_EXTENSION extension = PhPluginGetObjectExtension(PluginInstance, networkNode->NetworkItem, EmNetworkItemType);
-                
+                PNETWORK_EXTENSION extension = GetNetworkItemExtension(networkNode->NetworkItem);
+
                 UpdateNetworkNode(message->SubId, networkNode, extension);
 
                 switch (message->SubId)
@@ -711,10 +715,30 @@ VOID NTAPI TreeNewMessageCallback(
                     getCellText->Text = PhGetStringRef(extension->RemoteCountryName);
                     break;
                 case NETWORK_COLUMN_ID_LOCAL_SERVICE:
-                    getCellText->Text = PhGetStringRef(extension->LocalServiceName);
+                    {
+                        if (extension->LocalServiceName && extension->LocalServiceName->Length)
+                        {
+                            getCellText->Text.Buffer = extension->LocalServiceName->Buffer;
+                            getCellText->Text.Length = extension->LocalServiceName->Length;
+                        }
+                        else
+                        {
+                            PhInitializeEmptyStringRef(&getCellText->Text);
+                        }
+                    }
                     break;
                 case NETWORK_COLUMN_ID_REMOTE_SERVICE:
-                    getCellText->Text = PhGetStringRef(extension->RemoteServiceName);
+                    {
+                        if (extension->RemoteServiceName && extension->RemoteServiceName->Length)
+                        {
+                            getCellText->Text.Buffer = extension->RemoteServiceName->Buffer;
+                            getCellText->Text.Length = extension->RemoteServiceName->Length;
+                        }
+                        else
+                        {
+                            PhInitializeEmptyStringRef(&getCellText->Text);
+                        }
+                    }
                     break;
                 case NETWORK_COLUMN_ID_BYTES_IN:
                     getCellText->Text = PhGetStringRef(extension->BytesIn);
@@ -723,7 +747,10 @@ VOID NTAPI TreeNewMessageCallback(
                     getCellText->Text = PhGetStringRef(extension->BytesOut);
                     break;
                 case NETWORK_COLUMN_ID_PACKETLOSS:
-                    getCellText->Text = PhGetStringRef(extension->PacketLossText);
+                    getCellText->Text = PhGetStringRef(extension->LossText);
+                    break;
+                case NETWORK_COLUMN_ID_JITTER:
+                    getCellText->Text = PhGetStringRef(extension->JitterText);
                     break;
                 case NETWORK_COLUMN_ID_LATENCY:
                     getCellText->Text = PhGetStringRef(extension->LatencyText);
@@ -738,7 +765,7 @@ VOID NTAPI TreeNewMessageCallback(
         {
             PPH_TREENEW_CUSTOM_DRAW customDraw = message->Parameter1;
             PPH_NETWORK_NODE networkNode = (PPH_NETWORK_NODE)customDraw->Node;
-            PNETWORK_EXTENSION extension = PhPluginGetObjectExtension(PluginInstance, networkNode->NetworkItem, EmNetworkItemType);
+            PNETWORK_EXTENSION extension = GetNetworkItemExtension(networkNode->NetworkItem);
             HDC hdc = customDraw->Dc;
             RECT rect = customDraw->CellRect;
 
@@ -752,43 +779,54 @@ VOID NTAPI TreeNewMessageCallback(
                 // nothing to draw
                 break;
             }
-            
+
             // Padding
             rect.left += 5;
 
             // Draw the column data
-            if (GeoDbLoaded && !GeoDbExpired && extension->RemoteCountryCode && extension->RemoteCountryName)
+            if (extension->RemoteCountryName)
             {
-                if (extension->CountryIconIndex == INT_MAX)
-                    extension->CountryIconIndex = LookupCountryIcon(extension->RemoteCountryCode);
-
-                if (extension->CountryIconIndex != INT_MAX)
+                if (extension->CountryIconIndex != INT_ERROR)
                 {
                     DrawCountryIcon(hdc, rect, extension->CountryIconIndex);
                     rect.left += 16 + 2;
                 }
 
                 DrawText(
-                    hdc, 
+                    hdc,
                     extension->RemoteCountryName->Buffer,
                     (INT)extension->RemoteCountryName->Length / sizeof(WCHAR),
                     &rect,
                     DT_LEFT | DT_VCENTER | DT_END_ELLIPSIS | DT_SINGLELINE
                     );
             }
-
-            if (GeoDbExpired)
-            {
-                DrawText(hdc, L"Geoip database expired.", -1, &rect, DT_LEFT | DT_VCENTER | DT_END_ELLIPSIS | DT_SINGLELINE);
-            }
-
-            if (!GeoDbLoaded)
+            else if (!GeoDbInitialized)
             {
                 DrawText(hdc, L"Geoip database not found.", -1, &rect, DT_LEFT | DT_VCENTER | DT_END_ELLIPSIS | DT_SINGLELINE);
             }
         }
         break;
     }
+}
+
+BOOLEAN NetworkToolsGeoIpFlushCache(
+    VOID
+    )
+{
+    static ULONG64 lastTickCount = 0;
+    ULONG64 tickCount = NtGetTickCount64();
+
+    if (lastTickCount == 0)
+        lastTickCount = tickCount;
+
+    if (tickCount - lastTickCount >= 600 * 1000)
+    {
+        lastTickCount = tickCount;
+        NetworkToolsGeoDbFlushCache();
+        return TRUE;
+    }
+
+    return FALSE;
 }
 
 VOID ProcessesUpdatedCallback(
@@ -802,15 +840,17 @@ VOID ProcessesUpdatedCallback(
     if (!NetworkExtensionEnabled)
         return;
 
-    if (ProcessesUpdatedCount < 2)
+    if (ProcessesUpdatedCount != 3)
     {
         ProcessesUpdatedCount++;
         return;
     }
 
+    NetworkToolsGeoIpFlushCache();
+
     for (
-        listEntry = NetworkExtensionListHead.Flink; 
-        listEntry != &NetworkExtensionListHead; 
+        listEntry = NetworkExtensionListHead.Flink;
+        listEntry != &NetworkExtensionListHead;
         listEntry = listEntry->Flink
         )
     {
@@ -822,6 +862,8 @@ VOID ProcessesUpdatedCallback(
         if (extension->NetworkItem->ProtocolType == PH_TCP4_NETWORK_PROTOCOL)
         {
             MIB_TCPROW tcpRow;
+            TCP_ESTATS_DATA_RW_v0 dataRw;
+            TCP_ESTATS_PATH_RW_v0 pathRw;
             TCP_ESTATS_DATA_ROD_v0 dataRod;
             TCP_ESTATS_PATH_ROD_v0 pathRod;
 
@@ -830,9 +872,9 @@ VOID ProcessesUpdatedCallback(
             if (GetPerTcpConnectionEStats(
                 &tcpRow,
                 TcpConnectionEstatsData,
-                NULL,
+                (PUCHAR)&dataRw,
                 0,
-                0,
+                sizeof(TCP_ESTATS_DATA_RW_v0),
                 NULL,
                 0,
                 0,
@@ -841,16 +883,19 @@ VOID ProcessesUpdatedCallback(
                 sizeof(TCP_ESTATS_DATA_ROD_v0)
                 ) == ERROR_SUCCESS)
             {
-                extension->NumberOfBytesIn = dataRod.DataBytesIn;
-                extension->NumberOfBytesOut = dataRod.DataBytesOut;
+                if (dataRw.EnableCollection)
+                {
+                    extension->NumberOfBytesIn = dataRod.DataBytesIn;
+                    extension->NumberOfBytesOut = dataRod.DataBytesOut;
+                }
             }
 
             if (GetPerTcpConnectionEStats(
                 &tcpRow,
                 TcpConnectionEstatsPath,
-                NULL,
+                (PUCHAR)&pathRw,
                 0,
-                0,
+                sizeof(TCP_ESTATS_PATH_RW_v0),
                 NULL,
                 0,
                 0,
@@ -859,16 +904,24 @@ VOID ProcessesUpdatedCallback(
                 sizeof(TCP_ESTATS_PATH_ROD_v0)
                 ) == ERROR_SUCCESS)
             {
-                extension->NumberOfLostPackets = UInt32Add32To64(pathRod.FastRetran, pathRod.PktsRetrans);
-                extension->SampleRtt = pathRod.SampleRtt;
+                if (pathRw.EnableCollection)
+                {
+                    extension->NumberOfLostPackets = UInt32Add32To64(pathRod.FastRetran, pathRod.PktsRetrans);
+                    extension->SampleRtt = pathRod.SampleRtt;
+                    extension->VarianceRtt = pathRod.RttVar;
 
-                if (extension->SampleRtt == ULONG_MAX) // HACK
-                    extension->SampleRtt = 0;
+                    if (extension->SampleRtt == ULONG_MAX)
+                        extension->SampleRtt = 0;
+                    if (extension->VarianceRtt == ULONG_MAX)
+                        extension->VarianceRtt = 0;
+                }
             }
         }
         else if (extension->NetworkItem->ProtocolType == PH_TCP6_NETWORK_PROTOCOL)
         {
             MIB_TCP6ROW tcp6Row;
+            TCP_ESTATS_DATA_RW_v0 dataRw;
+            TCP_ESTATS_PATH_RW_v0 pathRw;
             TCP_ESTATS_DATA_ROD_v0 dataRod;
             TCP_ESTATS_PATH_ROD_v0 pathRod;
 
@@ -877,9 +930,9 @@ VOID ProcessesUpdatedCallback(
             if (GetPerTcp6ConnectionEStats(
                 &tcp6Row,
                 TcpConnectionEstatsData,
-                NULL,
+                (PUCHAR)&dataRw,
                 0,
-                0,
+                sizeof(TCP_ESTATS_DATA_RW_v0),
                 NULL,
                 0,
                 0,
@@ -888,16 +941,19 @@ VOID ProcessesUpdatedCallback(
                 sizeof(TCP_ESTATS_DATA_ROD_v0)
                 ) == ERROR_SUCCESS)
             {
-                extension->NumberOfBytesIn = dataRod.DataBytesIn;
-                extension->NumberOfBytesOut = dataRod.DataBytesOut;
+                if (dataRw.EnableCollection)
+                {
+                    extension->NumberOfBytesIn = dataRod.DataBytesIn;
+                    extension->NumberOfBytesOut = dataRod.DataBytesOut;
+                }
             }
 
             if (GetPerTcp6ConnectionEStats(
                 &tcp6Row,
                 TcpConnectionEstatsPath,
-                NULL,
+                (PUCHAR)&pathRw,
                 0,
-                0,
+                sizeof(TCP_ESTATS_PATH_RW_v0),
                 NULL,
                 0,
                 0,
@@ -906,11 +962,17 @@ VOID ProcessesUpdatedCallback(
                 sizeof(TCP_ESTATS_PATH_ROD_v0)
                 ) == ERROR_SUCCESS)
             {
-                extension->NumberOfLostPackets = UInt32Add32To64(pathRod.FastRetran, pathRod.PktsRetrans);
-                extension->SampleRtt = pathRod.SampleRtt;
+                if (pathRw.EnableCollection)
+                {
+                    extension->NumberOfLostPackets = UInt32Add32To64(pathRod.FastRetran, pathRod.PktsRetrans);
+                    extension->SampleRtt = pathRod.SampleRtt;
+                    extension->VarianceRtt = pathRod.RttVar;
 
-                if (extension->SampleRtt == ULONG_MAX) // HACK
-                    extension->SampleRtt = 0;
+                    if (extension->SampleRtt == ULONG_MAX)
+                        extension->SampleRtt = 0;
+                    if (extension->VarianceRtt == ULONG_MAX)
+                        extension->VarianceRtt = 0;
+                }
             }
         }
     }
@@ -932,7 +994,8 @@ LOGICAL DllMain(
                 { StringSettingType, SETTING_NAME_ADDRESS_HISTORY, L"" },
                 { IntegerPairSettingType, SETTING_NAME_PING_WINDOW_POSITION, L"0,0" },
                 { ScalableIntegerPairSettingType, SETTING_NAME_PING_WINDOW_SIZE, L"@96|420,250" },
-                { IntegerSettingType, SETTING_NAME_PING_MINIMUM_SCALING, L"1F4" }, // 500ms minimum scaling
+                { IntegerSettingType, SETTING_NAME_PING_MINIMUM_SCALING, L"c8" }, // 200ms minimum scaling
+                { IntegerSettingType, SETTING_NAME_PING_TIMEOUT, L"3e8" }, // 1000 timeout
                 { IntegerSettingType, SETTING_NAME_PING_SIZE, L"20" }, // 32 byte packet
                 { IntegerPairSettingType, SETTING_NAME_TRACERT_WINDOW_POSITION, L"0,0" },
                 { ScalableIntegerPairSettingType, SETTING_NAME_TRACERT_WINDOW_SIZE, L"@96|850,490" },
@@ -941,8 +1004,11 @@ LOGICAL DllMain(
                 { IntegerSettingType, SETTING_NAME_TRACERT_MAX_HOPS, L"14" },
                 { IntegerPairSettingType, SETTING_NAME_WHOIS_WINDOW_POSITION, L"0,0" },
                 { ScalableIntegerPairSettingType, SETTING_NAME_WHOIS_WINDOW_SIZE, L"@96|600,365" },
-                { StringSettingType, SETTING_NAME_DB_LOCATION, L"%APPDATA%\\Process Hacker\\GeoLite2-Country.mmdb" },
-                { IntegerSettingType, SETTING_NAME_EXTENDED_TCP_STATS, L"0" }
+                { IntegerSettingType, SETTING_NAME_WHOIS_IPV6_SUPPORT, L"0" },
+                { IntegerSettingType, SETTING_NAME_EXTENDED_TCP_STATS, L"0" },
+                { StringSettingType, SETTING_NAME_GEOLITE_API_KEY, L"" },
+                { StringSettingType, SETTING_NAME_GEOLITE_API_ID, L"" },
+                { IntegerSettingType, SETTING_NAME_GEOLITE_DB_TYPE, L"0" },
             };
 
             PluginInstance = PhRegisterPlugin(PLUGIN_NAME, Instance, &info);
@@ -953,8 +1019,8 @@ LOGICAL DllMain(
             info->DisplayName = L"Network Tools";
             info->Author = L"dmex, wj32";
             info->Description = L"Provides ping, traceroute and whois for network connections.";
-            info->Url = L"https://wj32.org/processhacker/forums/viewtopic.php?t=1117";
-  
+            info->Interface = &PluginInterface;
+
             PhRegisterCallback(
                 PhGetPluginCallback(PluginInstance, PluginCallbackLoad),
                 LoadCallback,
@@ -997,7 +1063,7 @@ LOGICAL DllMain(
                 TreeNewMessageCallback,
                 NULL,
                 &TreeNewMessageCallbackRegistration
-                );     
+                );
 
             PhRegisterCallback(
                 PhGetGeneralCallback(GeneralCallbackProcessesUpdated),
@@ -1007,8 +1073,8 @@ LOGICAL DllMain(
                 );
 
             PhPluginSetObjectExtension(
-                PluginInstance, 
-                EmNetworkItemType, 
+                PluginInstance,
+                EmNetworkItemType,
                 sizeof(NETWORK_EXTENSION),
                 NetworkItemCreateCallback,
                 NetworkItemDeleteCallback

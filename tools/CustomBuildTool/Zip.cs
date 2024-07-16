@@ -1,28 +1,13 @@
-﻿/*
- * Process Hacker Toolchain - 
- *   Build script
- * 
- * Copyright (C) dmex
- * 
- * This file is part of Process Hacker.
- * 
- * Process Hacker is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
+/*
+ * Copyright (c) 2022 Winsider Seminars & Solutions, Inc.  All rights reserved.
  *
- * Process Hacker is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
+ * This file is part of System Informer.
  *
- * You should have received a copy of the GNU General Public License
- * along with Process Hacker.  If not, see <http://www.gnu.org/licenses/>.
+ * Authors:
+ *
+ *     dmex
+ *
  */
-
-using System;
-using System.IO;
-using System.IO.Compression;
 
 namespace CustomBuildTool
 {
@@ -32,12 +17,12 @@ namespace CustomBuildTool
         private static string[] GetEntryNames(string[] names, string sourceFolder, bool includeBaseName)
         {
             if (names == null || names.Length == 0)
-                return new string[0];
+                return Array.Empty<string>();
 
             if (includeBaseName)
                 sourceFolder = Path.GetDirectoryName(sourceFolder);
 
-            int length = string.IsNullOrEmpty(sourceFolder) ? 0 : sourceFolder.Length;
+            int length = string.IsNullOrWhiteSpace(sourceFolder) ? 0 : sourceFolder.Length;
             if (length > 0 && sourceFolder != null && sourceFolder[length - 1] != Path.DirectorySeparatorChar && sourceFolder[length - 1] != Path.AltDirectorySeparatorChar)
                 length++;
 
@@ -55,11 +40,8 @@ namespace CustomBuildTool
             string[] filesToAdd = Directory.GetFiles(sourceDirectoryName, "*", SearchOption.AllDirectories);
             string[] entryNames = GetEntryNames(filesToAdd, sourceDirectoryName, false);
 
-            if (File.Exists(destinationArchiveFileName))
-                File.Delete(destinationArchiveFileName);
-
             using (FileStream zipFileStream = new FileStream(destinationArchiveFileName, FileMode.Create))
-            using (ZipArchive archive = new ZipArchive(zipFileStream, ZipArchiveMode.Create, true))
+            using (ZipArchive archive = new ZipArchive(zipFileStream, ZipArchiveMode.Create))
             {
                 for (int i = 0; i < filesToAdd.Length; i++)
                 {
@@ -79,9 +61,11 @@ namespace CustomBuildTool
                     }
 
                     if (name.StartsWith("Release32\\", StringComparison.OrdinalIgnoreCase))
-                        name = name.Replace("Release32\\", "32bit\\", StringComparison.OrdinalIgnoreCase);
+                        name = name.Replace("Release32\\", "i386\\", StringComparison.OrdinalIgnoreCase);
                     if (name.StartsWith("Release64\\", StringComparison.OrdinalIgnoreCase))
-                        name = name.Replace("Release64\\", "64bit\\", StringComparison.OrdinalIgnoreCase);
+                        name = name.Replace("Release64\\", "amd64\\", StringComparison.OrdinalIgnoreCase);
+                    if (name.StartsWith("ReleaseARM64\\", StringComparison.OrdinalIgnoreCase))
+                        name = name.Replace("ReleaseARM64\\", "arm64\\", StringComparison.OrdinalIgnoreCase);
 
                     archive.CreateEntryFromFile(file, name, CompressionLevel.Optimal);
                 }
@@ -124,11 +108,8 @@ namespace CustomBuildTool
             string[] filesToAdd = Directory.GetFiles(sourceDirectoryName, "*", SearchOption.AllDirectories);
             string[] entryNames = GetEntryNames(filesToAdd, sourceDirectoryName, false);
 
-            if (File.Exists(destinationArchiveFileName))
-                File.Delete(destinationArchiveFileName);
-
             using (FileStream zipFileStream = new FileStream(destinationArchiveFileName, FileMode.Create))
-            using (ZipArchive archive = new ZipArchive(zipFileStream, ZipArchiveMode.Create, true))
+            using (ZipArchive archive = new ZipArchive(zipFileStream, ZipArchiveMode.Create))
             {
                 for (int i = 0; i < filesToAdd.Length; i++)
                 {
@@ -138,8 +119,7 @@ namespace CustomBuildTool
 
             //string[] filesToAdd = Directory.GetFiles(sourceDirectoryName, "*", SearchOption.AllDirectories);
             //
-            //if (File.Exists(destinationArchiveFileName))
-            //    File.Delete(destinationArchiveFileName);
+            //Win32.DeleteFile(destinationArchiveFileName);
             //
             //using (var filestream = File.Create(destinationArchiveFileName))
             //using (var archive = new SevenZipArchive(filestream, FileAccess.Write))
@@ -166,11 +146,8 @@ namespace CustomBuildTool
             string[] filesToAdd = Directory.GetFiles(sourceDirectoryName, "*", SearchOption.AllDirectories);
             string[] entryNames = GetEntryNames(filesToAdd, sourceDirectoryName, false);
 
-            if (File.Exists(destinationArchiveFileName))
-                File.Delete(destinationArchiveFileName);
-
             using (FileStream zipFileStream = new FileStream(destinationArchiveFileName, FileMode.Create))
-            using (ZipArchive archive = new ZipArchive(zipFileStream, ZipArchiveMode.Create, true))
+            using (ZipArchive archive = new ZipArchive(zipFileStream, ZipArchiveMode.Create))
             {
                 for (int i = 0; i < filesToAdd.Length; i++)
                 {
@@ -179,9 +156,9 @@ namespace CustomBuildTool
                         continue;
 
                     // Ignore junk directories
-                    if (filesToAdd[i].Contains("bin\\Debug") ||
-                        filesToAdd[i].Contains("obj\\") ||
-                        filesToAdd[i].Contains("tests\\"))
+                    if (filesToAdd[i].Contains("bin\\Debug", StringComparison.OrdinalIgnoreCase) ||
+                        filesToAdd[i].Contains("obj\\", StringComparison.OrdinalIgnoreCase) ||
+                        filesToAdd[i].Contains("tests\\", StringComparison.OrdinalIgnoreCase))
                         continue;
 
                     archive.CreateEntryFromFile(filesToAdd[i], entryNames[i], CompressionLevel.Optimal);

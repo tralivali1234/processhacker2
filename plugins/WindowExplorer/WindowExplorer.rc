@@ -1,5 +1,7 @@
 // Microsoft Visual C++ generated resource script.
 //
+#pragma code_page(65001)
+
 #include "resource.h"
 
 #define APSTUDIO_READONLY_SYMBOLS
@@ -12,11 +14,10 @@
 #undef APSTUDIO_READONLY_SYMBOLS
 
 /////////////////////////////////////////////////////////////////////////////
-// English (Australia) resources
+// Neutral resources
 
-#if !defined(AFX_RESOURCE_DLL) || defined(AFX_TARG_ENA)
-LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_AUS
-#pragma code_page(1252)
+#if !defined(AFX_RESOURCE_DLL) || defined(AFX_TARG_NEU)
+LANGUAGE LANG_NEUTRAL, SUBLANG_NEUTRAL
 
 #ifdef APSTUDIO_INVOKED
 /////////////////////////////////////////////////////////////////////////////
@@ -24,17 +25,17 @@ LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_AUS
 // TEXTINCLUDE
 //
 
-1 TEXTINCLUDE 
+1 TEXTINCLUDE
 BEGIN
     "resource.h\0"
 END
 
-2 TEXTINCLUDE 
+2 TEXTINCLUDE
 BEGIN
     "#include ""winres.h""\0"
 END
 
-3 TEXTINCLUDE 
+3 TEXTINCLUDE
 BEGIN
     "\r\n"
     "\0"
@@ -55,6 +56,7 @@ CAPTION "Windows"
 FONT 8, "MS Shell Dlg", 400, 0, 0x1
 BEGIN
     PUSHBUTTON      "Refresh",IDC_REFRESH,2,3,50,14
+    PUSHBUTTON      "Find window",IDC_FINDWINDOW,54,3,50,14
     CONTROL         "Windows",IDC_LIST,"PhTreeNew",WS_CLIPSIBLINGS | WS_CLIPCHILDREN | 0x2,2,19,443,288,WS_EX_CLIENTEDGE
     EDITTEXT        IDC_SEARCHEDIT,302,3,143,14,ES_AUTOHSCROLL
 END
@@ -67,12 +69,16 @@ BEGIN
     CONTROL         "",IDC_LIST,"SysListView32",LVS_REPORT | LVS_SHOWSELALWAYS | LVS_ALIGNLEFT | WS_TABSTOP,0,0,271,224
 END
 
-IDD_WNDGENERAL DIALOGEX 0, 0, 271, 224
+IDD_WNDGENERAL DIALOGEX 0, 0, 273, 224
 STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "General"
 FONT 8, "MS Shell Dlg", 400, 0, 0x1
 BEGIN
-    CONTROL         "",IDC_WINDOWINFO,"SysListView32",LVS_REPORT | LVS_ALIGNLEFT | WS_TABSTOP,0,0,271,224
+    CONTROL         "",IDC_WINDOWINFO,"SysListView32",LVS_REPORT | LVS_ALIGNLEFT | WS_TABSTOP,0,44,271,179
+    ICON            "",IDC_WINDOWICON,10,12,21,20
+    GROUPBOX        "Window",IDC_WINDOWGROUPBOX,3,1,263,40
+    EDITTEXT        IDC_WINDOWTEXT,40,11,218,12,ES_AUTOHSCROLL | ES_READONLY | NOT WS_BORDER
+    EDITTEXT        IDC_APPIDTEXT,40,24,221,12,ES_AUTOHSCROLL | ES_READONLY | NOT WS_BORDER
 END
 
 IDD_WNDPROPLIST DIALOGEX 0, 0, 271, 224
@@ -81,6 +87,26 @@ CAPTION "Properties"
 FONT 8, "MS Shell Dlg", 400, 0, 0x1
 BEGIN
     CONTROL         "",IDC_LIST,"SysListView32",LVS_REPORT | LVS_SHOWSELALWAYS | LVS_ALIGNLEFT | WS_TABSTOP,0,0,271,224
+END
+
+IDD_WNDPREVIEW DIALOGEX 0, 0, 271, 224
+STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "Preview"
+FONT 8, "MS Shell Dlg", 400, 0, 0x1
+BEGIN
+END
+
+IDD_WNDPROPEDIT DIALOGEX 0, 0, 311, 177
+STYLE DS_SETFONT | DS_FIXEDSYS | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME
+CAPTION "Dialog"
+FONT 8, "MS Shell Dlg", 400, 0, 0x1
+BEGIN
+    LTEXT           "Name:",IDC_STATIC,7,8,21,8
+    EDITTEXT        IDC_NAME,38,7,266,12,ES_AUTOHSCROLL
+    LTEXT           "Value:",IDC_STATIC,7,25,21,8
+    EDITTEXT        IDC_VALUE,38,24,266,128,ES_MULTILINE | WS_VSCROLL
+    DEFPUSHBUTTON   "OK",IDOK,200,156,50,14
+    PUSHBUTTON      "Cancel",IDCANCEL,254,156,50,14
 END
 
 
@@ -107,13 +133,24 @@ BEGIN
 
     IDD_WNDGENERAL, DIALOG
     BEGIN
-        RIGHTMARGIN, 233
-        BOTTOMMARGIN, 147
+        RIGHTMARGIN, 271
     END
 
     IDD_WNDPROPLIST, DIALOG
     BEGIN
         BOTTOMMARGIN, 218
+    END
+
+    IDD_WNDPREVIEW, DIALOG
+    BEGIN
+    END
+
+    IDD_WNDPROPEDIT, DIALOG
+    BEGIN
+        LEFTMARGIN, 7
+        RIGHTMARGIN, 302
+        TOPMARGIN, 7
+        BOTTOMMARGIN, 169
     END
 END
 #endif    // APSTUDIO_INVOKED
@@ -121,45 +158,43 @@ END
 
 /////////////////////////////////////////////////////////////////////////////
 //
-// Menu
+// Version
 //
 
-IDR_WINDOW MENU
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION 3,7,0,0
+ PRODUCTVERSION 3,7,0,0
+ FILEFLAGSMASK 0x3fL
+#ifdef _DEBUG
+ FILEFLAGS 0x1L
+#else
+ FILEFLAGS 0x0L
+#endif
+ FILEOS 0x40004L
+ FILETYPE 0x2L
+ FILESUBTYPE 0x0L
 BEGIN
-    POPUP "Window"
+    BLOCK "StringFileInfo"
     BEGIN
-        MENUITEM "Bring to front",              ID_WINDOW_BRINGTOFRONT
-        MENUITEM "Restore",                     ID_WINDOW_RESTORE
-        MENUITEM "Minimize",                    ID_WINDOW_MINIMIZE
-        MENUITEM "Maximize",                    ID_WINDOW_MAXIMIZE
-        MENUITEM "Close",                       ID_WINDOW_CLOSE
-        MENUITEM SEPARATOR
-        MENUITEM "Visible",                     ID_WINDOW_VISIBLE
-        MENUITEM "Enabled",                     ID_WINDOW_ENABLED
-        MENUITEM "Always on top",               ID_WINDOW_ALWAYSONTOP
-        POPUP "Opacity"
+        BLOCK "000004b0"
         BEGIN
-            MENUITEM "10%",                         ID_OPACITY_10
-            MENUITEM "20%",                         ID_OPACITY_20
-            MENUITEM "30%",                         ID_OPACITY_30
-            MENUITEM "40%",                         ID_OPACITY_40
-            MENUITEM "50%",                         ID_OPACITY_50
-            MENUITEM "60%",                         ID_OPACITY_60
-            MENUITEM "70%",                         ID_OPACITY_70
-            MENUITEM "80%",                         ID_OPACITY_80
-            MENUITEM "90%",                         ID_OPACITY_90
-            MENUITEM "Opaque",                      ID_OPACITY_OPAQUE
+            VALUE "CompanyName", "System Informer"
+            VALUE "FileDescription", "System Informer"
+            VALUE "FileVersion", "3.7.0.0"
+            VALUE "InternalName", "WindowExplorer.dll"
+            VALUE "LegalCopyright", "Copyright (c) Winsider Seminars & Solutions, Inc.  All rights reserved."
+            VALUE "OriginalFilename", "WindowExplorer.dll"
+            VALUE "ProductName", "System Informer"
+            VALUE "ProductVersion", "3.7.0.0"
         END
-        MENUITEM SEPARATOR
-        MENUITEM "Highlight",                   ID_WINDOW_HIGHLIGHT
-        MENUITEM "Go to thread",                ID_WINDOW_GOTOTHREAD
-        MENUITEM "Properties",                  ID_WINDOW_PROPERTIES
-        MENUITEM SEPARATOR
-        MENUITEM "Copy\aCtrl+C",                ID_WINDOW_COPY
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x0, 1200
     END
 END
 
-#endif    // English (Australia) resources
+#endif    // Neutral resources
 /////////////////////////////////////////////////////////////////////////////
 
 

@@ -1,23 +1,12 @@
 /*
- * Process Hacker -
- *   property sheet 
+ * Copyright (c) 2022 Winsider Seminars & Solutions, Inc.  All rights reserved.
  *
- * Copyright (C) 2017 dmex
+ * This file is part of System Informer.
  *
- * This file is part of Process Hacker.
+ * Authors:
  *
- * Process Hacker is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
+ *     dmex    2017
  *
- * Process Hacker is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with Process Hacker.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 // NOTE: Copied from processhacker2\ProcessHacker\procprp.h
@@ -33,12 +22,20 @@ typedef struct _PV_PROPSHEETCONTEXT
     WNDPROC DefaultWindowProc;
     PH_LAYOUT_MANAGER LayoutManager;
     PPH_LAYOUT_ITEM TabPageItem;
+
+    WNDPROC OldOptionsButtonWndProc;
+    HWND OptionsButtonWindowHandle;
+    PWSTR PositionSettingName;
+    PWSTR SizeSettingName;
 } PV_PROPSHEETCONTEXT, *PPV_PROPSHEETCONTEXT;
 
 typedef struct _PV_PROPCONTEXT
 {
     PROPSHEETHEADER PropSheetHeader;
     HPROPSHEETPAGE *PropSheetPages;
+    BOOLEAN EnableControlButtons;
+    PWSTR PositionSettingName;
+    PWSTR SizeSettingName;
 } PV_PROPCONTEXT, *PPV_PROPCONTEXT;
 
 typedef struct _PV_PROPPAGECONTEXT
@@ -49,10 +46,6 @@ typedef struct _PV_PROPPAGECONTEXT
 
     BOOLEAN LayoutInitialized;
 } PV_PROPPAGECONTEXT, *PPV_PROPPAGECONTEXT;
-
-VOID HdPropInitialization(
-    VOID
-    );
 
 PPV_PROPCONTEXT HdCreatePropContext(
     _In_ PWSTR Caption
@@ -88,6 +81,16 @@ PPH_LAYOUT_ITEM PvAddPropPageLayoutItem(
     _In_ HWND Handle,
     _In_ PPH_LAYOUT_ITEM ParentItem,
     _In_ ULONG Anchor
+    );
+
+PPH_LAYOUT_ITEM PvAddPropPageLayoutItemEx(
+    _In_ HWND hwnd,
+    _In_ HWND Handle,
+    _In_ PPH_LAYOUT_ITEM ParentItem,
+    _In_ ULONG Anchor,
+    _In_ BOOLEAN EnableControlButtons,
+    _In_opt_ PWSTR PositionSettingName,
+    _In_opt_ PWSTR SizeSettingName
     );
 
 VOID PvDoPropPageLayout(

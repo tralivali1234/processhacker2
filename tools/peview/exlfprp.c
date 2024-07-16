@@ -1,23 +1,12 @@
 /*
- * Process Hacker -
- *   PE viewer
+ * Copyright (c) 2022 Winsider Seminars & Solutions, Inc.  All rights reserved.
  *
- * Copyright (C) 2017-2019 dmex
+ * This file is part of System Informer.
  *
- * This file is part of Process Hacker.
+ * Authors:
  *
- * Process Hacker is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
+ *     dmex    2017-2022
  *
- * Process Hacker is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with Process Hacker.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include <peview.h>
@@ -139,7 +128,7 @@ VOID PvExlfProperties(
 
         // Imports
         newPage = PvCreatePropPageContext(
-            MAKEINTRESOURCE(IDD_PEIMPORTS),
+            MAKEINTRESOURCE(IDD_ELFIMPORTS),
             PvpExlfImportsDlgProc,
             NULL
             );
@@ -147,7 +136,7 @@ VOID PvExlfProperties(
 
         // Exports
         newPage = PvCreatePropPageContext(
-            MAKEINTRESOURCE(IDD_PEEXPORTS),
+            MAKEINTRESOURCE(IDD_ELFEXPORTS),
             PvpExlfExportsDlgProc,
             NULL
             );
@@ -177,6 +166,14 @@ VOID PvExlfProperties(
             );
         PvAddPropPage(propContext, newPage);
 
+        // Layout page
+        newPage = PvCreatePropPageContext(
+            MAKEINTRESOURCE(IDD_PELAYOUT),
+            PvpPeLayoutDlgProc,
+            NULL
+            );
+        PvAddPropPage(propContext, newPage);
+
         PhModalPropertySheet(&propContext->PropSheetHeader);
 
         PhDereferenceObject(propContext);
@@ -189,7 +186,7 @@ static NTSTATUS PvpQueryWslImageThreadStart(
 {
     HWND windowHandle = Parameter;
 
-    PhInitializeLxssImageVersionInfo(&PvImageVersionInfo, PvFileName);
+    PhInitializeLxssImageVersionInfo(&PvImageVersionInfo, &PvFileName->sr);
 
     PhSetDialogItemText(windowHandle, IDC_NAME, PvpGetStringOrNa(PvImageVersionInfo.FileDescription));
     PhSetDialogItemText(windowHandle, IDC_COMPANYNAME, PvpGetStringOrNa(PvImageVersionInfo.CompanyName));
@@ -206,7 +203,7 @@ VOID PvpSetWslmageVersionInfo(
     PhSetDialogItemText(WindowHandle, IDC_COMPANYNAME, L"Loading...");
     PhSetDialogItemText(WindowHandle, IDC_VERSION, L"Loading...");
 
-    PhQueueItemWorkQueue(PhGetGlobalWorkQueue(), PvpQueryWslImageThreadStart, WindowHandle);
+    PhCreateThread2(PvpQueryWslImageThreadStart, WindowHandle);
 
     Static_SetIcon(GetDlgItem(WindowHandle, IDC_FILEICON), PvImageLargeIcon);
 }
@@ -266,7 +263,7 @@ VOID PvpSetWslImageBase(
 
     if (PvMappedImage.Header->e_ident[EI_CLASS] == ELFCLASS32)
     {
-        string = PhFormatString(L"0x%I32x", PhGetMappedWslImageBaseAddress(&PvMappedImage));
+        string = PhFormatString(L"0x%I32x", (ULONG)PhGetMappedWslImageBaseAddress(&PvMappedImage));
         PhSetDialogItemText(hwndDlg, IDC_IMAGEBASE, string->Buffer);
         PhDereferenceObject(string);
     }
@@ -383,8 +380,8 @@ PPH_STRING PvpGetWslImageSectionFlagsString(
     else
         PhAppendStringBuilder2(&sb, L"(None)");
 
-    // TODO: The "objdump -h /bin/su --wide" command shows section flags 
-    // such as CONTENT which appears to be based on ElfSectionType != SHT_NOBITS 
+    // TODO: The "objdump -h /bin/su --wide" command shows section flags
+    // such as CONTENT which appears to be based on ElfSectionType != SHT_NOBITS
     // but I can't find the relevant source-code and check.
 
     return PhFinalStringBuilderString(&sb);
@@ -410,8 +407,11 @@ VOID PvpLoadWslSections(
             lvItemIndex = PhAddListViewItem(LvHandle, MAXINT, imageSections[i].Name, NULL);
             PhSetListViewSubItem(LvHandle, lvItemIndex, 1, PvpGetWslImageSectionTypeName(imageSections[i].Type));
 
-            PhPrintPointer(pointer, (PVOID)imageSections[i].Address);
-            PhSetListViewSubItem(LvHandle, lvItemIndex, 2, pointer);
+            if (imageSections[i].Address)
+            {
+                PhPrintPointer(pointer, (PVOID)imageSections[i].Address);
+                PhSetListViewSubItem(LvHandle, lvItemIndex, 2, pointer);
+            }
 
             PhPrintPointer(pointer, (PVOID)imageSections[i].Offset);
             PhSetListViewSubItem(LvHandle, lvItemIndex, 3, pointer);
@@ -444,7 +444,7 @@ INT_PTR CALLBACK PvpExlfGeneralDlgProc(
             HWND lvHandle;
 
             lvHandle = GetDlgItem(hwndDlg, IDC_LIST);
-            PhSetListViewStyle(lvHandle, FALSE, TRUE);
+            PhSetListViewStyle(lvHandle, TRUE, TRUE);
             PhSetControlTheme(lvHandle, L"explorer");
             PhAddListViewColumn(lvHandle, 0, 0, 0, LVCFMT_LEFT, 80, L"Name");
             PhAddListViewColumn(lvHandle, 1, 1, 1, LVCFMT_LEFT, 80, L"Type");
@@ -463,7 +463,7 @@ INT_PTR CALLBACK PvpExlfGeneralDlgProc(
 
             PvpLoadWslSections(lvHandle);
 
-            EnableThemeDialogTexture(hwndDlg, ETDT_ENABLETAB);
+            PhInitializeWindowTheme(hwndDlg, PhEnableThemeSupport);
         }
         break;
     case WM_DESTROY:
@@ -482,7 +482,6 @@ INT_PTR CALLBACK PvpExlfGeneralDlgProc(
                 PvAddPropPageLayoutItem(hwndDlg, GetDlgItem(hwndDlg, IDC_NAME), dialogItem, PH_ANCHOR_LEFT | PH_ANCHOR_TOP | PH_ANCHOR_RIGHT);
                 PvAddPropPageLayoutItem(hwndDlg, GetDlgItem(hwndDlg, IDC_COMPANYNAME), dialogItem, PH_ANCHOR_LEFT | PH_ANCHOR_TOP | PH_ANCHOR_RIGHT);
                 PvAddPropPageLayoutItem(hwndDlg, GetDlgItem(hwndDlg, IDC_LIST), dialogItem, PH_ANCHOR_ALL);
-
                 PvDoPropPageLayout(hwndDlg);
 
                 propPageContext->LayoutInitialized = TRUE;

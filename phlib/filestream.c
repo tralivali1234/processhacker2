@@ -1,23 +1,12 @@
 /*
- * Process Hacker -
- *   file stream object
+ * Copyright (c) 2022 Winsider Seminars & Solutions, Inc.  All rights reserved.
  *
- * Copyright (C) 2010-2011 wj32
+ * This file is part of System Informer.
  *
- * This file is part of Process Hacker.
+ * Authors:
  *
- * Process Hacker is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
+ *     wj32    2010-2011
  *
- * Process Hacker is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with Process Hacker.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include <ph.h>
@@ -49,7 +38,7 @@ NTSTATUS PhCreateFileStream(
         &fileHandle,
         FileName,
         DesiredAccess,
-        0,
+        FILE_ATTRIBUTE_NORMAL,
         ShareAccess,
         CreateDisposition,
         createOptions
@@ -757,24 +746,49 @@ NTSTATUS PhUnlockFileStream(
         );
 }
 
+NTSTATUS PhSetAllocationSizeFileStream(
+    _Inout_ PPH_FILE_STREAM FileStream,
+    _In_ PLARGE_INTEGER AllocationSize
+    )
+{
+    NTSTATUS status;
+    IO_STATUS_BLOCK isb;
+    FILE_END_OF_FILE_INFORMATION endOfFileInfo;
+    FILE_ALLOCATION_INFORMATION allocationInfo;
+
+    memset(&endOfFileInfo, 0, sizeof(FILE_END_OF_FILE_INFORMATION));
+    endOfFileInfo.EndOfFile.QuadPart = AllocationSize->QuadPart;
+
+    if (!NT_SUCCESS(status = NtSetInformationFile(
+        FileStream->FileHandle,
+        &isb,
+        &endOfFileInfo,
+        sizeof(FILE_END_OF_FILE_INFORMATION),
+        FileEndOfFileInformation
+        )))
+        return status;
+
+    memset(&allocationInfo, 0, sizeof(FILE_ALLOCATION_INFORMATION));
+    allocationInfo.AllocationSize.QuadPart = AllocationSize->QuadPart;
+
+    if (!NT_SUCCESS(status = NtSetInformationFile(
+        FileStream->FileHandle,
+        &isb,
+        &allocationInfo,
+        sizeof(FILE_ALLOCATION_INFORMATION),
+        FileAllocationInformation
+        )))
+        return status;
+
+    return status;
+}
+
 NTSTATUS PhWriteStringAsUtf8FileStream(
     _Inout_ PPH_FILE_STREAM FileStream,
     _In_ PPH_STRINGREF String
     )
 {
     return PhWriteStringAsUtf8FileStreamEx(FileStream, String->Buffer, String->Length);
-}
-
-NTSTATUS PhWriteStringAsUtf8FileStream2(
-    _Inout_ PPH_FILE_STREAM FileStream,
-    _In_ PWSTR String
-    )
-{
-    PH_STRINGREF string;
-
-    PhInitializeStringRef(&string, String);
-
-    return PhWriteStringAsUtf8FileStream(FileStream, &string);
 }
 
 NTSTATUS PhWriteStringAsUtf8FileStreamEx(

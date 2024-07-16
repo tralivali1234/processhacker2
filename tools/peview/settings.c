@@ -1,64 +1,101 @@
 /*
- * PE viewer -
- *   program settings
+ * Copyright (c) 2022 Winsider Seminars & Solutions, Inc.  All rights reserved.
  *
- * Copyright (C) 2017 dmex
+ * This file is part of System Informer.
  *
- * This file is part of Process Hacker.
+ * Authors:
  *
- * Process Hacker is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
+ *     dmex    2017-2023
  *
- * Process Hacker is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with Process Hacker.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include <peview.h>
-#include <shlobj.h>
 
-static PPH_STRING PeSettingsFileName = NULL;
+static PPH_STRING PvSettingsFileName = NULL;
 
-VOID PhAddDefaultSettings(
+VOID PvAddDefaultSettings(
     VOID
     )
 {
     PhpAddIntegerSetting(L"FirstRun", L"1");
     PhpAddStringSetting(L"Font", L""); // null
     PhpAddStringSetting(L"DbgHelpSearchPath", L"SRV*C:\\Symbols*https://msdl.microsoft.com/download/symbols");
+    PhpAddIntegerSetting(L"DbgHelpUndecorate", L"1");
+    PhpAddIntegerSetting(L"EnableLegacyPropertiesDialog", L"0");
     PhpAddIntegerSetting(L"EnableSecurityAdvancedDialog", L"1");
+    PhpAddIntegerSetting(L"EnableStreamerMode", L"0");
     PhpAddIntegerSetting(L"EnableThemeSupport", L"0");
+    PhpAddIntegerSetting(L"EnableThemeAcrylicSupport", L"1");
+    PhpAddIntegerSetting(L"EnableThemeAcrylicWindowSupport", L"0");
+    PhpAddIntegerSetting(L"EnableTreeListBorder", L"1");
+    PhpAddIntegerSetting(L"EnableVersionSupport", L"0");
+    PhpAddIntegerSetting(L"SearchControlRegex", L"0");
+    PhpAddIntegerSetting(L"SearchControlCaseSensitive", L"0");
     PhpAddIntegerSetting(L"GraphColorMode", L"1");
     PhpAddIntegerSetting(L"HashAlgorithm", L"0");
     PhpAddIntegerSetting(L"MaxSizeUnit", L"6");
+    PhpAddIntegerSetting(L"MainWindowPageRestoreEnabled", L"1");
     PhpAddStringSetting(L"MainWindowPage", L"General");
-    PhpAddIntegerPairSetting(L"MainWindowPosition", L"150,150");
+    PhpAddIntegerPairSetting(L"MainWindowPosition", L"0,0");
     PhpAddScalableIntegerPairSetting(L"MainWindowSize", L"@96|550,580");
-    PhpAddStringSetting(L"ImageGeneralListViewColumns", L"");
-    PhpAddStringSetting(L"ImageGeneralListViewSort", L"");
-    PhpAddStringSetting(L"ImageDirectoryListViewColumns", L"");
+    PhpAddIntegerSetting(L"MainWindowState", L"1");
+    PhpAddStringSetting(L"ImageGeneralPropertiesListViewColumns", L"");
+    PhpAddStringSetting(L"ImageGeneralPropertiesListViewSort", L"");
+    PhpAddStringSetting(L"ImageGeneralPropertiesListViewGroupStates", L"");
+    PhpAddStringSetting(L"ImageDirectoryTreeListColumns", L"");
+    PhpAddStringSetting(L"ImageDirectoryTreeListSort", L"0,1"); // 0, AscendingSortOrder
+    PhpAddStringSetting(L"ImageExportTreeListColumns", L"");
+    PhpAddStringSetting(L"ImageExportTreeListSort", L"0,1"); // 0, AscendingSortOrder
+    PhpAddStringSetting(L"ImageImportTreeListColumns", L"");
+    PhpAddStringSetting(L"ImageImportTreeListSort", L"0,1"); // 0, AscendingSortOrder
+    PhpAddStringSetting(L"ImageSectionsTreeListColumns", L"");
+    PhpAddStringSetting(L"ImageSectionsTreeListSort", L"0,1"); // 0, AscendingSortOrder
+    PhpAddIntegerSetting(L"ImageSectionsTreeListFlags", L"0");
+    PhpAddStringSetting(L"ImageResourcesTreeListColumns", L"");
+    PhpAddStringSetting(L"ImageResourcesTreeListSort", L"0,1"); // 0, AscendingSortOrder
     PhpAddStringSetting(L"ImageLoadCfgListViewColumns", L"");
-    PhpAddStringSetting(L"ImageExportsListViewColumns", L"");
-    PhpAddStringSetting(L"ImageImportsListViewColumns", L"");
+    PhpAddStringSetting(L"ImageExceptionsIa32ListViewColumns", L"");
+    PhpAddStringSetting(L"ImageExceptionsAmd64ListViewColumns", L"");
+    PhpAddStringSetting(L"ImageExceptionsArm64ListViewColumns", L"");
+    PhpAddStringSetting(L"ImageHeadersListViewColumns", L"");
+    PhpAddStringSetting(L"ImageHeadersListViewGroupStates", L"");
+    PhpAddStringSetting(L"ImageLayoutTreeColumns", L"");
     PhpAddStringSetting(L"ImageCfgListViewColumns", L"");
-    PhpAddStringSetting(L"ImageResourcesListViewColumns", L"");
+    PhpAddStringSetting(L"ImageClrListViewColumns", L"");
+    PhpAddStringSetting(L"ImageClrImportsListViewColumns", L"");
+    PhpAddStringSetting(L"ImageClrTablesListViewColumns", L"");
     PhpAddStringSetting(L"ImageAttributesListViewColumns", L"");
     PhpAddStringSetting(L"ImagePropertiesListViewColumns", L"");
+    PhpAddStringSetting(L"ImageRelocationsListViewColumns", L"");
+    PhpAddStringSetting(L"ImageDynamicRelocationsListViewColumns", L"");
+    PhpAddStringSetting(L"ImageMuiListViewColumns", L"");
+    PhpAddStringSetting(L"ImageSecurityListViewColumns", L"");
+    PhpAddStringSetting(L"ImageSecurityListViewSort", L"");
+    PhpAddStringSetting(L"ImageSecurityTreeColumns", L"");
+    PhpAddStringSetting(L"ImageSecurityCertColumns", L"");
+    PhpAddIntegerPairSetting(L"ImageSecurityCertWindowPosition", L"0,0");
+    PhpAddScalableIntegerPairSetting(L"ImageSecurityCertWindowSize", L"@96|0,0");
     PhpAddStringSetting(L"ImageStreamsListViewColumns", L"");
     PhpAddStringSetting(L"ImageHardLinksListViewColumns", L"");
+    PhpAddStringSetting(L"ImageHashesListViewColumns", L"");
     PhpAddStringSetting(L"ImagePidsListViewColumns", L"");
     PhpAddStringSetting(L"ImageTlsListViewColumns", L"");
+    PhpAddStringSetting(L"ImageProdIdListViewColumns", L"");
+    PhpAddStringSetting(L"ImageDebugListViewColumns", L"");
+    PhpAddStringSetting(L"ImageDebugCrtListViewColumns", L"");
+    PhpAddStringSetting(L"ImageDebugPogoListViewColumns", L"");
+    PhpAddStringSetting(L"ImageDisasmTreeColumns", L"");
+    PhpAddIntegerPairSetting(L"ImageDisasmWindowPosition", L"0,0");
+    PhpAddScalableIntegerPairSetting(L"ImageDisasmWindowSize", L"@96|0,0");
+    PhpAddStringSetting(L"ImageEhContListViewColumns", L"");
+    PhpAddStringSetting(L"ImageVolatileListViewColumns", L"");
+    PhpAddStringSetting(L"ImageVersionInfoListViewColumns", L"");
     PhpAddStringSetting(L"LibListViewColumns", L"");
-    PhpAddStringSetting(L"PdbTreeListColumns", L"");
-
+    PhpAddStringSetting(L"SymbolsTreeListColumns", L"");
+    PhpAddStringSetting(L"SymbolsTreeListSort", L"0,1"); // 0, AscendingSortOrder
+    PhpAddIntegerSetting(L"SymbolsTreeListFlags", L"0");
     PhpAddIntegerSetting(L"TreeListBorderEnable", L"0");
-
+    PhpAddStringSetting(L"CHPEListViewColumns", L"");
     // Wsl properties
     PhpAddStringSetting(L"GeneralWslTreeListColumns", L"");
     PhpAddStringSetting(L"DynamicWslListViewColumns", L"");
@@ -66,52 +103,58 @@ VOID PhAddDefaultSettings(
     PhpAddStringSetting(L"ExportsWslListViewColumns", L"");
 }
 
-VOID PhUpdateCachedSettings(
+VOID PvUpdateCachedSettings(
     VOID
     )
 {
-    NOTHING;
+    PhMaxSizeUnit = PhGetIntegerSetting(L"MaxSizeUnit");
+    PhEnableSecurityAdvancedDialog = !!PhGetIntegerSetting(L"EnableSecurityAdvancedDialog");
+    PhEnableThemeSupport = !!PhGetIntegerSetting(L"EnableThemeSupport");
+    PhEnableThemeListviewBorder = !!PhGetIntegerSetting(L"TreeListBorderEnable");
 }
 
-VOID PeInitializeSettings(
+VOID PvInitializeSettings(
     VOID
     )
 {
-    static PH_STRINGREF settingsPath = PH_STRINGREF_INIT(L"%APPDATA%\\Process Hacker\\peview.xml");
-    static PH_STRINGREF settingsSuffix = PH_STRINGREF_INIT(L".peview.xml");
     NTSTATUS status;
     PPH_STRING appFileName;
-    PPH_STRING tempFileName;  
+    PPH_STRING tempFileName;
+
+    PvAddDefaultSettings();
 
     // There are three possible locations for the settings file:
-    // 1. A file named peview.exe.peview.xml in the program directory. (This changes
+    // 1. A file named peview.exe.settings.xml in the program directory. (This changes
     //    based on the executable file name.)
     // 2. The default location.
 
     // 1. File in program directory
 
-    appFileName = PhGetApplicationFileName();
-    tempFileName = PhConcatStringRef2(&appFileName->sr, &settingsSuffix);
-    PhDereferenceObject(appFileName);
+    if (appFileName = PhGetApplicationFileName())
+    {
+        tempFileName = PhConcatStringRefZ(&appFileName->sr, L".settings.xml");
 
-    if (PhDoesFileExistsWin32(tempFileName->Buffer))
-    {
-        PeSettingsFileName = tempFileName;
-    }
-    else
-    {
-        PhDereferenceObject(tempFileName);
+        if (PhDoesFileExist(&tempFileName->sr))
+        {
+            PvSettingsFileName = tempFileName;
+        }
+        else
+        {
+            PhDereferenceObject(tempFileName);
+        }
+
+        PhDereferenceObject(appFileName);
     }
 
     // 2. Default location
-    if (!PeSettingsFileName)
+    if (PhIsNullOrEmptyString(PvSettingsFileName))
     {
-        PeSettingsFileName = PhExpandEnvironmentStrings(&settingsPath);
+        PvSettingsFileName = PhGetRoamingAppDataDirectoryZ(L"peview.xml", TRUE);
     }
 
-    if (PeSettingsFileName)
+    if (!PhIsNullOrEmptyString(PvSettingsFileName))
     {
-        status = PhLoadSettings(PeSettingsFileName->Buffer);
+        status = PhLoadSettings(&PvSettingsFileName->sr);
 
         // If we didn't find the file, it will be created. Otherwise,
         // there was probably a parsing error and we don't want to
@@ -132,11 +175,11 @@ VOID PeInitializeSettings(
 
                 // This used to delete the file. But it's better to keep the file there
                 // and overwrite it with some valid XML, especially with case (2) above.
-                if (NT_SUCCESS(PhCreateFileWin32(
+                if (NT_SUCCESS(PhCreateFile(
                     &fileHandle,
-                    PeSettingsFileName->Buffer,
+                    &PvSettingsFileName->sr,
                     FILE_GENERIC_WRITE,
-                    0,
+                    FILE_ATTRIBUTE_NORMAL,
                     FILE_SHARE_READ | FILE_SHARE_DELETE,
                     FILE_OVERWRITE,
                     FILE_NON_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT
@@ -149,20 +192,19 @@ VOID PeInitializeSettings(
             else
             {
                 // Pretend we don't have a settings store so bad things don't happen.
-                PhDereferenceObject(PeSettingsFileName);
-                PeSettingsFileName = NULL;
+                PhDereferenceObject(PvSettingsFileName);
+                PvSettingsFileName = NULL;
             }
         }
     }
 
-    // Apply basic global settings.
-    PhMaxSizeUnit = PhGetIntegerSetting(L"MaxSizeUnit");
+    PvUpdateCachedSettings();
 }
 
-VOID PeSaveSettings(
+VOID PvSaveSettings(
     VOID
     )
 {
-    if (PeSettingsFileName)
-        PhSaveSettings(PeSettingsFileName->Buffer);
+    if (!PhIsNullOrEmptyString(PvSettingsFileName))
+        PhSaveSettings(&PvSettingsFileName->sr);
 }

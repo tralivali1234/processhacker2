@@ -1,28 +1,16 @@
 /*
- * Process Hacker Network Tools -
- *   Tracert dialog
+ * Copyright (c) 2022 Winsider Seminars & Solutions, Inc.  All rights reserved.
  *
- * Copyright (C) 2015-2017 dmex
+ * This file is part of System Informer.
  *
- * This file is part of Process Hacker.
+ * Authors:
  *
- * Process Hacker is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
+ *     dmex    2015-2023
  *
- * Process Hacker is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with Process Hacker.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include "nettools.h"
 #include "tracert.h"
-#include <commonutil.h>
 
 PPH_OBJECT_TYPE TracertTreeNodeItemType;
 
@@ -39,8 +27,6 @@ VOID NTAPI TracertTreeNodeItemDeleteProcedure(
         PhDereferenceObject(tracertNode->HostnameString);
     if (tracertNode->IpAddressString)
         PhDereferenceObject(tracertNode->IpAddressString);
-    if (tracertNode->RemoteCountryCode)
-        PhDereferenceObject(tracertNode->RemoteCountryCode);
     if (tracertNode->RemoteCountryName)
         PhDereferenceObject(tracertNode->RemoteCountryName);
 
@@ -66,7 +52,7 @@ PTRACERT_ROOT_NODE TracertTreeCreateNode(
     PhInitializeTreeNewNode(&tracertNode->Node);
 
     tracertNode->UniqueId = NextUniqueId++; // used to stabilize sorting
-    tracertNode->CountryIconIndex = INT_MAX;
+    tracertNode->CountryIconIndex = INT_ERROR;
 
     return tracertNode;
 }
@@ -97,25 +83,25 @@ END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(Ping1)
 {
-    sortResult = uint64cmp(node1->PingList[0], node2->PingList[0]);
+    sortResult = singlecmp(node1->PingList[0], node2->PingList[0]);
 }
 END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(Ping2)
 {
-    sortResult = uint64cmp(node1->PingList[1], node2->PingList[1]);
+    sortResult = singlecmp(node1->PingList[1], node2->PingList[1]);
 }
 END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(Ping3)
 {
-    sortResult = uint64cmp(node1->PingList[2], node2->PingList[2]);
+    sortResult = singlecmp(node1->PingList[2], node2->PingList[2]);
 }
 END_SORT_FUNCTION
 
 BEGIN_SORT_FUNCTION(Ping4)
 {
-    sortResult = uint64cmp(node1->PingList[3], node2->PingList[3]);
+    sortResult = singlecmp(node1->PingList[3], node2->PingList[3]);
 }
 END_SORT_FUNCTION
 
@@ -272,7 +258,7 @@ VOID UpdateTracertNode(
 }
 
 VOID UpdateTracertNodePingText(
-    _In_ PTRACERT_ROOT_NODE Node, 
+    _In_ PTRACERT_ROOT_NODE Node,
     _In_ PPH_TREENEW_GET_CELL_TEXT CellText,
     _In_ ULONG Index
     )
@@ -280,13 +266,15 @@ VOID UpdateTracertNodePingText(
     if (Node->PingStatus[Index] == IP_SUCCESS ||
         Node->PingStatus[Index] == IP_TTL_EXPIRED_TRANSIT) // IP_HOP_LIMIT_EXCEEDED
     {
-        if (Node->PingList[Index])
+        if (Node->PingList[Index] != 0.0f)
         {
-            PhMoveReference(
-                &Node->PingString[Index], 
-                PhFormatString(L"%s ms", PhaFormatUInt64(Node->PingList[Index], TRUE)->Buffer)
-                );
+            PH_FORMAT format[2];
 
+            // %.2f ms
+            PhInitFormatF(&format[0], Node->PingList[Index], 2);
+            PhInitFormatS(&format[1], L" ms");
+
+            PhMoveReference(&Node->PingString[Index], PhFormat(format, RTL_NUMBER_OF(format), 0));
             CellText->Text = PhGetStringRef(Node->PingString[Index]);
         }
         else
@@ -298,6 +286,10 @@ VOID UpdateTracertNodePingText(
     {
         PhInitializeStringRef(&CellText->Text, L"*");
     }
+    else if (Node->PingStatus[Index] == IP_DEST_NO_ROUTE)
+    {
+        PhInitializeStringRef(&CellText->Text, L"The destination address route is unreachable.");
+    }
     else
     {
         Node->PingMessage[Index] = TracertGetErrorMessage(Node->PingStatus[Index]);
@@ -308,26 +300,19 @@ VOID UpdateTracertNodePingText(
 BOOLEAN NTAPI TracertTreeNewCallback(
     _In_ HWND hwnd,
     _In_ PH_TREENEW_MESSAGE Message,
-    _In_opt_ PVOID Parameter1,
-    _In_opt_ PVOID Parameter2,
-    _In_opt_ PVOID Context
+    _In_ PVOID Parameter1,
+    _In_ PVOID Parameter2,
+    _In_ PVOID Context
     )
 {
     PNETWORK_TRACERT_CONTEXT context = Context;
     PTRACERT_ROOT_NODE node;
-
-    if (!context)
-        return FALSE;
 
     switch (Message)
     {
     case TreeNewGetChildren:
         {
             PPH_TREENEW_GET_CHILDREN getChildren = Parameter1;
-
-            if (!getChildren)
-                break;
-
             node = (PTRACERT_ROOT_NODE)getChildren->Node;
 
             if (!getChildren->Node)
@@ -344,6 +329,8 @@ BOOLEAN NTAPI TracertTreeNewCallback(
                     SORT_FUNCTION(Country),
                 };
                 int (__cdecl *sortFunction)(void *, const void *, const void *);
+
+                static_assert(RTL_NUMBER_OF(sortFunctions) == TREE_COLUMN_ITEM_MAXIMUM, "SortFunctions must equal maximum.");
 
                 if (context->TreeNewSortColumn < TREE_COLUMN_ITEM_MAXIMUM)
                     sortFunction = sortFunctions[context->TreeNewSortColumn];
@@ -363,10 +350,6 @@ BOOLEAN NTAPI TracertTreeNewCallback(
     case TreeNewIsLeaf:
         {
             PPH_TREENEW_IS_LEAF isLeaf = (PPH_TREENEW_IS_LEAF)Parameter1;
-
-            if (!isLeaf)
-                break;
-
             node = (PTRACERT_ROOT_NODE)isLeaf->Node;
 
             isLeaf->IsLeaf = TRUE;
@@ -375,10 +358,6 @@ BOOLEAN NTAPI TracertTreeNewCallback(
     case TreeNewGetCellText:
         {
             PPH_TREENEW_GET_CELL_TEXT getCellText = (PPH_TREENEW_GET_CELL_TEXT)Parameter1;
-
-            if (!getCellText)
-                break;
-
             node = (PTRACERT_ROOT_NODE)getCellText->Node;
 
             switch (getCellText->Id)
@@ -386,7 +365,7 @@ BOOLEAN NTAPI TracertTreeNewCallback(
             case TREE_COLUMN_ITEM_TTL:
                 {
                     PhMoveReference(&node->TtlString, PhFormatUInt64(node->TTL, TRUE));
-                    getCellText->Text = node->TtlString->sr;
+                    getCellText->Text = PhGetStringRef(node->TtlString);
                 }
                 break;
             case TREE_COLUMN_ITEM_PING1:
@@ -420,10 +399,6 @@ BOOLEAN NTAPI TracertTreeNewCallback(
     case TreeNewGetNodeColor:
         {
             PPH_TREENEW_GET_NODE_COLOR getNodeColor = Parameter1;
-
-            if (!getNodeColor)
-                break;
-
             node = (PTRACERT_ROOT_NODE)getNodeColor->Node;
 
             getNodeColor->Flags = TN_CACHE | TN_AUTO_FORECOLOR;
@@ -440,13 +415,10 @@ BOOLEAN NTAPI TracertTreeNewCallback(
         {
             PPH_TREENEW_CONTEXT_MENU contextMenuEvent = Parameter1;
 
-            if (!contextMenuEvent)
-                break;
-
             SendMessage(
                 context->WindowHandle,
-                WM_COMMAND, 
-                TRACERT_SHOWCONTEXTMENU, 
+                WM_COMMAND,
+                TRACERT_SHOWCONTEXTMENU,
                 (LPARAM)contextMenuEvent
                 );
         }
@@ -457,27 +429,28 @@ BOOLEAN NTAPI TracertTreeNewCallback(
 
             data.TreeNewHandle = hwnd;
             data.MouseEvent = Parameter1;
-            data.DefaultSortColumn = 0;
+            data.DefaultSortColumn = TREE_COLUMN_ITEM_TTL;
             data.DefaultSortOrder = AscendingSortOrder;
-            PhInitializeTreeNewColumnMenu(&data);
+            PhInitializeTreeNewColumnMenuEx(&data, PH_TN_COLUMN_MENU_SHOW_RESET_SORT);
 
-            data.Selection = PhShowEMenu(data.Menu, hwnd, PH_EMENU_SHOW_LEFTRIGHT,
-                PH_ALIGN_LEFT | PH_ALIGN_TOP, data.MouseEvent->ScreenLocation.x, data.MouseEvent->ScreenLocation.y);
+            data.Selection = PhShowEMenu(
+                data.Menu,
+                hwnd,
+                PH_EMENU_SHOW_LEFTRIGHT,
+                PH_ALIGN_LEFT | PH_ALIGN_TOP,
+                data.MouseEvent->ScreenLocation.x,
+                data.MouseEvent->ScreenLocation.y
+                );
+
             PhHandleTreeNewColumnMenu(&data);
             PhDeleteTreeNewColumnMenu(&data);
         }
         return TRUE;
     case TreeNewCustomDraw:
         {
-            PPH_TREENEW_CUSTOM_DRAW customDraw = Parameter1;  
-            HDC hdc;
-            RECT rect;
-
-            if (!customDraw)
-                break;
-
-            hdc = customDraw->Dc;
-            rect = customDraw->CellRect;
+            PPH_TREENEW_CUSTOM_DRAW customDraw = Parameter1;
+            HDC hdc = customDraw->Dc;
+            RECT rect = customDraw->CellRect;
             node = (PTRACERT_ROOT_NODE)customDraw->Node;
 
             // Check if this is the country column
@@ -494,13 +467,12 @@ BOOLEAN NTAPI TracertTreeNewCallback(
             // Padding
             rect.left += 5;
 
-            // Draw the column data
-            if (GeoDbLoaded && !GeoDbExpired && node->RemoteCountryCode && node->RemoteCountryName)
+            if (node->RemoteCountryCode && node->RemoteCountryName)
             {
-                if (node->CountryIconIndex == INT_MAX)
+                if (node->CountryIconIndex == INT_ERROR)
                     node->CountryIconIndex = LookupCountryIcon(node->RemoteCountryCode);
 
-                if (node->CountryIconIndex != INT_MAX)
+                if (node->CountryIconIndex != INT_ERROR)
                 {
                     DrawCountryIcon(hdc, rect, node->CountryIconIndex);
                     rect.left += 16 + 2;
@@ -514,13 +486,7 @@ BOOLEAN NTAPI TracertTreeNewCallback(
                     DT_LEFT | DT_VCENTER | DT_END_ELLIPSIS | DT_SINGLELINE
                     );
             }
-
-            if (GeoDbExpired)
-            {
-                DrawText(hdc, L"Geoip database expired.", -1, &rect, DT_LEFT | DT_VCENTER | DT_END_ELLIPSIS | DT_SINGLELINE);
-            }
-
-            if (!GeoDbLoaded)
+            else if (!GeoDbInitialized)
             {
                 DrawText(hdc, L"Geoip database not found.", -1, &rect, DT_LEFT | DT_VCENTER | DT_END_ELLIPSIS | DT_SINGLELINE);
             }
@@ -550,30 +516,29 @@ PTRACERT_ROOT_NODE GetSelectedTracertNode(
     _In_ PNETWORK_TRACERT_CONTEXT Context
     )
 {
-    PTRACERT_ROOT_NODE windowNode = NULL;
+    PTRACERT_ROOT_NODE node = NULL;
     ULONG i;
 
     for (i = 0; i < Context->NodeList->Count; i++)
     {
-        windowNode = Context->NodeList->Items[i];
+        node = Context->NodeList->Items[i];
 
-        if (windowNode->Node.Selected)
-            return windowNode;
+        if (node->Node.Selected)
+            return node;
     }
 
     return NULL;
 }
 
-VOID GetSelectedTracertNodes(
+_Success_(return)
+BOOLEAN GetSelectedTracertNodes(
     _In_ PNETWORK_TRACERT_CONTEXT Context,
-    _Out_ PTRACERT_ROOT_NODE **TracertNodes,
-    _Out_ PULONG NumberOfTracertNodes
+    _Out_ PTRACERT_ROOT_NODE **Nodes,
+    _Out_ PULONG NumberOfNodes
     )
 {
-    PPH_LIST list;
+    PPH_LIST list = PhCreateList(2);
     ULONG i;
-
-    list = PhCreateList(2);
 
     for (i = 0; i < Context->NodeList->Count; i++)
     {
@@ -585,10 +550,17 @@ VOID GetSelectedTracertNodes(
         }
     }
 
-    *TracertNodes = PhAllocateCopy(list->Items, sizeof(PVOID) * list->Count);
-    *NumberOfTracertNodes = list->Count;
+    if (list->Count)
+    {
+        *Nodes = PhAllocateCopy(list->Items, sizeof(PVOID) * list->Count);
+        *NumberOfNodes = list->Count;
+
+        PhDereferenceObject(list);
+        return TRUE;
+    }
 
     PhDereferenceObject(list);
+    return FALSE;
 }
 
 VOID InitializeTracertTree(
@@ -614,12 +586,13 @@ VOID InitializeTracertTree(
     PhSetControlTheme(Context->TreeNewHandle, L"explorer");
 
     TreeNew_SetCallback(Context->TreeNewHandle, TracertTreeNewCallback, Context);
+    TreeNew_SetRedraw(Context->TreeNewHandle, FALSE);
 
     PhAddTreeNewColumn(Context->TreeNewHandle, TREE_COLUMN_ITEM_TTL, TRUE, L"TTL", 30, PH_ALIGN_LEFT, -2, 0);
-    PhAddTreeNewColumn(Context->TreeNewHandle, TREE_COLUMN_ITEM_PING1, TRUE, L"Time", 50, PH_ALIGN_RIGHT, TREE_COLUMN_ITEM_PING1, DT_RIGHT);
-    PhAddTreeNewColumn(Context->TreeNewHandle, TREE_COLUMN_ITEM_PING2, TRUE, L"Time", 50, PH_ALIGN_RIGHT, TREE_COLUMN_ITEM_PING2, DT_RIGHT);
-    PhAddTreeNewColumn(Context->TreeNewHandle, TREE_COLUMN_ITEM_PING3, TRUE, L"Time", 50, PH_ALIGN_RIGHT, TREE_COLUMN_ITEM_PING3, DT_RIGHT);
-    PhAddTreeNewColumn(Context->TreeNewHandle, TREE_COLUMN_ITEM_PING4, TRUE, L"Time", 50, PH_ALIGN_RIGHT, TREE_COLUMN_ITEM_PING4, DT_RIGHT);
+    PhAddTreeNewColumn(Context->TreeNewHandle, TREE_COLUMN_ITEM_PING1, TRUE, L"Time", 70, PH_ALIGN_RIGHT, TREE_COLUMN_ITEM_PING1, DT_RIGHT);
+    PhAddTreeNewColumn(Context->TreeNewHandle, TREE_COLUMN_ITEM_PING2, TRUE, L"Time", 70, PH_ALIGN_RIGHT, TREE_COLUMN_ITEM_PING2, DT_RIGHT);
+    PhAddTreeNewColumn(Context->TreeNewHandle, TREE_COLUMN_ITEM_PING3, TRUE, L"Time", 70, PH_ALIGN_RIGHT, TREE_COLUMN_ITEM_PING3, DT_RIGHT);
+    PhAddTreeNewColumn(Context->TreeNewHandle, TREE_COLUMN_ITEM_PING4, TRUE, L"Time", 70, PH_ALIGN_RIGHT, TREE_COLUMN_ITEM_PING4, DT_RIGHT);
     PhAddTreeNewColumn(Context->TreeNewHandle, TREE_COLUMN_ITEM_IPADDR, TRUE, L"IP Address", 120, PH_ALIGN_LEFT, TREE_COLUMN_ITEM_IPADDR, 0);
     PhAddTreeNewColumn(Context->TreeNewHandle, TREE_COLUMN_ITEM_HOSTNAME, TRUE, L"Hostname", 150, PH_ALIGN_LEFT, TREE_COLUMN_ITEM_HOSTNAME, 0);
     PhAddTreeNewColumnEx2(Context->TreeNewHandle, TREE_COLUMN_ITEM_COUNTRY, TRUE, L"Country", 130, PH_ALIGN_LEFT, TREE_COLUMN_ITEM_COUNTRY, 0, TN_COLUMN_FLAG_CUSTOMDRAW);
@@ -627,6 +600,7 @@ VOID InitializeTracertTree(
     //for (INT i = 0; i < MAX_PINGS; i++)
     //    PhAddTreeNewColumn(context->TreeNewHandle, i + 1, i + 1, i + 1, LVCFMT_RIGHT, 50, L"Time");
 
+    TreeNew_SetRedraw(Context->TreeNewHandle, TRUE);
     TreeNew_SetSort(Context->TreeNewHandle, TREE_COLUMN_ITEM_TTL, AscendingSortOrder);
 
     TracertLoadSettingsTreeList(Context);
@@ -636,8 +610,6 @@ VOID DeleteTracertTree(
     _In_ PNETWORK_TRACERT_CONTEXT Context
     )
 {
-    TracertSaveSettingsTreeList(Context);
-
     for (ULONG i = 0; i < Context->NodeList->Count; i++)
     {
         DestroyTracertNode(Context->NodeList->Items[i]);

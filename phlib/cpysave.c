@@ -1,23 +1,13 @@
 /*
- * Process Hacker -
- *   copy/save code for listviews and treelists
+ * Copyright (c) 2022 Winsider Seminars & Solutions, Inc.  All rights reserved.
  *
- * Copyright (C) 2010-2012 wj32
+ * This file is part of System Informer.
  *
- * This file is part of Process Hacker.
+ * Authors:
  *
- * Process Hacker is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
+ *     wj32    2010-2012
+ *     dmex    2018-2023
  *
- * Process Hacker is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with Process Hacker.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include <ph.h>
@@ -40,12 +30,13 @@ VOID PhpEscapeStringForCsv(
 
     length = String->Length / sizeof(WCHAR);
     runStart = NULL;
+    runLength = 0;
 
     for (i = 0; i < length; i++)
     {
         switch (String->Buffer[i])
         {
-        case '\"':
+        case L'\"':
             if (runStart)
             {
                 PhAppendStringBuilderEx(StringBuilder, runStart, runLength * sizeof(WCHAR));
@@ -53,6 +44,22 @@ VOID PhpEscapeStringForCsv(
             }
 
             PhAppendStringBuilder2(StringBuilder, L"\"\"");
+
+            break;
+        case L',':
+            if (runStart)
+            {
+                PhAppendStringBuilderEx(StringBuilder, runStart, runLength * sizeof(WCHAR));
+                runStart = NULL;
+            }
+
+            // Note: There doesn't seem to be a proper way to escape
+            // commas for some locales in a way that works with all
+            // third party software. For now we'll swap commas
+            // for full stops. This works but prevents formatting
+            // integers with the correct decimal separator. (dmex)
+
+            PhAppendStringBuilder2(StringBuilder, L".");
 
             break;
         default:
@@ -183,7 +190,7 @@ PPH_LIST PhaFormatTextTable(
                         k = tabCount[j] + 1;
                     }
 
-                    PhAppendCharStringBuilder2(&stringBuilder, '\t', k);
+                    PhAppendCharStringBuilder2(&stringBuilder, L'\t', k);
                 }
             }
             break;
@@ -205,7 +212,7 @@ PPH_LIST PhaFormatTextTable(
                         k = (tabCount[j] + 1) * TAB_SIZE;
                     }
 
-                    PhAppendCharStringBuilder2(&stringBuilder, ' ', k);
+                    PhAppendCharStringBuilder2(&stringBuilder, L' ', k);
                 }
             }
             break;
@@ -213,17 +220,17 @@ PPH_LIST PhaFormatTextTable(
             {
                 for (j = 0; j < Columns; j++)
                 {
-                    PhAppendCharStringBuilder(&stringBuilder, '\"');
+                    PhAppendCharStringBuilder(&stringBuilder, L'\"');
 
                     if (Table[i][j])
                     {
                         PhpEscapeStringForCsv(&stringBuilder, Table[i][j]);
                     }
 
-                    PhAppendCharStringBuilder(&stringBuilder, '\"');
+                    PhAppendCharStringBuilder(&stringBuilder, L'\"');
 
                     if (j != Columns - 1)
-                        PhAppendCharStringBuilder(&stringBuilder, ',');
+                        PhAppendCharStringBuilder(&stringBuilder, L',');
                 }
             }
             break;
@@ -320,12 +327,13 @@ PPH_STRING PhGetTreeNewText(
             PhInitializeEmptyStringRef(&getCellText.Text);
             TreeNew_GetCellText(TreeNewHandle, &getCellText);
 
-            // Ignore empty columns. -dmex
+            // Ignore empty columns. (dmex)
             if (getCellText.Text.Length != 0)
             {
                 PhAppendStringBuilder(&stringBuilder, &getCellText.Text);
-                PhAppendStringBuilder2(&stringBuilder, L", ");
             }
+
+            PhAppendStringBuilder2(&stringBuilder, L", ");
         }
 
         // Remove the trailing comma and space.
@@ -486,6 +494,49 @@ PPH_STRING PhGetListViewItemText(
     PhTrimToNullTerminatorString(buffer);
 
     return buffer;
+}
+
+//PPH_STRING PhGetListViewItemText(
+//    _In_ HWND ListViewHandle,
+//    _In_ INT Index,
+//    _In_ INT SubIndex
+//    )
+//{
+//    WCHAR buffer[DOS_MAX_PATH_LENGTH] = L"";
+//    LVITEM item;
+//
+//    item.mask = LVIF_TEXT;
+//    item.iItem = Index;
+//    item.iSubItem = SubIndex;
+//    item.pszText = buffer;
+//    item.cchTextMax = RTL_NUMBER_OF(buffer);
+//
+//    if (ListView_GetItem(ListViewHandle, &item))
+//    {
+//        return PhCreateString(buffer);
+//    }
+//
+//    return NULL;
+//}
+
+PPH_STRING PhGetListViewSelectedItemText(
+    _In_ HWND ListViewHandle
+    )
+{
+    INT index;
+
+    index = PhFindListViewItemByFlags(
+        ListViewHandle,
+        INT_ERROR,
+        LVNI_SELECTED
+        );
+
+    if (index != INT_ERROR)
+    {
+        return PhGetListViewItemText(ListViewHandle, index, 0);
+    }
+
+    return NULL;
 }
 
 PPH_STRING PhaGetListViewItemText(

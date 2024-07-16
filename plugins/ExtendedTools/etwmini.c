@@ -1,23 +1,12 @@
 /*
- * Process Hacker Extended Tools -
- *   ETW mini information section
+ * Copyright (c) 2022 Winsider Seminars & Solutions, Inc.  All rights reserved.
  *
- * Copyright (C) 2015 wj32
+ * This file is part of System Informer.
  *
- * This file is part of Process Hacker.
+ * Authors:
  *
- * Process Hacker is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
+ *     wj32    2015
  *
- * Process Hacker is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with Process Hacker.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include "exttools.h"
@@ -42,8 +31,8 @@ VOID EtEtwMiniInformationInitializing(
 BOOLEAN EtpDiskListSectionCallback(
     _In_ struct _PH_MINIINFO_LIST_SECTION *ListSection,
     _In_ PH_MINIINFO_LIST_SECTION_MESSAGE Message,
-    _In_opt_ PVOID Parameter1,
-    _In_opt_ PVOID Parameter2
+    _In_ PVOID Parameter1,
+    _In_ PVOID Parameter2
     )
 {
     switch (Message)
@@ -68,9 +57,6 @@ BOOLEAN EtpDiskListSectionCallback(
         {
             PPH_MINIINFO_LIST_SECTION_SORT_LIST sortList = Parameter1;
 
-            if (!sortList)
-                break;
-
             qsort(sortList->List->Items, sortList->List->Count,
                 sizeof(PPH_PROCESS_NODE), EtpDiskListSectionProcessCompareFunction);
         }
@@ -82,9 +68,6 @@ BOOLEAN EtpDiskListSectionCallback(
             ULONG64 diskReadDelta;
             ULONG64 diskWriteDelta;
             ULONG i;
-
-            if (!assignSortData)
-                break;
 
             processes = assignSortData->ProcessGroup->Processes;
             diskReadDelta = 0;
@@ -106,9 +89,6 @@ BOOLEAN EtpDiskListSectionCallback(
         {
             PPH_MINIINFO_LIST_SECTION_SORT_LIST sortList = Parameter1;
 
-            if (!sortList)
-                break;
-
             qsort(sortList->List->Items, sortList->List->Count,
                 sizeof(PPH_MINIINFO_LIST_SECTION_SORT_DATA), EtpDiskListSectionNodeCompareFunction);
         }
@@ -120,9 +100,6 @@ BOOLEAN EtpDiskListSectionCallback(
             ULONG64 diskReadDelta;
             ULONG64 diskWriteDelta;
             PH_FORMAT format[1];
-
-            if (!getUsageText)
-                break;
 
             processes = getUsageText->ProcessGroup->Processes;
             diskReadDelta = getUsageText->SortData->UserData[0];
@@ -174,8 +151,8 @@ int __cdecl EtpDiskListSectionNodeCompareFunction(
 BOOLEAN EtpNetworkListSectionCallback(
     _In_ struct _PH_MINIINFO_LIST_SECTION *ListSection,
     _In_ PH_MINIINFO_LIST_SECTION_MESSAGE Message,
-    _In_opt_ PVOID Parameter1,
-    _In_opt_ PVOID Parameter2
+    _In_ PVOID Parameter1,
+    _In_ PVOID Parameter2
     )
 {
     switch (Message)
@@ -200,9 +177,6 @@ BOOLEAN EtpNetworkListSectionCallback(
         {
             PPH_MINIINFO_LIST_SECTION_SORT_LIST sortList = Parameter1;
 
-            if (!sortList)
-                break;
-
             qsort(sortList->List->Items, sortList->List->Count,
                 sizeof(PPH_PROCESS_NODE), EtpNetworkListSectionProcessCompareFunction);
         }
@@ -214,9 +188,6 @@ BOOLEAN EtpNetworkListSectionCallback(
             ULONG64 networkReceiveDelta;
             ULONG64 networkSendDelta;
             ULONG i;
-
-            if (!assignSortData)
-                break;
 
             processes = assignSortData->ProcessGroup->Processes;
             networkReceiveDelta = 0;
@@ -238,9 +209,6 @@ BOOLEAN EtpNetworkListSectionCallback(
         {
             PPH_MINIINFO_LIST_SECTION_SORT_LIST sortList = Parameter1;
 
-            if (!sortList)
-                break;
-
             qsort(sortList->List->Items, sortList->List->Count,
                 sizeof(PPH_MINIINFO_LIST_SECTION_SORT_DATA), EtpNetworkListSectionNodeCompareFunction);
         }
@@ -252,9 +220,6 @@ BOOLEAN EtpNetworkListSectionCallback(
             ULONG64 networkReceiveDelta;
             ULONG64 networkSendDelta;
             PH_FORMAT format[1];
-
-            if (!getUsageText)
-                break;
 
             processes = getUsageText->ProcessGroup->Processes;
             networkReceiveDelta = getUsageText->SortData->UserData[0];

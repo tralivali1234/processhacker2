@@ -1,23 +1,13 @@
 /*
- * Process Hacker .NET Tools
+ * Copyright (c) 2022 Winsider Seminars & Solutions, Inc.  All rights reserved.
  *
- * Copyright (C) 2011-2015 wj32
- * Copyright (C) 2015-2019 dmex
+ * This file is part of System Informer.
  *
- * This file is part of Process Hacker.
+ * Authors:
  *
- * Process Hacker is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
+ *     wj32    2011-2015
+ *     dmex    2015-2024
  *
- * Process Hacker is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with Process Hacker.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #ifndef DN_H
@@ -32,13 +22,12 @@
 #define PLUGIN_NAME L"ProcessHacker.DotNetTools"
 #define SETTING_NAME_ASM_TREE_LIST_COLUMNS (PLUGIN_NAME L".AsmTreeListColumns")
 #define SETTING_NAME_ASM_TREE_LIST_FLAGS (PLUGIN_NAME L".AsmTreeListFlags")
-//#define SETTING_NAME_ASM_TREE_LIST_SORT (PLUGIN_NAME L".AsmTreeListSort")
+#define SETTING_NAME_ASM_TREE_LIST_SORT (PLUGIN_NAME L".AsmTreeListSort")
 #define SETTING_NAME_DOT_NET_CATEGORY_INDEX (PLUGIN_NAME L".DotNetCategoryIndex")
 #define SETTING_NAME_DOT_NET_COUNTERS_COLUMNS (PLUGIN_NAME L".DotNetListColumns")
 #define SETTING_NAME_DOT_NET_COUNTERS_SORTCOLUMN (PLUGIN_NAME L".DotNetListSort")
 #define SETTING_NAME_DOT_NET_COUNTERS_GROUPSTATES (PLUGIN_NAME L".DotNetListGroupStates")
-
-#define MSG_UPDATE (WM_APP + 1)
+#define SETTING_NAME_DOT_NET_VERIFYSIGNATURE (PLUGIN_NAME L".DotNetVerifySignature")
 
 extern PPH_PLUGIN PluginInstance;
 
@@ -111,8 +100,10 @@ VOID ProcessThreadStackControl(
     _In_ PPH_PLUGIN_THREAD_STACK_CONTROL Control
     );
 
+typedef struct _CLR_PROCESS_SUPPORT *PCLR_PROCESS_SUPPORT;
+
 VOID PredictAddressesFromClrData(
-    _In_ struct _CLR_PROCESS_SUPPORT *Support,
+    _In_ PCLR_PROCESS_SUPPORT Support,
     _In_ HANDLE ThreadId,
     _In_ PVOID PcAddress,
     _In_ PVOID FrameAddress,

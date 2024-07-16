@@ -1,23 +1,13 @@
 /*
- * Process Hacker Extended Services -
- *   main program
+ * Copyright (c) 2022 Winsider Seminars & Solutions, Inc.  All rights reserved.
  *
- * Copyright (C) 2010-2015 wj32
+ * This file is part of System Informer.
  *
- * This file is part of Process Hacker.
+ * Authors:
  *
- * Process Hacker is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
+ *     wj32    2010-2015
+ *     dmex    2015-2023
  *
- * Process Hacker is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with Process Hacker.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include "extsrv.h"
@@ -27,10 +17,11 @@ PH_CALLBACK_REGISTRATION PluginMenuItemCallbackRegistration;
 PH_CALLBACK_REGISTRATION ProcessMenuInitializingCallbackRegistration;
 PH_CALLBACK_REGISTRATION ServicePropertiesInitializingCallbackRegistration;
 PH_CALLBACK_REGISTRATION ServiceMenuInitializingCallbackRegistration;
+PH_CALLBACK_REGISTRATION MiListSectionMenuInitializingCallbackRegistration;
 
 VOID NTAPI MenuItemCallback(
-    _In_opt_ PVOID Parameter,
-    _In_opt_ PVOID Context
+    _In_ PVOID Parameter,
+    _In_ PVOID Context
     )
 {
     PPH_PLUGIN_MENU_ITEM menuItem = Parameter;
@@ -39,53 +30,50 @@ VOID NTAPI MenuItemCallback(
     {
     case ID_SERVICE_GOTOSERVICE:
         {
-            ProcessHacker_SelectTabPage(PhMainWndHandle, 1);
-            ProcessHacker_SelectServiceItem(PhMainWndHandle, (PPH_SERVICE_ITEM)menuItem->Context);
+            ProcessHacker_SelectTabPage(1);
+            ProcessHacker_SelectServiceItem((PPH_SERVICE_ITEM)menuItem->Context);
         }
         break;
     case ID_SERVICE_START:
         {
-            PhUiStartService(PhMainWndHandle, (PPH_SERVICE_ITEM)menuItem->Context);
+            PhUiStartService(menuItem->OwnerWindow, (PPH_SERVICE_ITEM)menuItem->Context);
         }
         break;
     case ID_SERVICE_CONTINUE:
         {
-            PhUiContinueService(PhMainWndHandle, (PPH_SERVICE_ITEM)menuItem->Context);
+            PhUiContinueService(menuItem->OwnerWindow, (PPH_SERVICE_ITEM)menuItem->Context);
         }
         break;
     case ID_SERVICE_PAUSE:
         {
-            PhUiPauseService(PhMainWndHandle, (PPH_SERVICE_ITEM)menuItem->Context);
+            PhUiPauseService(menuItem->OwnerWindow, (PPH_SERVICE_ITEM)menuItem->Context);
         }
         break;
     case ID_SERVICE_STOP:
         {
-            PhUiStopService(PhMainWndHandle, (PPH_SERVICE_ITEM)menuItem->Context);
+            PhUiStopService(menuItem->OwnerWindow, (PPH_SERVICE_ITEM)menuItem->Context);
         }
         break;
     case ID_SERVICE_RESTART:
         {
             PPH_SERVICE_ITEM serviceItem = menuItem->Context;
             SC_HANDLE serviceHandle;
-            ULONG win32Result = ERROR_SUCCESS;
+            NTSTATUS status;
 
-            if (serviceHandle = PhOpenService(serviceItem->Name->Buffer, SERVICE_QUERY_STATUS))
+            status = PhOpenService(&serviceHandle, SERVICE_QUERY_STATUS, PhGetString(serviceItem->Name));
+
+            if (NT_SUCCESS(status))
             {
-                EsRestartServiceWithProgress(PhMainWndHandle, serviceItem, serviceHandle);
-                CloseServiceHandle(serviceHandle);
+                EsRestartServiceWithProgress(menuItem->OwnerWindow, serviceItem, serviceHandle);
+                PhCloseServiceHandle(serviceHandle);
             }
             else
             {
-                win32Result = GetLastError();
-            }
-
-            if (win32Result != ERROR_SUCCESS)
-            {
                 PhShowStatus(
-                    PhMainWndHandle,
+                    menuItem->OwnerWindow,
                     PhaFormatString(L"Unable to restart %s", serviceItem->Name->Buffer)->Buffer,
-                    0,
-                    win32Result
+                    status,
+                    0
                     );
             }
         }
@@ -194,35 +182,29 @@ VOID NTAPI ProcessMenuInitializingCallback(
             // Massive copy and paste from mainwnd.c.
             // == START ==
 
-#define SET_MENU_ITEM_ENABLED(MenuItem, Enabled) if (!(Enabled)) (MenuItem)->Flags |= PH_EMENU_DISABLED;
-
             switch (serviceItem->State)
             {
             case SERVICE_RUNNING:
                 {
-                    SET_MENU_ITEM_ENABLED(startMenuItem, FALSE);
-                    SET_MENU_ITEM_ENABLED(continueMenuItem, FALSE);
-                    SET_MENU_ITEM_ENABLED(pauseMenuItem,
-                        serviceItem->ControlsAccepted & SERVICE_ACCEPT_PAUSE_CONTINUE);
-                    SET_MENU_ITEM_ENABLED(stopMenuItem,
-                        serviceItem->ControlsAccepted & SERVICE_ACCEPT_STOP);
+                    PhSetEnabledEMenuItem(startMenuItem, FALSE);
+                    PhSetEnabledEMenuItem(continueMenuItem, FALSE);
+                    PhSetEnabledEMenuItem(pauseMenuItem, FlagOn(serviceItem->ControlsAccepted, SERVICE_ACCEPT_PAUSE_CONTINUE));
+                    PhSetEnabledEMenuItem(stopMenuItem, FlagOn(serviceItem->ControlsAccepted, SERVICE_ACCEPT_STOP));
                 }
                 break;
             case SERVICE_PAUSED:
                 {
-                    SET_MENU_ITEM_ENABLED(startMenuItem, FALSE);
-                    SET_MENU_ITEM_ENABLED(continueMenuItem,
-                        serviceItem->ControlsAccepted & SERVICE_ACCEPT_PAUSE_CONTINUE);
-                    SET_MENU_ITEM_ENABLED(pauseMenuItem, FALSE);
-                    SET_MENU_ITEM_ENABLED(stopMenuItem,
-                        serviceItem->ControlsAccepted & SERVICE_ACCEPT_STOP);
+                    PhSetEnabledEMenuItem(startMenuItem, FALSE);
+                    PhSetEnabledEMenuItem(continueMenuItem, FlagOn(serviceItem->ControlsAccepted, SERVICE_ACCEPT_PAUSE_CONTINUE));
+                    PhSetEnabledEMenuItem(pauseMenuItem, FALSE);
+                    PhSetEnabledEMenuItem(stopMenuItem, FlagOn(serviceItem->ControlsAccepted, SERVICE_ACCEPT_STOP));
                 }
                 break;
             case SERVICE_STOPPED:
                 {
-                    SET_MENU_ITEM_ENABLED(continueMenuItem, FALSE);
-                    SET_MENU_ITEM_ENABLED(pauseMenuItem, FALSE);
-                    SET_MENU_ITEM_ENABLED(stopMenuItem, FALSE);
+                    PhSetEnabledEMenuItem(continueMenuItem, FALSE);
+                    PhSetEnabledEMenuItem(pauseMenuItem, FALSE);
+                    PhSetEnabledEMenuItem(stopMenuItem, FALSE);
                 }
                 break;
             case SERVICE_START_PENDING:
@@ -230,15 +212,15 @@ VOID NTAPI ProcessMenuInitializingCallback(
             case SERVICE_PAUSE_PENDING:
             case SERVICE_STOP_PENDING:
                 {
-                    SET_MENU_ITEM_ENABLED(startMenuItem, FALSE);
-                    SET_MENU_ITEM_ENABLED(continueMenuItem, FALSE);
-                    SET_MENU_ITEM_ENABLED(pauseMenuItem, FALSE);
-                    SET_MENU_ITEM_ENABLED(stopMenuItem, FALSE);
+                    PhSetEnabledEMenuItem(startMenuItem, FALSE);
+                    PhSetEnabledEMenuItem(continueMenuItem, FALSE);
+                    PhSetEnabledEMenuItem(pauseMenuItem, FALSE);
+                    PhSetEnabledEMenuItem(stopMenuItem, FALSE);
                 }
                 break;
             }
 
-            if (!(serviceItem->ControlsAccepted & SERVICE_ACCEPT_PAUSE_CONTINUE))
+            if (!FlagOn(serviceItem->ControlsAccepted, SERVICE_ACCEPT_PAUSE_CONTINUE))
             {
                 PhDestroyEMenuItem(continueMenuItem);
                 PhDestroyEMenuItem(pauseMenuItem);
@@ -267,18 +249,13 @@ VOID NTAPI ProcessMenuInitializingCallback(
 }
 
 VOID NTAPI ServicePropertiesInitializingCallback(
-    _In_opt_ PVOID Parameter,
-    _In_opt_ PVOID Context
+    _In_ PVOID Parameter,
+    _In_ PVOID Context
     )
 {
     PPH_PLUGIN_OBJECT_PROPERTIES objectProperties = Parameter;
+    PPH_SERVICE_ITEM serviceItem = objectProperties->Parameter;
     PROPSHEETPAGE propSheetPage;
-    PPH_SERVICE_ITEM serviceItem;
-
-    if (!objectProperties)
-        return;
-
-    serviceItem = objectProperties->Parameter;
 
     // Recovery
     if (objectProperties->NumberOfPages < objectProperties->MaximumNumberOfPages)
@@ -288,7 +265,7 @@ VOID NTAPI ServicePropertiesInitializingCallback(
         propSheetPage.hInstance = PluginInstance->DllBase;
         propSheetPage.lParam = (LPARAM)serviceItem;
 
-        if (!(serviceItem->Flags & SERVICE_RUNS_IN_SYSTEM_PROCESS))
+        if (!FlagOn(serviceItem->Flags, SERVICE_RUNS_IN_SYSTEM_PROCESS))
         {
             propSheetPage.pszTemplate = MAKEINTRESOURCE(IDD_SRVRECOVERY);
             propSheetPage.pfnDlgProc = EspServiceRecoveryDlgProc;
@@ -346,6 +323,34 @@ VOID NTAPI ServicePropertiesInitializingCallback(
         objectProperties->Pages[objectProperties->NumberOfPages++] = CreatePropertySheetPage(&propSheetPage);
     }
 
+    // Package
+    if (PhWindowsVersion >= WINDOWS_10_20H1 && objectProperties->NumberOfPages < objectProperties->MaximumNumberOfPages)
+    {
+        memset(&propSheetPage, 0, sizeof(PROPSHEETPAGE));
+        propSheetPage.dwSize = sizeof(PROPSHEETPAGE);
+        propSheetPage.dwFlags = PSP_USETITLE;
+        propSheetPage.hInstance = PluginInstance->DllBase;
+        propSheetPage.pszTemplate = MAKEINTRESOURCE(IDD_SRVPACKAGE);
+        propSheetPage.pszTitle = L"Package";
+        propSheetPage.pfnDlgProc = EspPackageServiceDlgProc;
+        propSheetPage.lParam = (LPARAM)serviceItem;
+        objectProperties->Pages[objectProperties->NumberOfPages++] = CreatePropertySheetPage(&propSheetPage);
+    }
+
+    // PnP
+    if (objectProperties->NumberOfPages < objectProperties->MaximumNumberOfPages)
+    {
+        memset(&propSheetPage, 0, sizeof(PROPSHEETPAGE));
+        propSheetPage.dwSize = sizeof(PROPSHEETPAGE);
+        propSheetPage.dwFlags = PSP_USETITLE;
+        propSheetPage.hInstance = PluginInstance->DllBase;
+        propSheetPage.pszTemplate = MAKEINTRESOURCE(IDD_SRVPNP);
+        propSheetPage.pszTitle = L"PnP";
+        propSheetPage.pfnDlgProc = EspPnPServiceDlgProc;
+        propSheetPage.lParam = (LPARAM)serviceItem;
+        objectProperties->Pages[objectProperties->NumberOfPages++] = CreatePropertySheetPage(&propSheetPage);
+    }
+
     // Other
     if (objectProperties->NumberOfPages < objectProperties->MaximumNumberOfPages)
     {
@@ -362,16 +367,13 @@ VOID NTAPI ServicePropertiesInitializingCallback(
 }
 
 VOID NTAPI ServiceMenuInitializingCallback(
-    _In_opt_ PVOID Parameter,
-    _In_opt_ PVOID Context
+    _In_ PVOID Parameter,
+    _In_ PVOID Context
     )
 {
     PPH_PLUGIN_MENU_INFORMATION menuInfo = Parameter;
     PPH_EMENU_ITEM menuItem;
     ULONG indexOfMenuItem;
-
-    if (!menuInfo)
-        return;
 
     if (
         menuInfo->u.Service.NumberOfServices == 1 &&
@@ -392,6 +394,165 @@ VOID NTAPI ServiceMenuInitializingCallback(
             PhPluginCreateEMenuItem(PluginInstance, 0, ID_SERVICE_RESTART, L"R&estart", menuInfo->u.Service.Services[0]),
             indexOfMenuItem
             );
+    }
+}
+
+VOID MiListSectionMenuInitializingCallback(
+    _In_ PVOID Parameter,
+    _In_ PVOID Context
+    )
+{
+    PPH_PLUGIN_MENU_INFORMATION menuInfo = Parameter;
+    PPH_PROCESS_ITEM processItem;
+
+    processItem = menuInfo->u.MiListSection.ProcessGroup->Representative;
+
+    if (PH_IS_FAKE_PROCESS_ID(processItem->ProcessId) || processItem->ProcessId == SYSTEM_IDLE_PROCESS_ID || processItem->ProcessId == SYSTEM_PROCESS_ID)
+        return;
+
+    if (
+        PhGetIntegerSetting(SETTING_NAME_ENABLE_SERVICES_MENU) &&
+        menuInfo->u.MiListSection.ProcessGroup->Processes->Count == 1 &&
+        processItem->ServiceList &&
+        processItem->ServiceList->Count != 0
+        )
+    {
+        PPH_EMENU_ITEM servicesMenuItem = NULL;
+        ULONG enumerationKey;
+        PPH_SERVICE_ITEM serviceItem;
+        PPH_LIST serviceList;
+        ULONG i;
+        PPH_EMENU_ITEM priorityMenuItem;
+        ULONG insertIndex;
+
+        // Create a service list so we can sort it.
+
+        serviceList = PH_AUTO(PhCreateList(processItem->ServiceList->Count));
+        enumerationKey = 0;
+
+        PhAcquireQueuedLockShared(&processItem->ServiceListLock);
+
+        while (PhEnumPointerList(processItem->ServiceList, &enumerationKey, &serviceItem))
+        {
+            PhReferenceObject(serviceItem);
+            // We need to use the service item when the user chooses a menu item.
+            PH_AUTO(serviceItem);
+            PhAddItemList(serviceList, serviceItem);
+        }
+
+        PhReleaseQueuedLockShared(&processItem->ServiceListLock);
+
+        // Sort the service list.
+        qsort(serviceList->Items, serviceList->Count, sizeof(PPH_SERVICE_ITEM), ServiceForServicesMenuCompare);
+
+        // If there is only one service:
+        // * We use the text "Service (Xxx)".
+        // * There are no extra submenus.
+        if (serviceList->Count != 1)
+        {
+            servicesMenuItem = PhPluginCreateEMenuItem(PluginInstance, 0, 0, L"Ser&vices", NULL);
+        }
+
+        // Create and add a menu item for each service.
+
+        for (i = 0; i < serviceList->Count; i++)
+        {
+            PPH_STRING escapedName;
+            PPH_EMENU_ITEM serviceMenuItem;
+            PPH_EMENU_ITEM startMenuItem;
+            PPH_EMENU_ITEM continueMenuItem;
+            PPH_EMENU_ITEM pauseMenuItem;
+            PPH_EMENU_ITEM stopMenuItem;
+
+            serviceItem = serviceList->Items[i];
+            escapedName = PH_AUTO(PhEscapeStringForMenuPrefix(&serviceItem->Name->sr));
+
+            if (serviceList->Count == 1)
+            {
+                // "Service (Xxx)"
+                escapedName = PhaFormatString(L"Ser&vice (%s)", escapedName->Buffer);
+            }
+
+            serviceMenuItem = PhPluginCreateEMenuItem(PluginInstance, 0, 0, escapedName->Buffer, NULL);
+
+            if (serviceList->Count == 1)
+            {
+                // Make this the root submenu that we will insert.
+                servicesMenuItem = serviceMenuItem;
+            }
+
+            PhInsertEMenuItem(serviceMenuItem, PhPluginCreateEMenuItem(PluginInstance, 0, ID_SERVICE_GOTOSERVICE, L"&Go to service", serviceItem), ULONG_MAX);
+            PhInsertEMenuItem(serviceMenuItem, startMenuItem = PhPluginCreateEMenuItem(PluginInstance, 0, ID_SERVICE_START, L"Sta&rt", serviceItem), ULONG_MAX);
+            PhInsertEMenuItem(serviceMenuItem, continueMenuItem = PhPluginCreateEMenuItem(PluginInstance, 0, ID_SERVICE_CONTINUE, L"&Continue", serviceItem), ULONG_MAX);
+            PhInsertEMenuItem(serviceMenuItem, pauseMenuItem = PhPluginCreateEMenuItem(PluginInstance, 0, ID_SERVICE_PAUSE, L"&Pause", serviceItem), ULONG_MAX);
+            PhInsertEMenuItem(serviceMenuItem, stopMenuItem = PhPluginCreateEMenuItem(PluginInstance, 0, ID_SERVICE_STOP, L"St&op", serviceItem), ULONG_MAX);
+
+            // Massive copy and paste from mainwnd.c.
+            // == START ==
+
+            switch (serviceItem->State)
+            {
+            case SERVICE_RUNNING:
+                {
+                    PhSetEnabledEMenuItem(startMenuItem, FALSE);
+                    PhSetEnabledEMenuItem(continueMenuItem, FALSE);
+                    PhSetEnabledEMenuItem(pauseMenuItem, FlagOn(serviceItem->ControlsAccepted, SERVICE_ACCEPT_PAUSE_CONTINUE));
+                    PhSetEnabledEMenuItem(stopMenuItem, FlagOn(serviceItem->ControlsAccepted, SERVICE_ACCEPT_STOP));
+                }
+                break;
+            case SERVICE_PAUSED:
+                {
+                    PhSetEnabledEMenuItem(startMenuItem, FALSE);
+                    PhSetEnabledEMenuItem(continueMenuItem, FlagOn(serviceItem->ControlsAccepted, SERVICE_ACCEPT_PAUSE_CONTINUE));
+                    PhSetEnabledEMenuItem(pauseMenuItem, FALSE);
+                    PhSetEnabledEMenuItem(stopMenuItem, FlagOn(serviceItem->ControlsAccepted, SERVICE_ACCEPT_STOP));
+                }
+                break;
+            case SERVICE_STOPPED:
+                {
+                    PhSetEnabledEMenuItem(continueMenuItem, FALSE);
+                    PhSetEnabledEMenuItem(pauseMenuItem, FALSE);
+                    PhSetEnabledEMenuItem(stopMenuItem, FALSE);
+                }
+                break;
+            case SERVICE_START_PENDING:
+            case SERVICE_CONTINUE_PENDING:
+            case SERVICE_PAUSE_PENDING:
+            case SERVICE_STOP_PENDING:
+                {
+                    PhSetEnabledEMenuItem(startMenuItem, FALSE);
+                    PhSetEnabledEMenuItem(continueMenuItem, FALSE);
+                    PhSetEnabledEMenuItem(pauseMenuItem, FALSE);
+                    PhSetEnabledEMenuItem(stopMenuItem, FALSE);
+                }
+                break;
+            }
+
+            if (!(serviceItem->ControlsAccepted & SERVICE_ACCEPT_PAUSE_CONTINUE))
+            {
+                PhDestroyEMenuItem(continueMenuItem);
+                PhDestroyEMenuItem(pauseMenuItem);
+            }
+
+            // == END ==
+
+            if (serviceList->Count != 1)
+                PhInsertEMenuItem(servicesMenuItem, serviceMenuItem, ULONG_MAX);
+        }
+
+        // Insert our Services menu after the I/O Priority menu.
+
+        priorityMenuItem = PhFindEMenuItem(menuInfo->Menu, 0, NULL, PHAPP_ID_PROCESS_IOPRIORITY);
+
+        if (!priorityMenuItem)
+            priorityMenuItem = PhFindEMenuItem(menuInfo->Menu, 0, NULL, PHAPP_ID_PROCESS_PRIORITY);
+
+        if (priorityMenuItem)
+            insertIndex = PhIndexOfEMenuItem(menuInfo->Menu, priorityMenuItem) + 1;
+        else
+            insertIndex = 0;
+
+        PhInsertEMenuItem(menuInfo->Menu, servicesMenuItem, insertIndex);
     }
 }
 
@@ -417,9 +578,8 @@ LOGICAL DllMain(
                 return FALSE;
 
             info->DisplayName = L"Extended Services";
-            info->Author = L"wj32";
+            info->Author = L"dmex, wj32";
             info->Description = L"Extends service management capabilities.";
-            info->Url = L"https://wj32.org/processhacker/forums/viewtopic.php?t=1113";
 
             PhRegisterCallback(
                 PhGetPluginCallback(PluginInstance, PluginCallbackMenuItem),
@@ -445,6 +605,12 @@ LOGICAL DllMain(
                 ServiceMenuInitializingCallback,
                 NULL,
                 &ServiceMenuInitializingCallbackRegistration
+                );
+            PhRegisterCallback(
+                PhGetGeneralCallback(GeneralCallbackMiListSectionMenuInitializing),
+                MiListSectionMenuInitializingCallback,
+                NULL,
+                &MiListSectionMenuInitializingCallbackRegistration
                 );
 
             PhAddSettings(settings, ARRAYSIZE(settings));

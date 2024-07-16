@@ -1,24 +1,13 @@
 /*
- * Process Hacker -
- *   hex editor control
+ * Copyright (c) 2022 Winsider Seminars & Solutions, Inc.  All rights reserved.
  *
- * Copyright (C) 2010-2015 wj32
- * Copyright (C) 2017 dmex
+ * This file is part of System Informer.
  *
- * This file is part of Process Hacker.
+ * Authors:
  *
- * Process Hacker is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
+ *     wj32    2010-2015
+ *     dmex    2017-2023
  *
- * Process Hacker is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with Process Hacker.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include <ph.h>
@@ -41,7 +30,7 @@ BOOLEAN PhHexEditInitialization(
     c.cbWndExtra = sizeof(PVOID);
     c.hInstance = PhInstanceHandle;
     c.lpfnWndProc = PhpHexEditWndProc;
-    c.hCursor = LoadCursor(NULL, IDC_ARROW);
+    c.hCursor = PhLoadCursor(NULL, IDC_ARROW);
 
     if (!RegisterClassEx(&c))
         return FALSE;
@@ -108,12 +97,12 @@ LRESULT CALLBACK PhpHexEditWndProc(
 {
     PPHP_HEXEDIT_CONTEXT context;
 
-    context = (PPHP_HEXEDIT_CONTEXT)GetWindowLongPtr(hwnd, 0);
+    context = PhGetWindowContextEx(hwnd);
 
     if (uMsg == WM_CREATE)
     {
         PhpCreateHexEditContext(&context);
-        SetWindowLongPtr(hwnd, 0, (LONG_PTR)context);
+        PhSetWindowContextEx(hwnd, context);
     }
 
     if (!context)
@@ -123,12 +112,31 @@ LRESULT CALLBACK PhpHexEditWndProc(
     {
     case WM_CREATE:
         {
-            context->Font = CreateFont(-(LONG)PhMultiplyDivide(12, PhGlobalDpi, 96), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, L"Courier New");
+            LONG dpiValue;
+
+            dpiValue = PhGetWindowDpi(hwnd);
+
+            context->Font = CreateFont(
+                -(LONG)PhGetDpi(12, dpiValue),
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                L"Courier New"
+                );
         }
         break;
     case WM_DESTROY:
         {
-            SetWindowLongPtr(hwnd, 0, (LONG_PTR)NULL);
+            PhRemoveWindowContextEx(hwnd);
             PhpFreeHexEditContext(context);
         }
         break;
@@ -261,9 +269,12 @@ LRESULT CALLBACK PhpHexEditWndProc(
             if (context->Data)
             {
                 ULONG wheelScrollLines;
+                LONG dpiValue;
 
-                if (!SystemParametersInfo(SPI_GETWHEELSCROLLLINES, 0, &wheelScrollLines, 0))
-                    wheelScrollLines = 3;
+                dpiValue = PhGetWindowDpi(hwnd);
+
+                if (!PhGetSystemParametersInfo(SPI_GETWHEELSCROLLLINES, 0, &wheelScrollLines, dpiValue))
+                    wheelScrollLines = PhGetDpi(3, dpiValue);
 
                 context->TopIndex += context->BytesPerRow * (LONG)wheelScrollLines * -wheelDelta / WHEEL_DELTA;
 

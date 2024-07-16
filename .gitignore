@@ -6,6 +6,8 @@
 *.suo
 *.user
 *.key
+*.sig
+*.orig
 
 # Build results
 *.appx
@@ -20,6 +22,7 @@
 *.pgc
 *.pgd
 *.pvk
+*.res
 *.rsp
 *.sbr
 *.tlb
@@ -42,6 +45,7 @@
 # Visual C++ cache folders
 ipch/
 .vs/
+*/packages/
 
 # Visual Studio profiler
 *.psess
@@ -78,28 +82,22 @@ build/output/
 plugins-extra/
 sdk/
 
-!KProcessHacker/bin/
-KProcessHacker/bin/Debug32/
-KProcessHacker/bin/Debug64/
-KProcessHacker/bin/Release32/
-KProcessHacker/bin/Release64/
-KProcessHacker/bin/*
-
-!plugins/SamplePlugin/bin/
-plugins/SamplePlugin/bin/Debug32/
-plugins/SamplePlugin/bin/Debug64/
-plugins/SamplePlugin/bin/Release32/*
-!plugins/SamplePlugin/bin/Release32/SamplePlugin.dll
-plugins/SamplePlugin/bin/Release64/*
-!plugins/SamplePlugin/bin/Release64/SamplePlugin.dll
-plugins/OnlineChecks/virustotal.h
+!KSystemInformer/bin/
+KSystemInformer/bin/Debug32/
+KSystemInformer/bin/Debug64/
+KSystemInformer/bin/Release32/
+KSystemInformer/bin/Release64/
+KSystemInformer/bin/*
 
 !tools/CustomBuildTool/bin/
 tools/CustomBuildTool/bin/Debug*/
-tools/CustomBuildTool/bin/Release*/*
-!tools/CustomBuildTool/bin/Release/CustomBuildTool.exe
-!tools/CustomBuildTool/bin/Release/CustomBuildTool.exe.config
-!tools/CustomBuildTool/bin/Release/CustomBuildTool.pdb
+tools/CustomBuildTool/bin/ARM64/
+tools/CustomBuildTool/bin/x64/
+tools/CustomBuildTool/bin/Release*/net*/*
+tools/CustomBuildTool/bin/Release*/amd64/*
+tools/CustomBuildTool/bin/Release*/arm64/*
+!tools/CustomBuildTool/bin/Release/amd64/CustomBuildTool.exe
+!tools/CustomBuildTool/bin/Release/arm64/CustomBuildTool.exe
 
 !tools/CustomSignTool/bin/
 tools/CustomSignTool/bin/Debug*/
@@ -118,3 +116,6 @@ tools/GenerateZw/GenerateZw/bin/Release/*
 !tools/GenerateZw/GenerateZw/bin/Release/GenerateZw.exe
 
 !tools/delaylib/bin/
+
+!tools/thirdparty/bin/
+!tools/thirdparty/bin/*/*.pdb

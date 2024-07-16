@@ -1,3 +1,15 @@
+/*
+ * Copyright (c) 2022 Winsider Seminars & Solutions, Inc.  All rights reserved.
+ *
+ * This file is part of System Informer.
+ *
+ * Authors:
+ *
+ *     wj32    2010-2015
+ *     dmex    2017-2023
+ *
+ */
+
 #ifndef _PH_PHSUP_H
 #define _PH_PHSUP_H
 
@@ -6,7 +18,9 @@
 #include <intrin.h>
 #include <wchar.h>
 #include <assert.h>
+#include <stdint.h>
 #include <stdio.h>
+#include <malloc.h>
 
 // Memory
 
@@ -20,8 +34,19 @@
 #define ALIGN_DOWN_POINTER_BY(Pointer, Align) ((PVOID)ALIGN_DOWN_BY(Pointer, Align))
 #define ALIGN_DOWN(Address, Type) ALIGN_DOWN_BY(Address, sizeof(Type))
 #define ALIGN_DOWN_POINTER(Pointer, Type) ((PVOID)ALIGN_DOWN(Pointer, Type))
+#define IS_ALIGNED(Pointer, Alignment) ((((ULONG_PTR)(Pointer)) & ((Alignment) - 1)) == 0)
 
 #define PAGE_SIZE 0x1000
+#define PAGE_MASK 0xFFF
+#define PAGE_SHIFT 0xC
+
+#define BYTE_OFFSET(Address) ((SIZE_T)((ULONG_PTR)(Address) & PAGE_MASK))
+#define PAGE_ALIGN(Address) ((PVOID)((ULONG_PTR)(Address) & ~PAGE_MASK))
+
+#define ADDRESS_AND_SIZE_TO_SPAN_PAGES(Address, Size) ((BYTE_OFFSET(Address) + ((SIZE_T)(Size)) + PAGE_MASK) >> PAGE_SHIFT)
+#define ROUND_TO_SIZE(Size, Alignment) ((((ULONG_PTR)(Size))+((Alignment)-1)) & ~(ULONG_PTR)((Alignment)-1))
+#define ROUND_TO_PAGES(Size) (((ULONG_PTR)(Size) + PAGE_MASK) & ~PAGE_MASK)
+#define BYTES_TO_PAGES(Size) (((Size) >> PAGE_SHIFT) + (((Size) & PAGE_MASK) != 0))
 
 #define PH_LARGE_BUFFER_SIZE (256 * 1024 * 1024)
 
@@ -44,8 +69,13 @@
 
 // Math
 
-#define UInt32Add32To64(a, b)  ((unsigned __int64)((unsigned __int64)(a) + ((unsigned __int64)(b)))) // Avoids warning C26451 (dmex)
-#define UInt32Mul32To64(a, b)  ((unsigned __int64)((unsigned __int64)(a) * ((unsigned __int64)(b))))
+#if defined(_M_IX86)
+#define UInt32Add32To64(a, b) ((unsigned __int64)(((unsigned __int64)((unsigned int)(a))) + ((unsigned int)(b)))) // Avoids warning C26451 (dmex)
+#define UInt32Sub32To64(a, b) ((unsigned __int64)(((unsigned __int64)((unsigned int)(a))) - ((unsigned int)(b))))
+#else
+#define UInt32Add32To64(a, b) (((unsigned __int64)((unsigned int)(a))) + ((unsigned __int64)((unsigned int)(b)))) // from UInt32x32To64 (dmex)
+#define UInt32Sub32To64(a, b) (((unsigned __int64)((unsigned int)(a))) - ((unsigned __int64)((unsigned int)(b))))
+#endif
 
 // Time
 
@@ -56,6 +86,7 @@
 #define PH_TICKS_PER_HOUR (PH_TICKS_PER_MIN * 60)
 #define PH_TICKS_PER_DAY (PH_TICKS_PER_HOUR * 24)
 
+#define PH_TICKS_PARTIAL_NS(Ticks) (((ULONG64)(Ticks) / PH_TICKS_PER_NS) % 1000000)
 #define PH_TICKS_PARTIAL_MS(Ticks) (((ULONG64)(Ticks) / PH_TICKS_PER_MS) % 1000)
 #define PH_TICKS_PARTIAL_SEC(Ticks) (((ULONG64)(Ticks) / PH_TICKS_PER_SEC) % 60)
 #define PH_TICKS_PARTIAL_MIN(Ticks) (((ULONG64)(Ticks) / PH_TICKS_PER_MIN) % 60)
@@ -130,9 +161,9 @@ FORCEINLINE LONG PhModifySort(
 }
 
 #define PH_BUILTIN_COMPARE(value1, value2) \
-    if (value1 > value2) \
+    if ((value1) > (value2)) \
         return 1; \
-    else if (value1 < value2) \
+    else if ((value1) < (value2)) \
         return -1; \
     \
     return 0
@@ -277,7 +308,7 @@ FORCEINLINE void *_InterlockedExchangePointer(
 
 #endif
 
-FORCEINLINE LONG_PTR _InterlockedExchangeAddPointer(
+FORCEINLINE LONG_PTR __InterlockedExchangeAddPointer(
     _Inout_ _Interlocked_operand_ LONG_PTR volatile *Addend,
     _In_ LONG_PTR Value
     )
@@ -288,6 +319,8 @@ FORCEINLINE LONG_PTR _InterlockedExchangeAddPointer(
     return (LONG_PTR)_InterlockedExchangeAdd((PLONG)Addend, (LONG)Value);
 #endif
 }
+
+#define _InterlockedExchangeAddPointer __InterlockedExchangeAddPointer
 
 FORCEINLINE LONG_PTR _InterlockedIncrementPointer(
     _Inout_ _Interlocked_operand_ LONG_PTR volatile *Addend
@@ -300,7 +333,7 @@ FORCEINLINE LONG_PTR _InterlockedIncrementPointer(
 #endif
 }
 
-FORCEINLINE LONG_PTR _InterlockedDecrementPointer(
+FORCEINLINE LONG_PTR __InterlockedDecrementPointer(
     _Inout_ _Interlocked_operand_ LONG_PTR volatile *Addend
     )
 {
@@ -310,6 +343,8 @@ FORCEINLINE LONG_PTR _InterlockedDecrementPointer(
     return (LONG_PTR)_InterlockedDecrement((PLONG)Addend);
 #endif
 }
+
+#define _InterlockedDecrementPointer __InterlockedDecrementPointer
 
 FORCEINLINE BOOLEAN _InterlockedBitTestAndResetPointer(
     _Inout_ _Interlocked_operand_ LONG_PTR volatile *Base,
@@ -400,6 +435,8 @@ FORCEINLINE BOOLEAN _InterlockedIncrementPositive(
 #define PH_PTR_STR_LEN 24
 #define PH_PTR_STR_LEN_1 (PH_PTR_STR_LEN + 1)
 
+#define PH_HEX_CHARS L"0123456789abcdef"
+
 FORCEINLINE VOID PhPrintInt32(
     _Out_writes_(PH_INT32_STR_LEN_1) PWSTR Destination,
     _In_ LONG Int32
@@ -416,7 +453,7 @@ FORCEINLINE VOID PhPrintUInt32(
     _ultow(UInt32, Destination, 10);
 }
 
-FORCEINLINE VOID PhPrintUInt32Hex(
+FORCEINLINE VOID PhPrintUInt32IX(
     _Out_writes_(PH_PTR_STR_LEN_1) PWSTR Destination,
     _In_ ULONG UInt32
     )
@@ -442,11 +479,11 @@ FORCEINLINE VOID PhPrintUInt64(
 
 FORCEINLINE VOID PhPrintPointer(
     _Out_writes_(PH_PTR_STR_LEN_1) PWSTR Destination,
-    _In_ PVOID Pointer
+    _In_opt_ PVOID Pointer
     )
 {
-    Destination[0] = '0';
-    Destination[1] = 'x';
+    Destination[0] = L'0';
+    Destination[1] = L'x';
 #ifdef _WIN64
     _ui64tow((ULONG64)Pointer, &Destination[2], 16);
 #else
@@ -454,22 +491,49 @@ FORCEINLINE VOID PhPrintPointer(
 #endif
 }
 
-// Misc.
-
-FORCEINLINE ULONG PhCountBits(
-    _In_ ULONG Value
+FORCEINLINE VOID PhPrintPointerPadZeros(
+    _Out_writes_(PH_PTR_STR_LEN_1) PWSTR Destination,
+    _In_ PVOID Pointer
     )
 {
-    ULONG count = 0;
+    ULONG_PTR ptr = (ULONG_PTR)Pointer;
+    PWSTR dest = Destination;
 
-    while (Value)
-    {
-        count++;
-        Value &= Value - 1;
-    }
+    *dest++ = L'0';
+    *dest++ = L'x';
 
-    return count;
+#ifdef _WIN64
+    *dest++ = PH_HEX_CHARS[ptr >> 60];
+    *dest++ = PH_HEX_CHARS[(ptr & 0x0f00000000000000) >> 56];
+    *dest++ = PH_HEX_CHARS[(ptr & 0x00f0000000000000) >> 52];
+    *dest++ = PH_HEX_CHARS[(ptr & 0x000f000000000000) >> 48];
+    *dest++ = PH_HEX_CHARS[(ptr & 0x0000f00000000000) >> 44];
+    *dest++ = PH_HEX_CHARS[(ptr & 0x00000f0000000000) >> 40];
+    *dest++ = PH_HEX_CHARS[(ptr & 0x000000f000000000) >> 36];
+    *dest++ = PH_HEX_CHARS[(ptr & 0x0000000f00000000) >> 32];
+    *dest++ = PH_HEX_CHARS[(ptr & 0x00000000f0000000) >> 28];
+    *dest++ = PH_HEX_CHARS[(ptr & 0x000000000f000000) >> 24];
+    *dest++ = PH_HEX_CHARS[(ptr & 0x0000000000f00000) >> 20];
+    *dest++ = PH_HEX_CHARS[(ptr & 0x00000000000f0000) >> 16];
+    *dest++ = PH_HEX_CHARS[(ptr & 0x000000000000f000) >> 12];
+    *dest++ = PH_HEX_CHARS[(ptr & 0x0000000000000f00) >> 8];
+    *dest++ = PH_HEX_CHARS[(ptr & 0x00000000000000f0) >> 4];
+    *dest++ = PH_HEX_CHARS[ptr & 0x000000000000000f];
+#else
+    *dest++ = PH_HEX_CHARS[ptr >> 28];
+    *dest++ = PH_HEX_CHARS[(ptr & 0x0f000000) >> 24];
+    *dest++ = PH_HEX_CHARS[(ptr & 0x00f00000) >> 20];
+    *dest++ = PH_HEX_CHARS[(ptr & 0x000f0000) >> 16];
+    *dest++ = PH_HEX_CHARS[(ptr & 0x0000f000) >> 12];
+    *dest++ = PH_HEX_CHARS[(ptr & 0x00000f00) >> 8];
+    *dest++ = PH_HEX_CHARS[(ptr & 0x000000f0) >> 4];
+    *dest++ = PH_HEX_CHARS[ptr & 0x0000000f];
+#endif
+
+    *dest = UNICODE_NULL;
 }
+
+// Misc.
 
 FORCEINLINE ULONG64 PhRoundNumber(
     _In_ ULONG64 Value,
@@ -523,31 +587,19 @@ FORCEINLINE VOID PhProbeAddress(
 }
 
 FORCEINLINE PLARGE_INTEGER PhTimeoutFromMilliseconds(
-    _Inout_ PLARGE_INTEGER Timeout,
+    _Out_ PLARGE_INTEGER Timeout,
     _In_ ULONG Milliseconds
     )
 {
     if (Milliseconds == INFINITE)
-        return NULL;
-
-    Timeout->QuadPart = -(LONGLONG)UInt32x32To64(Milliseconds, PH_TIMEOUT_MS);
+        Timeout->QuadPart = MINLONGLONG;
+    else
+        Timeout->QuadPart = -(LONGLONG)UInt32x32To64(Milliseconds, PH_TIMEOUT_MS);
 
     return Timeout;
 }
 
 #define PhTimeoutFromMillisecondsEx(Milliseconds) \
-    &(LARGE_INTEGER) { -(LONGLONG)UInt32x32To64((Milliseconds), PH_TIMEOUT_MS) }
-
-FORCEINLINE NTSTATUS PhGetLastWin32ErrorAsNtStatus(
-    VOID
-    )
-{
-    ULONG win32Result;
-
-    // This is needed because NTSTATUS_FROM_WIN32 uses the argument multiple times.
-    win32Result = GetLastError();
-
-    return NTSTATUS_FROM_WIN32(win32Result);
-}
+    &(LARGE_INTEGER) { .QuadPart = -(LONGLONG)UInt32x32To64(((ULONG)(Milliseconds)), PH_TIMEOUT_MS) }
 
 #endif

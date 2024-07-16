@@ -1,30 +1,18 @@
 /*
- * Process Hacker -
- *   property sheet 
+ * Copyright (c) 2022 Winsider Seminars & Solutions, Inc.  All rights reserved.
  *
- * Copyright (C) 2017 dmex
+ * This file is part of System Informer.
  *
- * This file is part of Process Hacker.
+ * Authors:
  *
- * Process Hacker is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
+ *     dmex    2017-2020
  *
- * Process Hacker is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with Process Hacker.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include "devices.h"
 
-BOOLEAN HdPropContextInit = FALSE;
-PPH_OBJECT_TYPE PvpPropContextType;
-PPH_OBJECT_TYPE PvpPropPageContextType;
+static PPH_OBJECT_TYPE PvpPropContextType = NULL;
+static PPH_OBJECT_TYPE PvpPropPageContextType = NULL;
 static RECT MinimumSize = { -1, -1, -1, -1 };
 
 VOID NTAPI PvpPropContextDeleteProcedure(
@@ -56,20 +44,15 @@ INT CALLBACK PvpStandardPropPageProc(
     _In_ LPPROPSHEETPAGE ppsp
     );
 
-VOID HdPropInitialization(
-    VOID
-    )
-{
-    PvpPropContextType = PhCreateObjectType(L"HdPropContext", 0, PvpPropContextDeleteProcedure);
-    PvpPropPageContextType = PhCreateObjectType(L"HdPropPageContext", 0, PvpPropPageContextDeleteProcedure);
-}
-
 PPV_PROPCONTEXT HdCreatePropContext(
     _In_ PWSTR Caption
     )
 {
     PPV_PROPCONTEXT propContext;
     PROPSHEETHEADER propSheetHeader;
+
+    if (!PvpPropContextType)
+        PvpPropContextType = PhCreateObjectType(L"HdPropContext", 0, PvpPropContextDeleteProcedure);
 
     propContext = PhCreateObject(sizeof(PV_PROPCONTEXT), PvpPropContextType);
     memset(propContext, 0, sizeof(PV_PROPCONTEXT));
@@ -191,11 +174,17 @@ LRESULT CALLBACK PvpPropSheetWndProc(
     {
     case WM_DESTROY:
         {
-            SetWindowLongPtr(hWnd, GWLP_WNDPROC, (LONG_PTR)oldWndProc);
-            PhRemoveWindowContext(hWnd, ULONG_MAX);
+            if (context->PositionSettingName)
+                PhSaveWindowPlacementToSetting(context->PositionSettingName, context->SizeSettingName, hWnd);
 
-            PhSaveWindowPlacementToSetting(SETTING_NAME_DISK_POSITION, SETTING_NAME_DISK_SIZE, hWnd);
             PhDeleteLayoutManager(&context->LayoutManager);
+        }
+        break;
+    case WM_NCDESTROY:
+        {
+            SetWindowLongPtr(hWnd, GWLP_WNDPROC, (LONG_PTR)oldWndProc);
+
+            PhRemoveWindowContext(hWnd, ULONG_MAX);
 
             PhFree(context);
         }
@@ -214,7 +203,7 @@ LRESULT CALLBACK PvpPropSheetWndProc(
         break;
     case WM_SIZE:
         {
-            if (!IsIconic(hWnd))
+            if (!IsMinimized(hWnd))
             {
                 PhLayoutManagerLayout(&context->LayoutManager);
             }
@@ -230,9 +219,116 @@ LRESULT CALLBACK PvpPropSheetWndProc(
     return CallWindowProc(oldWndProc, hWnd, uMsg, wParam, lParam);
 }
 
+BOOLEAN CALLBACK PvUpdateButtonWindowEnumCallback(
+    _In_ HWND WindowHandle,
+    _In_opt_ PVOID Context
+    )
+{
+    WCHAR className[256];
+
+    if (!GetClassName(WindowHandle, className, RTL_NUMBER_OF(className)))
+        className[0] = UNICODE_NULL;
+
+    if (PhEqualStringZ(className, L"#32770", TRUE))
+    {
+        SendMessage(WindowHandle, WM_PH_UPDATE_DIALOG, 0, 0);
+    }
+
+    return TRUE;
+}
+
+VOID PvUpdateChildWindows(
+    _In_ HWND WindowHandle
+    )
+{
+    HWND propSheetHandle;
+
+    if (propSheetHandle = GetAncestor(WindowHandle, GA_ROOT))
+    {
+        PhEnumChildWindows(propSheetHandle, ULONG_MAX, PvUpdateButtonWindowEnumCallback, NULL);
+    }
+}
+
+LRESULT CALLBACK PvControlButtonWndProc(
+    _In_ HWND WindowHandle,
+    _In_ UINT uMsg,
+    _In_ WPARAM wParam,
+    _In_ LPARAM lParam
+    )
+{
+    PPV_PROPSHEETCONTEXT propSheetContext;
+    WNDPROC oldWndProc;
+
+    if (!(propSheetContext = PhGetWindowContext(WindowHandle, SCHAR_MAX)))
+        return DefWindowProc(WindowHandle, uMsg, wParam, lParam);
+
+    oldWndProc = propSheetContext->OldOptionsButtonWndProc;
+
+    switch (uMsg)
+    {
+    case WM_COMMAND:
+        {
+            if (GET_WM_COMMAND_HWND(wParam, lParam) == propSheetContext->OptionsButtonWindowHandle)
+            {
+                PvUpdateChildWindows(WindowHandle);
+            }
+        }
+        break;
+    case WM_NCDESTROY:
+        {
+            PhRemoveWindowContext(WindowHandle, SCHAR_MAX);
+            SetWindowLongPtr(WindowHandle, GWLP_WNDPROC, (LONG_PTR)oldWndProc);
+        }
+        break;
+    }
+
+    return CallWindowProc(oldWndProc, WindowHandle, uMsg, wParam, lParam);
+}
+
+HWND PvpCreateControlButton(
+    _In_ PPV_PROPSHEETCONTEXT PropSheetContext,
+    _In_ HWND PropSheetWindow
+    )
+{
+    if (!PropSheetContext->OptionsButtonWindowHandle)
+    {
+        RECT clientRect;
+        RECT rect;
+
+        PropSheetContext->OldOptionsButtonWndProc = PhGetWindowProcedure(PropSheetWindow);
+        PhSetWindowContext(PropSheetWindow, SCHAR_MAX, PropSheetContext);
+        PhSetWindowProcedure(PropSheetWindow, PvControlButtonWndProc);
+
+        // Create the refresh button.
+        GetClientRect(PropSheetWindow, &clientRect);
+        GetWindowRect(GetDlgItem(PropSheetWindow, IDCANCEL), &rect);
+        MapWindowPoints(NULL, PropSheetWindow, (POINT*)& rect, 2);
+        PropSheetContext->OptionsButtonWindowHandle = CreateWindowEx(
+            WS_EX_NOPARENTNOTIFY,
+            WC_BUTTON,
+            L"Options",
+            WS_CHILD | WS_VISIBLE | WS_TABSTOP,
+            clientRect.right - rect.right,
+            rect.top,
+            rect.right - rect.left,
+            rect.bottom - rect.top,
+            PropSheetWindow,
+            (HMENU)IDABORT,
+            PluginInstance->DllBase,
+            NULL
+            );
+        SetWindowFont(PropSheetContext->OptionsButtonWindowHandle, GetWindowFont(GetDlgItem(PropSheetWindow, IDCANCEL)), TRUE);
+    }
+
+    return PropSheetContext->OptionsButtonWindowHandle;
+}
+
 BOOLEAN PhpInitializePropSheetLayoutStage1(
     _In_ PPV_PROPSHEETCONTEXT PropSheetContext,
-    _In_ HWND hwnd
+    _In_ HWND hwnd,
+    _In_ BOOLEAN EnableOptionsButton,
+    _In_opt_ PWSTR PositionSettingName,
+    _In_opt_ PWSTR SizeSettingName
     )
 {
     if (!PropSheetContext->LayoutInitialized)
@@ -252,12 +348,36 @@ BOOLEAN PhpInitializePropSheetLayoutStage1(
         PhAddLayoutItem(&PropSheetContext->LayoutManager, GetDlgItem(hwnd, IDCANCEL),
             NULL, PH_ANCHOR_RIGHT | PH_ANCHOR_BOTTOM);
 
+        if (EnableOptionsButton)
+        {
+            PhAddLayoutItem(
+                &PropSheetContext->LayoutManager,
+                PvpCreateControlButton(PropSheetContext, hwnd),
+                NULL, PH_ANCHOR_LEFT | PH_ANCHOR_BOTTOM
+                );
+        }
+
         // Hide the OK button.
         ShowWindow(GetDlgItem(hwnd, IDOK), SW_HIDE);
         // Set the Cancel button's text to "Close".
         PhSetDialogItemText(hwnd, IDCANCEL, L"Close");
 
-        PhLoadWindowPlacementFromSetting(SETTING_NAME_DISK_POSITION, SETTING_NAME_DISK_SIZE, hwnd);
+        if (PositionSettingName)
+        {
+            PropSheetContext->PositionSettingName = PositionSettingName;
+            PropSheetContext->SizeSettingName = SizeSettingName;
+
+            if (PhGetIntegerPairSetting(PositionSettingName).X)
+            {
+                PhLoadWindowPlacementFromSetting(PositionSettingName, SizeSettingName, hwnd);
+            }
+            else
+            {
+                PhCenterWindow(hwnd, GetParent(hwnd));
+            }
+
+            PhSetApplicationWindowIcon(hwnd);
+        }
 
         PropSheetContext->LayoutInitialized = TRUE;
 
@@ -326,6 +446,9 @@ PPV_PROPPAGECONTEXT PvCreatePropPageContextEx(
 {
     PPV_PROPPAGECONTEXT propPageContext;
 
+    if (!PvpPropPageContextType)
+        PvpPropPageContextType = PhCreateObjectType(L"HdPropPageContext", 0, PvpPropPageContextDeleteProcedure);
+
     propPageContext = PhCreateObject(sizeof(PV_PROPPAGECONTEXT), PvpPropPageContextType);
     memset(propPageContext, 0, sizeof(PV_PROPPAGECONTEXT));
 
@@ -371,11 +494,14 @@ INT CALLBACK PvpStandardPropPageProc(
     return 1;
 }
 
-PPH_LAYOUT_ITEM PvAddPropPageLayoutItem(
+PPH_LAYOUT_ITEM PvAddPropPageLayoutItemEx(
     _In_ HWND hwnd,
     _In_ HWND Handle,
     _In_ PPH_LAYOUT_ITEM ParentItem,
-    _In_ ULONG Anchor
+    _In_ ULONG Anchor,
+    _In_ BOOLEAN EnableOptionsButton,
+    _In_opt_ PWSTR PositionSettingName,
+    _In_opt_ PWSTR SizeSettingName
     )
 {
     HWND parent;
@@ -388,7 +514,7 @@ PPH_LAYOUT_ITEM PvAddPropPageLayoutItem(
     propSheetContext = PvpGetPropSheetContext(parent);
     layoutManager = &propSheetContext->LayoutManager;
 
-    PhpInitializePropSheetLayoutStage1(propSheetContext, parent);
+    PhpInitializePropSheetLayoutStage1(propSheetContext, parent, EnableOptionsButton, PositionSettingName, SizeSettingName);
 
     if (ParentItem != PH_PROP_PAGE_TAB_CONTROL_PARENT)
         realParentItem = ParentItem;
@@ -429,6 +555,28 @@ PPH_LAYOUT_ITEM PvAddPropPageLayoutItem(
     }
 
     return item;
+}
+
+PPH_LAYOUT_ITEM PvAddPropPageLayoutItem(
+    _In_ HWND hwnd,
+    _In_ HWND Handle,
+    _In_ PPH_LAYOUT_ITEM ParentItem,
+    _In_ ULONG Anchor
+    )
+{
+    return PvAddPropPageLayoutItemEx(hwnd, Handle, ParentItem, Anchor, FALSE, NULL, NULL);
+}
+
+PPH_LAYOUT_ITEM PvAddPropPageLayoutConfig(
+    _In_ HWND hwnd,
+    _In_ HWND Handle,
+    _In_ PPH_LAYOUT_ITEM ParentItem,
+    _In_ ULONG Anchor,
+    _In_opt_ PWSTR PositionSettingName,
+    _In_opt_ PWSTR SizeSettingName
+    )
+{
+    return PvAddPropPageLayoutItemEx(hwnd, Handle, ParentItem, Anchor, FALSE, PositionSettingName, SizeSettingName);
 }
 
 VOID PvDoPropPageLayout(

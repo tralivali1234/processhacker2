@@ -1,27 +1,15 @@
 /*
- * Process Hacker ToolStatus -
- *   Statusbar Customize Dialog
+ * Copyright (c) 2022 Winsider Seminars & Solutions, Inc.  All rights reserved.
  *
- * Copyright (C) 2015-2017 dmex
+ * This file is part of System Informer.
  *
- * This file is part of Process Hacker.
+ * Authors:
  *
- * Process Hacker is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
+ *     dmex    2015-2023
  *
- * Process Hacker is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with Process Hacker.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include "toolstatus.h"
-#include "commonutil.h"
 
 BOOLEAN CustomizeStatusBarItemExists(
     _In_ PCUSTOMIZE_CONTEXT Context,
@@ -92,7 +80,7 @@ VOID CustomizeAddStatusBarItem(
         CustomizeInsertStatusBarItem(IndexTo, button);
     }
 
-    SendMessage(Context->DialogHandle, WM_COMMAND, MAKEWPARAM(IDC_AVAILABLE, LBN_SELCHANGE), 0);
+    SendMessage(Context->WindowHandle, WM_COMMAND, MAKEWPARAM(IDC_AVAILABLE, LBN_SELCHANGE), 0);
 }
 
 VOID CustomizeRemoveStatusBarItem(
@@ -121,7 +109,7 @@ VOID CustomizeRemoveStatusBarItem(
         ListBox_InsertItemData(Context->AvailableListHandle, count - 1, button);
     }
 
-    SendMessage(Context->DialogHandle, WM_COMMAND, MAKEWPARAM(IDC_CURRENT, LBN_SELCHANGE), 0);
+    SendMessage(Context->WindowHandle, WM_COMMAND, MAKEWPARAM(IDC_CURRENT, LBN_SELCHANGE), 0);
 
     StatusBarUpdate(TRUE);
 }
@@ -217,9 +205,7 @@ VOID CustomizeLoadStatusBarItems(
 
     for (index = 0; index < StatusBarItemList->Count; index++)
     {
-        button = PhAllocate(sizeof(BUTTON_CONTEXT));
-        memset(button, 0, sizeof(BUTTON_CONTEXT));
-
+        button = PhAllocateZero(sizeof(BUTTON_CONTEXT));
         button->IdCommand = PtrToUlong(StatusBarItemList->Items[index]);
 
         ListBox_AddItemData(Context->CurrentListHandle, button);
@@ -232,17 +218,14 @@ VOID CustomizeLoadStatusBarItems(
         if (CustomizeStatusBarItemExists(Context, buttonId))
             continue;
 
-        button = PhAllocate(sizeof(BUTTON_CONTEXT));
-        memset(button, 0, sizeof(BUTTON_CONTEXT));
-
+        button = PhAllocateZero(sizeof(BUTTON_CONTEXT));
         button->IdCommand = buttonId;
 
         ListBox_AddItemData(Context->AvailableListHandle, button);
     }
 
     // Append separator to the last 'current list' position
-    button = PhAllocate(sizeof(BUTTON_CONTEXT));
-    memset(button, 0, sizeof(BUTTON_CONTEXT));
+    button = PhAllocateZero(sizeof(BUTTON_CONTEXT));
     button->IsVirtual = TRUE;
 
     index = ListBox_AddItemData(Context->CurrentListHandle, button);
@@ -250,8 +233,7 @@ VOID CustomizeLoadStatusBarItems(
     ListBox_SetTopIndex(Context->CurrentListHandle, index);
 
     // Append separator to the last 'available list' position
-    button = PhAllocate(sizeof(BUTTON_CONTEXT));
-    memset(button, 0, sizeof(BUTTON_CONTEXT));
+    button = PhAllocateZero(sizeof(BUTTON_CONTEXT));
     button->IsVirtual = TRUE;
 
     index = ListBox_AddItemData(Context->AvailableListHandle, button);
@@ -293,23 +275,45 @@ INT_PTR CALLBACK CustomizeStatusBarDialogProc(
     {
     case WM_INITDIALOG:
         {
-            PhCenterWindow(hwndDlg, PhMainWndHandle);
+            PhSetApplicationWindowIcon(hwndDlg);
 
-            context->DialogHandle = hwndDlg;
+            PhCenterWindow(hwndDlg, GetParent(hwndDlg));
+
+            context->WindowHandle = hwndDlg;
             context->AvailableListHandle = GetDlgItem(hwndDlg, IDC_AVAILABLE);
             context->CurrentListHandle = GetDlgItem(hwndDlg, IDC_CURRENT);
             context->MoveUpButtonHandle = GetDlgItem(hwndDlg, IDC_MOVEUP);
             context->MoveDownButtonHandle = GetDlgItem(hwndDlg, IDC_MOVEDOWN);
             context->AddButtonHandle = GetDlgItem(hwndDlg, IDC_ADD);
             context->RemoveButtonHandle = GetDlgItem(hwndDlg, IDC_REMOVE);
-            context->FontHandle = PhDuplicateFont(GetWindowFont(StatusBarHandle));
 
-            ListBox_SetItemHeight(context->AvailableListHandle, 0, PH_SCALE_DPI(22)); // BitmapHeight
-            ListBox_SetItemHeight(context->CurrentListHandle, 0, PH_SCALE_DPI(22)); // BitmapHeight
+            context->WindowDpi = PhGetWindowDpi(hwndDlg);
+            context->FontHandle = PhCreateIconTitleFont(context->WindowDpi);
+
+            if (PhGetIntegerSetting(L"EnableThemeSupport"))
+            {
+                context->BrushNormal = CreateSolidBrush(RGB(43, 43, 43));
+                context->BrushHot = CreateSolidBrush(RGB(128, 128, 128));
+                context->BrushPushed = CreateSolidBrush(RGB(153, 209, 255));
+                context->TextColor = RGB(0xff, 0xff, 0xff);
+            }
+            else
+            {
+                context->BrushNormal = GetSysColorBrush(COLOR_WINDOW);
+                context->BrushHot = CreateSolidBrush(RGB(145, 201, 247));
+                context->BrushPushed = CreateSolidBrush(RGB(153, 209, 255));
+                context->TextColor = GetSysColor(COLOR_WINDOWTEXT);
+            }
+
+
+            ListBox_SetItemHeight(context->AvailableListHandle, 0, PhGetDpi(22, context->WindowDpi)); // BitmapHeight
+            ListBox_SetItemHeight(context->CurrentListHandle, 0, PhGetDpi(22, context->WindowDpi)); // BitmapHeight
 
             CustomizeLoadStatusBarItems(context);
 
-            PhSetDialogFocus(context->DialogHandle, context->CurrentListHandle);
+            PhInitializeWindowTheme(hwndDlg, !!PhGetIntegerSetting(L"EnableThemeSupport"));
+
+            PhSetDialogFocus(context->WindowHandle, context->CurrentListHandle);
         }
         break;
     case WM_DESTROY:
@@ -318,16 +322,35 @@ INT_PTR CALLBACK CustomizeStatusBarDialogProc(
 
             CustomizeFreeStatusBarItems(context);
 
+            if (context->BrushNormal)
+                DeleteBrush(context->BrushNormal);
+
+            if (context->BrushHot)
+                DeleteBrush(context->BrushHot);
+
+            if (context->BrushPushed)
+                DeleteBrush(context->BrushPushed);
+
             if (context->FontHandle)
-            {
                 DeleteFont(context->FontHandle);
-            }
         }
         break;
     case WM_NCDESTROY:
         {
             PhRemoveWindowContext(hwndDlg, PH_WINDOW_CONTEXT_DEFAULT);
             PhFree(context);
+        }
+        break;
+    case WM_DPICHANGED:
+        {
+            context->WindowDpi = LOWORD(wParam); // PhGetWindowDpi(hwndDlg);
+            if (context->FontHandle) DeleteFont(context->FontHandle);
+            context->FontHandle = PhCreateIconTitleFont(context->WindowDpi);
+            ListBox_SetItemHeight(context->AvailableListHandle, 0, PhGetDpi(22, context->WindowDpi)); // BitmapHeight
+            ListBox_SetItemHeight(context->CurrentListHandle, 0, PhGetDpi(22, context->WindowDpi)); // BitmapHeight
+
+            InvalidateRect(context->AvailableListHandle, NULL, TRUE);
+            InvalidateRect(context->CurrentListHandle, NULL, TRUE);
         }
         break;
     case WM_COMMAND:
@@ -533,7 +556,7 @@ INT_PTR CALLBACK CustomizeStatusBarDialogProc(
                 break;
             case IDCANCEL:
                 {
-                    EndDialog(hwndDlg, FALSE);
+                    EndDialog(hwndDlg, IDCANCEL);
                 }
                 break;
             }
@@ -569,23 +592,20 @@ INT_PTR CALLBACK CustomizeStatusBarDialogProc(
 
                 oldBufferBitmap = SelectBitmap(bufferDc, bufferBitmap);
                 SelectFont(bufferDc, context->FontHandle);
-                SetBkMode(bufferDc, TRANSPARENT);    
+                SetBkMode(bufferDc, TRANSPARENT);
 
-                if (isSelected)
-                {
-                    FillRect(bufferDc, &bufferRect, GetSysColorBrush(isFocused ? COLOR_HIGHLIGHT : COLOR_WINDOW));
-                    SetTextColor(bufferDc, GetSysColor(isFocused ? COLOR_HIGHLIGHTTEXT : COLOR_WINDOWTEXT));
-                    //FrameRect(bufferDc, &bufferRect, isFocused ? GetStockBrush(BLACK_BRUSH) : GetSysColorBrush(COLOR_HIGHLIGHT));
-                }
+                if (isSelected || isFocused)
+                    FillRect(bufferDc, &bufferRect, context->BrushHot);
                 else
-                {
-                    FillRect(bufferDc, &bufferRect, GetSysColorBrush(isFocused ? COLOR_HIGHLIGHT : COLOR_WINDOW));
-                    SetTextColor(bufferDc, GetSysColor(isFocused ? COLOR_HIGHLIGHTTEXT : COLOR_WINDOWTEXT));
-                    //FrameRect(bufferDc, &bufferRect, isFocused ? GetStockBrush(BLACK_BRUSH) : GetSysColorBrush(COLOR_HIGHLIGHTTEXT));
-                }
+                    FillRect(bufferDc, &bufferRect, context->BrushNormal);
 
                 if (!button->IsVirtual)
-                {           
+                    SetTextColor(bufferDc, context->TextColor);
+                else
+                    SetTextColor(bufferDc, GetSysColor(COLOR_GRAYTEXT));
+
+                if (!button->IsVirtual)
+                {
                     bufferRect.left += 5;
                     DrawText(
                         bufferDc,
@@ -616,19 +636,26 @@ INT_PTR CALLBACK CustomizeStatusBarDialogProc(
             }
         }
         break;
+    case WM_CTLCOLORBTN:
+        return HANDLE_WM_CTLCOLORBTN(hwndDlg, wParam, lParam, PhWindowThemeControlColor);
+    case WM_CTLCOLORDLG:
+        return HANDLE_WM_CTLCOLORDLG(hwndDlg, wParam, lParam, PhWindowThemeControlColor);
+    case WM_CTLCOLORSTATIC:
+        return HANDLE_WM_CTLCOLORSTATIC(hwndDlg, wParam, lParam, PhWindowThemeControlColor);
     }
 
     return FALSE;
 }
 
 VOID StatusBarShowCustomizeDialog(
-    VOID
+    _In_ HWND ParentWindowHandle
     )
 {
-    DialogBox(
+    PhDialogBox(
         PluginInstance->DllBase,
         MAKEINTRESOURCE(IDD_CUSTOMIZE_SB),
-        PhMainWndHandle,
-        CustomizeStatusBarDialogProc
+        ParentWindowHandle,
+        CustomizeStatusBarDialogProc,
+        NULL
         );
 }

@@ -1,21 +1,7 @@
 /*
- * Process Hacker -
- *   Executive support library functions
+ * Executive support library functions
  *
- * This file is part of Process Hacker.
- *
- * Process Hacker is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * Process Hacker is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with Process Hacker.  If not, see <http://www.gnu.org/licenses/>.
+ * This file is part of System Informer.
  */
 
 #ifndef _NTEXAPI_H
@@ -32,7 +18,7 @@ NTSTATUS
 NTAPI
 NtDelayExecution(
     _In_ BOOLEAN Alertable,
-    _In_opt_ PLARGE_INTEGER DelayInterval
+    _In_ PLARGE_INTEGER DelayInterval
     );
 
 // Environment values
@@ -55,15 +41,24 @@ NtSetSystemEnvironmentValue(
     _In_ PUNICODE_STRING VariableValue
     );
 
+#define EFI_VARIABLE_NON_VOLATILE 0x00000001
+#define EFI_VARIABLE_BOOTSERVICE_ACCESS 0x00000002
+#define EFI_VARIABLE_RUNTIME_ACCESS 0x00000004
+#define EFI_VARIABLE_HARDWARE_ERROR_RECORD 0x00000008
+#define EFI_VARIABLE_AUTHENTICATED_WRITE_ACCESS 0x00000010
+#define EFI_VARIABLE_TIME_BASED_AUTHENTICATED_WRITE_ACCESS 0x00000020
+#define EFI_VARIABLE_APPEND_WRITE 0x00000040
+#define EFI_VARIABLE_ENHANCED_AUTHENTICATED_ACCESS 0x00000080
+
 NTSYSCALLAPI
 NTSTATUS
 NTAPI
 NtQuerySystemEnvironmentValueEx(
     _In_ PUNICODE_STRING VariableName,
-    _In_ LPGUID VendorGuid,
+    _In_ PCGUID VendorGuid,
     _Out_writes_bytes_opt_(*ValueLength) PVOID Value,
     _Inout_ PULONG ValueLength,
-    _Out_opt_ PULONG Attributes
+    _Out_opt_ PULONG Attributes // EFI_VARIABLE_*
     );
 
 NTSYSCALLAPI
@@ -71,17 +66,42 @@ NTSTATUS
 NTAPI
 NtSetSystemEnvironmentValueEx(
     _In_ PUNICODE_STRING VariableName,
-    _In_ LPGUID VendorGuid,
+    _In_ PCGUID VendorGuid,
     _In_reads_bytes_opt_(ValueLength) PVOID Value,
-    _In_ ULONG ValueLength,
-    _In_ ULONG Attributes
+    _In_ ULONG ValueLength, // 0 = delete variable
+    _In_ ULONG Attributes // EFI_VARIABLE_*
     );
+
+typedef enum _SYSTEM_ENVIRONMENT_INFORMATION_CLASS
+{
+    SystemEnvironmentNameInformation = 1, // q: VARIABLE_NAME
+    SystemEnvironmentValueInformation = 2, // q: VARIABLE_NAME_AND_VALUE
+    MaxSystemEnvironmentInfoClass
+} SYSTEM_ENVIRONMENT_INFORMATION_CLASS;
+
+typedef struct _VARIABLE_NAME
+{
+    ULONG NextEntryOffset;
+    GUID VendorGuid;
+    WCHAR Name[ANYSIZE_ARRAY];
+} VARIABLE_NAME, *PVARIABLE_NAME;
+
+typedef struct _VARIABLE_NAME_AND_VALUE
+{
+    ULONG NextEntryOffset;
+    ULONG ValueOffset;
+    ULONG ValueLength;
+    ULONG Attributes;
+    GUID VendorGuid;
+    WCHAR Name[ANYSIZE_ARRAY];
+    //BYTE Value[ANYSIZE_ARRAY];
+} VARIABLE_NAME_AND_VALUE, *PVARIABLE_NAME_AND_VALUE;
 
 NTSYSCALLAPI
 NTSTATUS
 NTAPI
 NtEnumerateSystemEnvironmentValuesEx(
-    _In_ ULONG InformationClass,
+    _In_ ULONG InformationClass, // SYSTEM_ENVIRONMENT_INFORMATION_CLASS
     _Out_ PVOID Buffer,
     _Inout_ PULONG BufferLength
     );
@@ -98,7 +118,7 @@ typedef struct _BOOT_ENTRY
     ULONG FriendlyNameOffset;
     ULONG BootFilePathOffset;
     ULONG OsOptionsLength;
-    UCHAR OsOptions[1];
+    _Field_size_bytes_(OsOptionsLength) UCHAR OsOptions[1];
 } BOOT_ENTRY, *PBOOT_ENTRY;
 
 // private
@@ -125,7 +145,7 @@ typedef struct _FILE_PATH
     ULONG Version;
     ULONG Length;
     ULONG Type;
-    UCHAR FilePath[1];
+    _Field_size_bytes_(Length) UCHAR FilePath[1];
 } FILE_PATH, *PFILE_PATH;
 
 // private
@@ -145,7 +165,7 @@ typedef struct _EFI_DRIVER_ENTRY_LIST
     EFI_DRIVER_ENTRY DriverEntry;
 } EFI_DRIVER_ENTRY_LIST, *PEFI_DRIVER_ENTRY_LIST;
 
-#if (PHNT_VERSION >= PHNT_VISTA)
+#if (PHNT_VERSION >= PHNT_WINXP)
 
 NTSYSCALLAPI
 NTSTATUS
@@ -265,6 +285,8 @@ NtSetDriverEntryOrder(
     _In_ ULONG Count
     );
 
+#endif
+
 typedef enum _FILTER_BOOT_OPTION_OPERATION
 {
     FilterBootOptionOperationOpenSystemStore,
@@ -273,7 +295,8 @@ typedef enum _FILTER_BOOT_OPTION_OPERATION
     FilterBootOptionOperationMax
 } FILTER_BOOT_OPTION_OPERATION;
 
-#if (PHNT_VERSION >= PHNT_THRESHOLD)
+#if (PHNT_VERSION >= PHNT_WIN8)
+
 NTSYSCALLAPI
 NTSTATUS
 NTAPI
@@ -284,7 +307,6 @@ NtFilterBootOption(
     _In_reads_bytes_opt_(DataSize) PVOID Data,
     _In_ ULONG DataSize
     );
-#endif
 
 #endif
 
@@ -292,6 +314,14 @@ NtFilterBootOption(
 
 #ifndef EVENT_QUERY_STATE
 #define EVENT_QUERY_STATE 0x0001
+#endif
+
+#ifndef EVENT_MODIFY_STATE
+#define EVENT_MODIFY_STATE 0x0002
+#endif
+
+#ifndef EVENT_ALL_ACCESS
+#define EVENT_ALL_ACCESS (EVENT_QUERY_STATE|EVENT_MODIFY_STATE|STANDARD_RIGHTS_REQUIRED|SYNCHRONIZE)
 #endif
 
 typedef enum _EVENT_INFORMATION_CLASS
@@ -440,10 +470,18 @@ NtSetHighWaitLowEventPair(
 
 // Mutant
 
+#ifndef MUTANT_QUERY_STATE
+#define MUTANT_QUERY_STATE 0x0001
+#endif
+
+#ifndef MUTANT_ALL_ACCESS
+#define MUTANT_ALL_ACCESS (MUTANT_QUERY_STATE|STANDARD_RIGHTS_REQUIRED|SYNCHRONIZE)
+#endif
+
 typedef enum _MUTANT_INFORMATION_CLASS
 {
-    MutantBasicInformation,
-    MutantOwnerInformation
+    MutantBasicInformation, // MUTANT_BASIC_INFORMATION
+    MutantOwnerInformation // MUTANT_OWNER_INFORMATION
 } MUTANT_INFORMATION_CLASS;
 
 typedef struct _MUTANT_BASIC_INFORMATION
@@ -502,6 +540,14 @@ NtQueryMutant(
 #define SEMAPHORE_QUERY_STATE 0x0001
 #endif
 
+#ifndef SEMAPHORE_MODIFY_STATE
+#define SEMAPHORE_MODIFY_STATE 0x0002
+#endif
+
+#ifndef SEMAPHORE_ALL_ACCESS
+#define SEMAPHORE_ALL_ACCESS (SEMAPHORE_QUERY_STATE|SEMAPHORE_MODIFY_STATE|STANDARD_RIGHTS_REQUIRED|SYNCHRONIZE)
+#endif
+
 typedef enum _SEMAPHORE_INFORMATION_CLASS
 {
     SemaphoreBasicInformation
@@ -555,9 +601,21 @@ NtQuerySemaphore(
 
 // Timer
 
+#ifndef TIMER_QUERY_STATE
+#define TIMER_QUERY_STATE 0x0001
+#endif
+
+#ifndef TIMER_MODIFY_STATE
+#define TIMER_MODIFY_STATE 0x0002
+#endif
+
+#ifndef TIMER_ALL_ACCESS
+#define TIMER_ALL_ACCESS (TIMER_QUERY_STATE|TIMER_MODIFY_STATE|STANDARD_RIGHTS_REQUIRED|SYNCHRONIZE)
+#endif
+
 typedef enum _TIMER_INFORMATION_CLASS
 {
-    TimerBasicInformation
+    TimerBasicInformation // TIMER_BASIC_INFORMATION
 } TIMER_INFORMATION_CLASS;
 
 typedef struct _TIMER_BASIC_INFORMATION
@@ -574,19 +632,19 @@ typedef VOID (NTAPI *PTIMER_APC_ROUTINE)(
 
 typedef enum _TIMER_SET_INFORMATION_CLASS
 {
-    TimerSetCoalescableTimer,
+    TimerSetCoalescableTimer, // TIMER_SET_COALESCABLE_TIMER_INFO
     MaxTimerInfoClass
 } TIMER_SET_INFORMATION_CLASS;
 
 #if (PHNT_VERSION >= PHNT_WIN7)
-struct _COUNTED_REASON_CONTEXT;
+typedef struct _COUNTED_REASON_CONTEXT *PCOUNTED_REASON_CONTEXT;
 
 typedef struct _TIMER_SET_COALESCABLE_TIMER_INFO
 {
     _In_ LARGE_INTEGER DueTime;
     _In_opt_ PTIMER_APC_ROUTINE TimerApcRoutine;
     _In_opt_ PVOID TimerContext;
-    _In_opt_ struct _COUNTED_REASON_CONTEXT *WakeContext;
+    _In_opt_ PCOUNTED_REASON_CONTEXT WakeContext;
     _In_opt_ ULONG Period;
     _In_ ULONG TolerableDelay;
     _Out_opt_ PBOOLEAN PreviousState;
@@ -663,6 +721,7 @@ NTSTATUS
 NTAPI
 NtCreateIRTimer(
     _Out_ PHANDLE TimerHandle,
+    _In_ PVOID Reserved,
     _In_ ACCESS_MASK DesiredAccess
     );
 
@@ -672,6 +731,21 @@ NTAPI
 NtSetIRTimer(
     _In_ HANDLE TimerHandle,
     _In_opt_ PLARGE_INTEGER DueTime
+    );
+
+#endif
+
+#if (PHNT_VERSION >= PHNT_THRESHOLD)
+
+NTSYSCALLAPI
+NTSTATUS
+NTAPI
+NtCreateTimer2(
+    _Out_ PHANDLE TimerHandle,
+    _In_opt_ PVOID Reserved1,
+    _In_opt_ POBJECT_ATTRIBUTES ObjectAttributes,
+    _In_ ULONG Attributes, // TIMER_TYPE
+    _In_ ACCESS_MASK DesiredAccess
     );
 
 #endif
@@ -686,17 +760,6 @@ typedef struct _T2_SET_PARAMETERS_V0
 typedef PVOID PT2_CANCEL_PARAMETERS;
 
 #if (PHNT_VERSION >= PHNT_THRESHOLD)
-
-NTSYSCALLAPI
-NTSTATUS
-NTAPI
-NtCreateTimer2(
-    _Out_ PHANDLE TimerHandle,
-    _In_opt_ PVOID Reserved1,
-    _In_opt_ PVOID Reserved2,
-    _In_ ULONG Attributes,
-    _In_ ACCESS_MASK DesiredAccess
-    );
 
 NTSYSCALLAPI
 NTSTATUS
@@ -800,7 +863,7 @@ NtCreateKeyedEvent(
     _Out_ PHANDLE KeyedEventHandle,
     _In_ ACCESS_MASK DesiredAccess,
     _In_opt_ POBJECT_ATTRIBUTES ObjectAttributes,
-    _In_ ULONG Flags
+    _Reserved_ ULONG Flags
     );
 
 NTSYSCALLAPI
@@ -816,7 +879,7 @@ NTSYSCALLAPI
 NTSTATUS
 NTAPI
 NtReleaseKeyedEvent(
-    _In_ HANDLE KeyedEventHandle,
+    _In_opt_ HANDLE KeyedEventHandle,
     _In_ PVOID KeyValue,
     _In_ BOOLEAN Alertable,
     _In_opt_ PLARGE_INTEGER Timeout
@@ -826,7 +889,7 @@ NTSYSCALLAPI
 NTSTATUS
 NTAPI
 NtWaitForKeyedEvent(
-    _In_ HANDLE KeyedEventHandle,
+    _In_opt_ HANDLE KeyedEventHandle,
     _In_ PVOID KeyValue,
     _In_ BOOLEAN Alertable,
     _In_opt_ PLARGE_INTEGER Timeout
@@ -875,7 +938,8 @@ typedef enum _WNF_DATA_SCOPE
     WnfDataScopeSession,
     WnfDataScopeUser,
     WnfDataScopeProcess,
-    WnfDataScopeMachine // REDSTONE3
+    WnfDataScopeMachine, // REDSTONE3
+    WnfDataScopePhysicalMachine, // WIN11
 } WNF_DATA_SCOPE;
 
 typedef struct _WNF_TYPE_ID
@@ -928,10 +992,10 @@ NTSTATUS
 NTAPI
 NtUpdateWnfStateData(
     _In_ PCWNF_STATE_NAME StateName,
-    _In_reads_bytes_opt_(Length) const VOID *Buffer,
+    _In_reads_bytes_opt_(Length) const VOID* Buffer,
     _In_opt_ ULONG Length,
     _In_opt_ PCWNF_TYPE_ID TypeId,
-    _In_opt_ const VOID *ExplicitScope,
+    _In_opt_ const VOID* ExplicitScope,
     _In_ WNF_CHANGE_STAMP MatchingChangeStamp,
     _In_ LOGICAL CheckStamp
     );
@@ -941,7 +1005,7 @@ NTSTATUS
 NTAPI
 NtDeleteWnfStateData(
     _In_ PCWNF_STATE_NAME StateName,
-    _In_opt_ const VOID *ExplicitScope
+    _In_opt_ const VOID* ExplicitScope
     );
 
 NTSYSCALLAPI
@@ -950,9 +1014,9 @@ NTAPI
 NtQueryWnfStateData(
     _In_ PCWNF_STATE_NAME StateName,
     _In_opt_ PCWNF_TYPE_ID TypeId,
-    _In_opt_ const VOID *ExplicitScope,
+    _In_opt_ const VOID* ExplicitScope,
     _Out_ PWNF_CHANGE_STAMP ChangeStamp,
-    _Out_writes_bytes_to_opt_(*BufferSize, *BufferSize) PVOID Buffer,
+    _Out_writes_bytes_opt_(*BufferSize) PVOID Buffer,
     _Inout_ PULONG BufferSize
     );
 
@@ -962,7 +1026,7 @@ NTAPI
 NtQueryWnfStateNameInformation(
     _In_ PCWNF_STATE_NAME StateName,
     _In_ WNF_STATE_NAME_INFORMATION NameInfoClass,
-    _In_opt_ const VOID *ExplicitScope,
+    _In_opt_ const VOID* ExplicitScope,
     _Out_writes_bytes_(InfoBufferSize) PVOID InfoBuffer,
     _In_ ULONG InfoBufferSize
     );
@@ -1036,21 +1100,21 @@ NtSetWnfProcessNotificationEvent(
 
 typedef enum _WORKERFACTORYINFOCLASS
 {
-    WorkerFactoryTimeout, // q; s: LARGE_INTEGER
-    WorkerFactoryRetryTimeout, // q; s: LARGE_INTEGER
-    WorkerFactoryIdleTimeout, // q; s: LARGE_INTEGER
-    WorkerFactoryBindingCount,
-    WorkerFactoryThreadMinimum, // q; s: ULONG
-    WorkerFactoryThreadMaximum, // q; s: ULONG
+    WorkerFactoryTimeout, // LARGE_INTEGER
+    WorkerFactoryRetryTimeout, // LARGE_INTEGER
+    WorkerFactoryIdleTimeout, // s: LARGE_INTEGER
+    WorkerFactoryBindingCount, // s: ULONG
+    WorkerFactoryThreadMinimum, // s: ULONG
+    WorkerFactoryThreadMaximum, // s: ULONG
     WorkerFactoryPaused, // ULONG or BOOLEAN
-    WorkerFactoryBasicInformation, // WORKER_FACTORY_BASIC_INFORMATION
+    WorkerFactoryBasicInformation, // q: WORKER_FACTORY_BASIC_INFORMATION
     WorkerFactoryAdjustThreadGoal,
     WorkerFactoryCallbackType,
     WorkerFactoryStackInformation, // 10
-    WorkerFactoryThreadBasePriority,
-    WorkerFactoryTimeoutWaiters, // since THRESHOLD
-    WorkerFactoryFlags,
-    WorkerFactoryThreadSoftMaximum,
+    WorkerFactoryThreadBasePriority, // s: ULONG
+    WorkerFactoryTimeoutWaiters, // s: ULONG, since THRESHOLD
+    WorkerFactoryFlags, // s: ULONG
+    WorkerFactoryThreadSoftMaximum, // s: ULONG
     WorkerFactoryThreadCpuSets, // since REDSTONE5
     MaxWorkerFactoryInfoClass
 } WORKERFACTORYINFOCLASS, *PWORKERFACTORYINFOCLASS;
@@ -1146,15 +1210,41 @@ NtWorkerFactoryWorkerReady(
     _In_ HANDLE WorkerFactoryHandle
     );
 
-struct _FILE_IO_COMPLETION_INFORMATION;
+#if (PHNT_VERSION >= PHNT_WIN8)
+
+typedef struct _FILE_IO_COMPLETION_INFORMATION *PFILE_IO_COMPLETION_INFORMATION;
+typedef struct _PORT_MESSAGE *PPORT_MESSAGE;
+
+typedef struct _WORKER_FACTORY_DEFERRED_WORK
+{
+    PPORT_MESSAGE AlpcSendMessage;
+    PVOID AlpcSendMessagePort;
+    ULONG AlpcSendMessageFlags;
+    ULONG Flags;
+} WORKER_FACTORY_DEFERRED_WORK, *PWORKER_FACTORY_DEFERRED_WORK;
 
 NTSYSCALLAPI
 NTSTATUS
 NTAPI
 NtWaitForWorkViaWorkerFactory(
     _In_ HANDLE WorkerFactoryHandle,
-    _Out_ struct _FILE_IO_COMPLETION_INFORMATION *MiniPacket
+    _Out_writes_to_(Count, *PacketsReturned) PFILE_IO_COMPLETION_INFORMATION MiniPackets,
+    _In_ ULONG Count,
+    _Out_ PULONG PacketsReturned,
+    _In_ PWORKER_FACTORY_DEFERRED_WORK DeferredWork
     );
+
+#else
+
+NTSYSCALLAPI
+NTSTATUS
+NTAPI
+NtWaitForWorkViaWorkerFactory(
+    _In_ HANDLE WorkerFactoryHandle,
+    _Out_ PFILE_IO_COMPLETION_INFORMATION MiniPacket
+    );
+
+#endif
 
 #endif
 
@@ -1203,6 +1293,27 @@ NtQueryPerformanceCounter(
     _Out_opt_ PLARGE_INTEGER PerformanceFrequency
     );
 
+#if (PHNT_VERSION >= PHNT_REDSTONE2)
+// rev
+NTSYSCALLAPI
+NTSTATUS
+NTAPI
+NtQueryAuxiliaryCounterFrequency(
+    _Out_ PLARGE_INTEGER AuxiliaryCounterFrequency
+    );
+
+// rev
+NTSYSCALLAPI
+NTSTATUS
+NTAPI
+NtConvertBetweenAuxiliaryCounterAndPerformanceCounter(
+    _In_ BOOLEAN ConvertAuxiliaryToPerformanceCounter,
+    _In_ PLARGE_INTEGER PerformanceOrAuxiliaryCounterValue,
+    _Out_ PLARGE_INTEGER ConvertedValue,
+    _Out_opt_ PLARGE_INTEGER ConversionError
+    );
+#endif
+
 // LUIDs
 
 NTSYSCALLAPI
@@ -1247,7 +1358,7 @@ typedef enum _SYSTEM_INFORMATION_CLASS
     SystemProcessInformation, // q: SYSTEM_PROCESS_INFORMATION
     SystemCallCountInformation, // q: SYSTEM_CALL_COUNT_INFORMATION
     SystemDeviceInformation, // q: SYSTEM_DEVICE_INFORMATION
-    SystemProcessorPerformanceInformation, // q: SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION
+    SystemProcessorPerformanceInformation, // q: SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION (EX in: USHORT ProcessorGroup)
     SystemFlagsInformation, // q: SYSTEM_FLAGS_INFORMATION
     SystemCallTimeInformation, // not implemented // SYSTEM_CALL_TIME_INFORMATION // 10
     SystemModuleInformation, // q: RTL_PROCESS_MODULES
@@ -1258,22 +1369,22 @@ typedef enum _SYSTEM_INFORMATION_CLASS
     SystemHandleInformation, // q: SYSTEM_HANDLE_INFORMATION
     SystemObjectInformation, // q: SYSTEM_OBJECTTYPE_INFORMATION mixed with SYSTEM_OBJECT_INFORMATION
     SystemPageFileInformation, // q: SYSTEM_PAGEFILE_INFORMATION
-    SystemVdmInstemulInformation, // q
+    SystemVdmInstemulInformation, // q: SYSTEM_VDM_INSTEMUL_INFO
     SystemVdmBopInformation, // not implemented // 20
     SystemFileCacheInformation, // q: SYSTEM_FILECACHE_INFORMATION; s (requires SeIncreaseQuotaPrivilege) (info for WorkingSetTypeSystemCache)
     SystemPoolTagInformation, // q: SYSTEM_POOLTAG_INFORMATION
-    SystemInterruptInformation, // q: SYSTEM_INTERRUPT_INFORMATION
+    SystemInterruptInformation, // q: SYSTEM_INTERRUPT_INFORMATION (EX in: USHORT ProcessorGroup)
     SystemDpcBehaviorInformation, // q: SYSTEM_DPC_BEHAVIOR_INFORMATION; s: SYSTEM_DPC_BEHAVIOR_INFORMATION (requires SeLoadDriverPrivilege)
-    SystemFullMemoryInformation, // not implemented
+    SystemFullMemoryInformation, // not implemented // SYSTEM_MEMORY_USAGE_INFORMATION
     SystemLoadGdiDriverInformation, // s (kernel-mode only)
     SystemUnloadGdiDriverInformation, // s (kernel-mode only)
     SystemTimeAdjustmentInformation, // q: SYSTEM_QUERY_TIME_ADJUST_INFORMATION; s: SYSTEM_SET_TIME_ADJUST_INFORMATION (requires SeSystemtimePrivilege)
-    SystemSummaryMemoryInformation, // not implemented
+    SystemSummaryMemoryInformation, // not implemented // SYSTEM_MEMORY_USAGE_INFORMATION
     SystemMirrorMemoryInformation, // s (requires license value "Kernel-MemoryMirroringSupported") (requires SeShutdownPrivilege) // 30
     SystemPerformanceTraceInformation, // q; s: (type depends on EVENT_TRACE_INFORMATION_CLASS)
     SystemObsolete0, // not implemented
     SystemExceptionInformation, // q: SYSTEM_EXCEPTION_INFORMATION
-    SystemCrashDumpStateInformation, // s (requires SeDebugPrivilege)
+    SystemCrashDumpStateInformation, // s: SYSTEM_CRASH_DUMP_STATE_INFORMATION (requires SeDebugPrivilege)
     SystemKernelDebuggerInformation, // q: SYSTEM_KERNEL_DEBUGGER_INFORMATION
     SystemContextSwitchInformation, // q: SYSTEM_CONTEXT_SWITCH_INFORMATION
     SystemRegistryQuotaInformation, // q: SYSTEM_REGISTRY_QUOTA_INFORMATION; s (requires SeIncreaseQuotaPrivilege)
@@ -1281,11 +1392,11 @@ typedef enum _SYSTEM_INFORMATION_CLASS
     SystemPrioritySeperation, // s (requires SeTcbPrivilege)
     SystemVerifierAddDriverInformation, // s (requires SeDebugPrivilege) // 40
     SystemVerifierRemoveDriverInformation, // s (requires SeDebugPrivilege)
-    SystemProcessorIdleInformation, // q: SYSTEM_PROCESSOR_IDLE_INFORMATION
+    SystemProcessorIdleInformation, // q: SYSTEM_PROCESSOR_IDLE_INFORMATION (EX in: USHORT ProcessorGroup)
     SystemLegacyDriverInformation, // q: SYSTEM_LEGACY_DRIVER_INFORMATION
     SystemCurrentTimeZoneInformation, // q; s: RTL_TIME_ZONE_INFORMATION
     SystemLookasideInformation, // q: SYSTEM_LOOKASIDE_INFORMATION
-    SystemTimeSlipNotification, // s (requires SeSystemtimePrivilege)
+    SystemTimeSlipNotification, // s: HANDLE (NtCreateEvent) (requires SeSystemtimePrivilege)
     SystemSessionCreate, // not implemented
     SystemSessionDetach, // not implemented
     SystemSessionInformation, // not implemented (SYSTEM_SESSION_INFORMATION)
@@ -1293,16 +1404,16 @@ typedef enum _SYSTEM_INFORMATION_CLASS
     SystemVerifierInformation, // q: SYSTEM_VERIFIER_INFORMATION; s (requires SeDebugPrivilege)
     SystemVerifierThunkExtend, // s (kernel-mode only)
     SystemSessionProcessInformation, // q: SYSTEM_SESSION_PROCESS_INFORMATION
-    SystemLoadGdiDriverInSystemSpace, // s (kernel-mode only) (same as SystemLoadGdiDriverInformation)
-    SystemNumaProcessorMap, // q
-    SystemPrefetcherInformation, // q: PREFETCHER_INFORMATION; s: PREFETCHER_INFORMATION // PfSnQueryPrefetcherInformation
+    SystemLoadGdiDriverInSystemSpace, // s: SYSTEM_GDI_DRIVER_INFORMATION (kernel-mode only) (same as SystemLoadGdiDriverInformation)
+    SystemNumaProcessorMap, // q: SYSTEM_NUMA_INFORMATION
+    SystemPrefetcherInformation, // q; s: PREFETCHER_INFORMATION // PfSnQueryPrefetcherInformation
     SystemExtendedProcessInformation, // q: SYSTEM_PROCESS_INFORMATION
-    SystemRecommendedSharedDataAlignment, // q
-    SystemComPlusPackage, // q; s
-    SystemNumaAvailableMemory, // 60
-    SystemProcessorPowerInformation, // q: SYSTEM_PROCESSOR_POWER_INFORMATION
-    SystemEmulationBasicInformation,
-    SystemEmulationProcessorInformation,
+    SystemRecommendedSharedDataAlignment, // q: ULONG // KeGetRecommendedSharedDataAlignment
+    SystemComPlusPackage, // q; s: ULONG
+    SystemNumaAvailableMemory, // q: SYSTEM_NUMA_INFORMATION // 60
+    SystemProcessorPowerInformation, // q: SYSTEM_PROCESSOR_POWER_INFORMATION (EX in: USHORT ProcessorGroup)
+    SystemEmulationBasicInformation, // q: SYSTEM_BASIC_INFORMATION
+    SystemEmulationProcessorInformation, // q: SYSTEM_PROCESSOR_INFORMATION
     SystemExtendedHandleInformation, // q: SYSTEM_HANDLE_INFORMATION_EX
     SystemLostDelayedWriteInformation, // q: ULONG
     SystemBigPoolInformation, // q: SYSTEM_BIGPOOL_INFORMATION
@@ -1310,11 +1421,11 @@ typedef enum _SYSTEM_INFORMATION_CLASS
     SystemSessionMappedViewInformation, // q: SYSTEM_SESSION_MAPPED_VIEW_INFORMATION
     SystemHotpatchInformation, // q; s: SYSTEM_HOTPATCH_CODE_INFORMATION
     SystemObjectSecurityMode, // q: ULONG // 70
-    SystemWatchdogTimerHandler, // s (kernel-mode only)
-    SystemWatchdogTimerInformation, // q (kernel-mode only); s (kernel-mode only)
-    SystemLogicalProcessorInformation, // q: SYSTEM_LOGICAL_PROCESSOR_INFORMATION
+    SystemWatchdogTimerHandler, // s: SYSTEM_WATCHDOG_HANDLER_INFORMATION // (kernel-mode only)
+    SystemWatchdogTimerInformation, // q: SYSTEM_WATCHDOG_TIMER_INFORMATION // (kernel-mode only)
+    SystemLogicalProcessorInformation, // q: SYSTEM_LOGICAL_PROCESSOR_INFORMATION (EX in: USHORT ProcessorGroup)
     SystemWow64SharedInformationObsolete, // not implemented
-    SystemRegisterFirmwareTableInformationHandler, // s (kernel-mode only)
+    SystemRegisterFirmwareTableInformationHandler, // s: SYSTEM_FIRMWARE_TABLE_HANDLER // (kernel-mode only)
     SystemFirmwareTableInformation, // SYSTEM_FIRMWARE_TABLE_INFORMATION
     SystemModuleInformationEx, // q: RTL_PROCESS_MODULE_INFORMATION_EX
     SystemVerifierTriageInformation, // not implemented
@@ -1322,66 +1433,66 @@ typedef enum _SYSTEM_INFORMATION_CLASS
     SystemMemoryListInformation, // q: SYSTEM_MEMORY_LIST_INFORMATION; s: SYSTEM_MEMORY_LIST_COMMAND (requires SeProfileSingleProcessPrivilege) // 80
     SystemFileCacheInformationEx, // q: SYSTEM_FILECACHE_INFORMATION; s (requires SeIncreaseQuotaPrivilege) (same as SystemFileCacheInformation)
     SystemThreadPriorityClientIdInformation, // s: SYSTEM_THREAD_CID_PRIORITY_INFORMATION (requires SeIncreaseBasePriorityPrivilege)
-    SystemProcessorIdleCycleTimeInformation, // q: SYSTEM_PROCESSOR_IDLE_CYCLE_TIME_INFORMATION[]
-    SystemVerifierCancellationInformation, // not implemented // name:wow64:whNT32QuerySystemVerifierCancellationInformation
+    SystemProcessorIdleCycleTimeInformation, // q: SYSTEM_PROCESSOR_IDLE_CYCLE_TIME_INFORMATION[] (EX in: USHORT ProcessorGroup)
+    SystemVerifierCancellationInformation, // SYSTEM_VERIFIER_CANCELLATION_INFORMATION // name:wow64:whNT32QuerySystemVerifierCancellationInformation
     SystemProcessorPowerInformationEx, // not implemented
     SystemRefTraceInformation, // q; s: SYSTEM_REF_TRACE_INFORMATION // ObQueryRefTraceInformation
-    SystemSpecialPoolInformation, // q; s (requires SeDebugPrivilege) // MmSpecialPoolTag, then MmSpecialPoolCatchOverruns != 0
+    SystemSpecialPoolInformation, // q; s: SYSTEM_SPECIAL_POOL_INFORMATION (requires SeDebugPrivilege) // MmSpecialPoolTag, then MmSpecialPoolCatchOverruns != 0
     SystemProcessIdInformation, // q: SYSTEM_PROCESS_ID_INFORMATION
     SystemErrorPortInformation, // s (requires SeTcbPrivilege)
     SystemBootEnvironmentInformation, // q: SYSTEM_BOOT_ENVIRONMENT_INFORMATION // 90
-    SystemHypervisorInformation, // q; s (kernel-mode only)
+    SystemHypervisorInformation, // q: SYSTEM_HYPERVISOR_QUERY_INFORMATION
     SystemVerifierInformationEx, // q; s: SYSTEM_VERIFIER_INFORMATION_EX
-    SystemTimeZoneInformation, // s (requires SeTimeZonePrivilege)
+    SystemTimeZoneInformation, // q; s: RTL_TIME_ZONE_INFORMATION (requires SeTimeZonePrivilege)
     SystemImageFileExecutionOptionsInformation, // s: SYSTEM_IMAGE_FILE_EXECUTION_OPTIONS_INFORMATION (requires SeTcbPrivilege)
-    SystemCoverageInformation, // q; s // name:wow64:whNT32QuerySystemCoverageInformation; ExpCovQueryInformation
-    SystemPrefetchPatchInformation, // not implemented
-    SystemVerifierFaultsInformation, // s (requires SeDebugPrivilege)
+    SystemCoverageInformation, // q: COVERAGE_MODULES s: COVERAGE_MODULE_REQUEST // ExpCovQueryInformation (requires SeDebugPrivilege)
+    SystemPrefetchPatchInformation, // SYSTEM_PREFETCH_PATCH_INFORMATION
+    SystemVerifierFaultsInformation, // s: SYSTEM_VERIFIER_FAULTS_INFORMATION (requires SeDebugPrivilege)
     SystemSystemPartitionInformation, // q: SYSTEM_SYSTEM_PARTITION_INFORMATION
     SystemSystemDiskInformation, // q: SYSTEM_SYSTEM_DISK_INFORMATION
-    SystemProcessorPerformanceDistribution, // q: SYSTEM_PROCESSOR_PERFORMANCE_DISTRIBUTION // 100
-    SystemNumaProximityNodeInformation,
-    SystemDynamicTimeZoneInformation, // q; s (requires SeTimeZonePrivilege)
+    SystemProcessorPerformanceDistribution, // q: SYSTEM_PROCESSOR_PERFORMANCE_DISTRIBUTION (EX in: USHORT ProcessorGroup) // 100
+    SystemNumaProximityNodeInformation, // q; s: SYSTEM_NUMA_PROXIMITY_MAP
+    SystemDynamicTimeZoneInformation, // q; s: RTL_DYNAMIC_TIME_ZONE_INFORMATION (requires SeTimeZonePrivilege)
     SystemCodeIntegrityInformation, // q: SYSTEM_CODEINTEGRITY_INFORMATION // SeCodeIntegrityQueryInformation
-    SystemProcessorMicrocodeUpdateInformation, // s
-    SystemProcessorBrandString, // q // HaliQuerySystemInformation -> HalpGetProcessorBrandString, info class 23
+    SystemProcessorMicrocodeUpdateInformation, // s: SYSTEM_PROCESSOR_MICROCODE_UPDATE_INFORMATION
+    SystemProcessorBrandString, // q: CHAR[] // HaliQuerySystemInformation -> HalpGetProcessorBrandString, info class 23
     SystemVirtualAddressInformation, // q: SYSTEM_VA_LIST_INFORMATION[]; s: SYSTEM_VA_LIST_INFORMATION[] (requires SeIncreaseQuotaPrivilege) // MmQuerySystemVaInformation
-    SystemLogicalProcessorAndGroupInformation, // q: SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX // since WIN7 // KeQueryLogicalProcessorRelationship
-    SystemProcessorCycleTimeInformation, // q: SYSTEM_PROCESSOR_CYCLE_TIME_INFORMATION[]
-    SystemStoreInformation, // q; s: SYSTEM_STORE_INFORMATION // SmQueryStoreInformation
+    SystemLogicalProcessorAndGroupInformation, // q: SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX (EX in: LOGICAL_PROCESSOR_RELATIONSHIP RelationshipType) // since WIN7 // KeQueryLogicalProcessorRelationship
+    SystemProcessorCycleTimeInformation, // q: SYSTEM_PROCESSOR_CYCLE_TIME_INFORMATION[] (EX in: USHORT ProcessorGroup)
+    SystemStoreInformation, // q; s: SYSTEM_STORE_INFORMATION (requires SeProfileSingleProcessPrivilege) // SmQueryStoreInformation
     SystemRegistryAppendString, // s: SYSTEM_REGISTRY_APPEND_STRING_PARAMETERS // 110
     SystemAitSamplingValue, // s: ULONG (requires SeProfileSingleProcessPrivilege)
     SystemVhdBootInformation, // q: SYSTEM_VHD_BOOT_INFORMATION
-    SystemCpuQuotaInformation, // q; s // PsQueryCpuQuotaInformation
-    SystemNativeBasicInformation, // not implemented
-    SystemSpare1, // not implemented
+    SystemCpuQuotaInformation, // q; s: PS_CPU_QUOTA_QUERY_INFORMATION
+    SystemNativeBasicInformation, // q: SYSTEM_BASIC_INFORMATION
+    SystemErrorPortTimeouts, // SYSTEM_ERROR_PORT_TIMEOUTS
     SystemLowPriorityIoInformation, // q: SYSTEM_LOW_PRIORITY_IO_INFORMATION
     SystemTpmBootEntropyInformation, // q: TPM_BOOT_ENTROPY_NT_RESULT // ExQueryTpmBootEntropyInformation
     SystemVerifierCountersInformation, // q: SYSTEM_VERIFIER_COUNTERS_INFORMATION
     SystemPagedPoolInformationEx, // q: SYSTEM_FILECACHE_INFORMATION; s (requires SeIncreaseQuotaPrivilege) (info for WorkingSetTypePagedPool)
     SystemSystemPtesInformationEx, // q: SYSTEM_FILECACHE_INFORMATION; s (requires SeIncreaseQuotaPrivilege) (info for WorkingSetTypeSystemPtes) // 120
-    SystemNodeDistanceInformation,
+    SystemNodeDistanceInformation, // q: USHORT[4*NumaNodes] // (EX in: USHORT NodeNumber)
     SystemAcpiAuditInformation, // q: SYSTEM_ACPI_AUDIT_INFORMATION // HaliQuerySystemInformation -> HalpAuditQueryResults, info class 26
     SystemBasicPerformanceInformation, // q: SYSTEM_BASIC_PERFORMANCE_INFORMATION // name:wow64:whNtQuerySystemInformation_SystemBasicPerformanceInformation
     SystemQueryPerformanceCounterInformation, // q: SYSTEM_QUERY_PERFORMANCE_COUNTER_INFORMATION // since WIN7 SP1
     SystemSessionBigPoolInformation, // q: SYSTEM_SESSION_POOLTAG_INFORMATION // since WIN8
     SystemBootGraphicsInformation, // q; s: SYSTEM_BOOT_GRAPHICS_INFORMATION (kernel-mode only)
     SystemScrubPhysicalMemoryInformation, // q; s: MEMORY_SCRUB_INFORMATION
-    SystemBadPageInformation,
+    SystemBadPageInformation, // SYSTEM_BAD_PAGE_INFORMATION
     SystemProcessorProfileControlArea, // q; s: SYSTEM_PROCESSOR_PROFILE_CONTROL_AREA
     SystemCombinePhysicalMemoryInformation, // s: MEMORY_COMBINE_INFORMATION, MEMORY_COMBINE_INFORMATION_EX, MEMORY_COMBINE_INFORMATION_EX2 // 130
-    SystemEntropyInterruptTimingCallback,
-    SystemConsoleInformation, // q: SYSTEM_CONSOLE_INFORMATION
-    SystemPlatformBinaryInformation, // q: SYSTEM_PLATFORM_BINARY_INFORMATION
-    SystemThrottleNotificationInformation,
+    SystemEntropyInterruptTimingInformation, // q; s: SYSTEM_ENTROPY_TIMING_INFORMATION
+    SystemConsoleInformation, // q; s: SYSTEM_CONSOLE_INFORMATION
+    SystemPlatformBinaryInformation, // q: SYSTEM_PLATFORM_BINARY_INFORMATION (requires SeTcbPrivilege)
+    SystemPolicyInformation, // q: SYSTEM_POLICY_INFORMATION (Warbird/Encrypt/Decrypt/Execute)
     SystemHypervisorProcessorCountInformation, // q: SYSTEM_HYPERVISOR_PROCESSOR_COUNT_INFORMATION
     SystemDeviceDataInformation, // q: SYSTEM_DEVICE_DATA_INFORMATION
-    SystemDeviceDataEnumerationInformation,
+    SystemDeviceDataEnumerationInformation, // q: SYSTEM_DEVICE_DATA_INFORMATION
     SystemMemoryTopologyInformation, // q: SYSTEM_MEMORY_TOPOLOGY_INFORMATION
     SystemMemoryChannelInformation, // q: SYSTEM_MEMORY_CHANNEL_INFORMATION
     SystemBootLogoInformation, // q: SYSTEM_BOOT_LOGO_INFORMATION // 140
-    SystemProcessorPerformanceInformationEx, // q: SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION_EX // since WINBLUE
-    SystemSpare0,
+    SystemProcessorPerformanceInformationEx, // q: SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION_EX // (EX in: USHORT ProcessorGroup) // since WINBLUE
+    SystemCriticalProcessErrorLogInformation,
     SystemSecureBootPolicyInformation, // q: SYSTEM_SECUREBOOT_POLICY_INFORMATION
     SystemPageFileInformationEx, // q: SYSTEM_PAGEFILE_INFORMATION_EX
     SystemSecureBootInformation, // q: SYSTEM_SECUREBOOT_INFORMATION
@@ -1392,39 +1503,39 @@ typedef enum _SYSTEM_INFORMATION_CLASS
     SystemBootMetadataInformation, // 150
     SystemSoftRebootInformation, // q: ULONG
     SystemElamCertificateInformation, // s: SYSTEM_ELAM_CERTIFICATE_INFORMATION
-    SystemOfflineDumpConfigInformation,
+    SystemOfflineDumpConfigInformation, // q: OFFLINE_CRASHDUMP_CONFIGURATION_TABLE_V2
     SystemProcessorFeaturesInformation, // q: SYSTEM_PROCESSOR_FEATURES_INFORMATION
-    SystemRegistryReconciliationInformation,
-    SystemEdidInformation,
+    SystemRegistryReconciliationInformation, // s: NULL (requires admin) (flushes registry hives)
+    SystemEdidInformation, // q: SYSTEM_EDID_INFORMATION
     SystemManufacturingInformation, // q: SYSTEM_MANUFACTURING_INFORMATION // since THRESHOLD
     SystemEnergyEstimationConfigInformation, // q: SYSTEM_ENERGY_ESTIMATION_CONFIG_INFORMATION
     SystemHypervisorDetailInformation, // q: SYSTEM_HYPERVISOR_DETAIL_INFORMATION
-    SystemProcessorCycleStatsInformation, // q: SYSTEM_PROCESSOR_CYCLE_STATS_INFORMATION // 160
+    SystemProcessorCycleStatsInformation, // q: SYSTEM_PROCESSOR_CYCLE_STATS_INFORMATION (EX in: USHORT ProcessorGroup) // 160
     SystemVmGenerationCountInformation,
     SystemTrustedPlatformModuleInformation, // q: SYSTEM_TPM_INFORMATION
     SystemKernelDebuggerFlags, // SYSTEM_KERNEL_DEBUGGER_FLAGS
-    SystemCodeIntegrityPolicyInformation, // q: SYSTEM_CODEINTEGRITYPOLICY_INFORMATION
+    SystemCodeIntegrityPolicyInformation, // q; s: SYSTEM_CODEINTEGRITYPOLICY_INFORMATION
     SystemIsolatedUserModeInformation, // q: SYSTEM_ISOLATED_USER_MODE_INFORMATION
     SystemHardwareSecurityTestInterfaceResultsInformation,
     SystemSingleModuleInformation, // q: SYSTEM_SINGLE_MODULE_INFORMATION
-    SystemAllowedCpuSetsInformation,
+    SystemAllowedCpuSetsInformation, // s: SYSTEM_WORKLOAD_ALLOWED_CPU_SET_INFORMATION
     SystemVsmProtectionInformation, // q: SYSTEM_VSM_PROTECTION_INFORMATION (previously SystemDmaProtectionInformation)
     SystemInterruptCpuSetsInformation, // q: SYSTEM_INTERRUPT_CPU_SET_INFORMATION // 170
     SystemSecureBootPolicyFullInformation, // q: SYSTEM_SECUREBOOT_POLICY_FULL_INFORMATION
     SystemCodeIntegrityPolicyFullInformation,
-    SystemAffinitizedInterruptProcessorInformation,
+    SystemAffinitizedInterruptProcessorInformation, // (requires SeIncreaseBasePriorityPrivilege)
     SystemRootSiloInformation, // q: SYSTEM_ROOT_SILO_INFORMATION
     SystemCpuSetInformation, // q: SYSTEM_CPU_SET_INFORMATION // since THRESHOLD2
     SystemCpuSetTagInformation, // q: SYSTEM_CPU_SET_TAG_INFORMATION
     SystemWin32WerStartCallout,
     SystemSecureKernelProfileInformation, // q: SYSTEM_SECURE_KERNEL_HYPERGUARD_PROFILE_INFORMATION
     SystemCodeIntegrityPlatformManifestInformation, // q: SYSTEM_SECUREBOOT_PLATFORM_MANIFEST_INFORMATION // since REDSTONE
-    SystemInterruptSteeringInformation, // 180
-    SystemSupportedProcessorArchitectures,
+    SystemInterruptSteeringInformation, // q: in: SYSTEM_INTERRUPT_STEERING_INFORMATION_INPUT, out: SYSTEM_INTERRUPT_STEERING_INFORMATION_OUTPUT // NtQuerySystemInformationEx // 180
+    SystemSupportedProcessorArchitectures, // p: in opt: HANDLE, out: SYSTEM_SUPPORTED_PROCESSOR_ARCHITECTURES_INFORMATION[] // NtQuerySystemInformationEx
     SystemMemoryUsageInformation, // q: SYSTEM_MEMORY_USAGE_INFORMATION
     SystemCodeIntegrityCertificateInformation, // q: SYSTEM_CODEINTEGRITY_CERTIFICATE_INFORMATION
     SystemPhysicalMemoryInformation, // q: SYSTEM_PHYSICAL_MEMORY_INFORMATION // since REDSTONE2
-    SystemControlFlowTransition,
+    SystemControlFlowTransition, // (Warbird/Encrypt/Decrypt/Execute)
     SystemKernelDebuggingAllowed, // s: ULONG
     SystemActivityModerationExeState, // SYSTEM_ACTIVITY_MODERATION_EXE_STATE
     SystemActivityModerationUserSettings, // SYSTEM_ACTIVITY_MODERATION_USER_SETTINGS
@@ -1432,7 +1543,7 @@ typedef enum _SYSTEM_INFORMATION_CLASS
     SystemCodeIntegrityUnlockInformation, // SYSTEM_CODEINTEGRITY_UNLOCK_INFORMATION // 190
     SystemIntegrityQuotaInformation,
     SystemFlushInformation, // q: SYSTEM_FLUSH_INFORMATION
-    SystemProcessorIdleMaskInformation, // q: ULONG_PTR // since REDSTONE3
+    SystemProcessorIdleMaskInformation, // q: ULONG_PTR[ActiveGroupCount] // since REDSTONE3
     SystemSecureDumpEncryptionInformation,
     SystemWriteConstraintInformation, // SYSTEM_WRITE_CONSTRAINT_INFORMATION
     SystemKernelVaShadowInformation, // SYSTEM_KERNEL_VA_SHADOW_INFORMATION
@@ -1444,11 +1555,49 @@ typedef enum _SYSTEM_INFORMATION_CLASS
     SystemDmaGuardPolicyInformation, // SYSTEM_DMA_GUARD_POLICY_INFORMATION
     SystemEnclaveLaunchControlInformation, // SYSTEM_ENCLAVE_LAUNCH_CONTROL_INFORMATION
     SystemWorkloadAllowedCpuSetsInformation, // SYSTEM_WORKLOAD_ALLOWED_CPU_SET_INFORMATION // since REDSTONE5
-    SystemCodeIntegrityUnlockModeInformation,
+    SystemCodeIntegrityUnlockModeInformation, // SYSTEM_CODEINTEGRITY_UNLOCK_INFORMATION
     SystemLeapSecondInformation, // SYSTEM_LEAP_SECOND_INFORMATION
     SystemFlags2Information, // q: SYSTEM_FLAGS_INFORMATION
     SystemSecurityModelInformation, // SYSTEM_SECURITY_MODEL_INFORMATION // since 19H1
     SystemCodeIntegritySyntheticCacheInformation,
+    SystemFeatureConfigurationInformation, // q: in: SYSTEM_FEATURE_CONFIGURATION_QUERY, out: SYSTEM_FEATURE_CONFIGURATION_INFORMATION; s: SYSTEM_FEATURE_CONFIGURATION_UPDATE // NtQuerySystemInformationEx // since 20H1 // 210
+    SystemFeatureConfigurationSectionInformation, // q: in: SYSTEM_FEATURE_CONFIGURATION_SECTIONS_REQUEST, out: SYSTEM_FEATURE_CONFIGURATION_SECTIONS_INFORMATION // NtQuerySystemInformationEx
+    SystemFeatureUsageSubscriptionInformation, // q: SYSTEM_FEATURE_USAGE_SUBSCRIPTION_DETAILS; s: SYSTEM_FEATURE_USAGE_SUBSCRIPTION_UPDATE
+    SystemSecureSpeculationControlInformation, // SECURE_SPECULATION_CONTROL_INFORMATION
+    SystemSpacesBootInformation, // since 20H2
+    SystemFwRamdiskInformation, // SYSTEM_FIRMWARE_RAMDISK_INFORMATION
+    SystemWheaIpmiHardwareInformation,
+    SystemDifSetRuleClassInformation, // SYSTEM_DIF_VOLATILE_INFORMATION
+    SystemDifClearRuleClassInformation,
+    SystemDifApplyPluginVerificationOnDriver, // SYSTEM_DIF_PLUGIN_DRIVER_INFORMATION
+    SystemDifRemovePluginVerificationOnDriver, // SYSTEM_DIF_PLUGIN_DRIVER_INFORMATION // 220
+    SystemShadowStackInformation, // SYSTEM_SHADOW_STACK_INFORMATION
+    SystemBuildVersionInformation, // q: in: ULONG (LayerNumber), out: SYSTEM_BUILD_VERSION_INFORMATION // NtQuerySystemInformationEx // 222
+    SystemPoolLimitInformation, // SYSTEM_POOL_LIMIT_INFORMATION (requires SeIncreaseQuotaPrivilege)
+    SystemCodeIntegrityAddDynamicStore,
+    SystemCodeIntegrityClearDynamicStores,
+    SystemDifPoolTrackingInformation,
+    SystemPoolZeroingInformation, // q: SYSTEM_POOL_ZEROING_INFORMATION
+    SystemDpcWatchdogInformation, // q; s: SYSTEM_DPC_WATCHDOG_CONFIGURATION_INFORMATION
+    SystemDpcWatchdogInformation2, // q; s: SYSTEM_DPC_WATCHDOG_CONFIGURATION_INFORMATION_V2
+    SystemSupportedProcessorArchitectures2, // q: in opt: HANDLE, out: SYSTEM_SUPPORTED_PROCESSOR_ARCHITECTURES_INFORMATION[] // NtQuerySystemInformationEx // 230
+    SystemSingleProcessorRelationshipInformation, // q: SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX // (EX in: PROCESSOR_NUMBER Processor)
+    SystemXfgCheckFailureInformation, // q: SYSTEM_XFG_FAILURE_INFORMATION
+    SystemIommuStateInformation, // SYSTEM_IOMMU_STATE_INFORMATION // since 22H1
+    SystemHypervisorMinrootInformation, // SYSTEM_HYPERVISOR_MINROOT_INFORMATION
+    SystemHypervisorBootPagesInformation, // SYSTEM_HYPERVISOR_BOOT_PAGES_INFORMATION
+    SystemPointerAuthInformation, // SYSTEM_POINTER_AUTH_INFORMATION
+    SystemSecureKernelDebuggerInformation,
+    SystemOriginalImageFeatureInformation, // q: in: SYSTEM_ORIGINAL_IMAGE_FEATURE_INFORMATION_INPUT, out: SYSTEM_ORIGINAL_IMAGE_FEATURE_INFORMATION_OUTPUT // NtQuerySystemInformationEx
+    SystemMemoryNumaInformation, // SYSTEM_MEMORY_NUMA_INFORMATION_INPUT, SYSTEM_MEMORY_NUMA_INFORMATION_OUTPUT 
+    SystemMemoryNumaPerformanceInformation, // SYSTEM_MEMORY_NUMA_PERFORMANCE_INFORMATION_INPUTSYSTEM_MEMORY_NUMA_PERFORMANCE_INFORMATION_INPUT, SYSTEM_MEMORY_NUMA_PERFORMANCE_INFORMATION_OUTPUT // since 24H2 // 240
+    SystemCodeIntegritySignedPoliciesFullInformation,
+    SystemSecureSecretsInformation,
+    SystemTrustedAppsRuntimeInformation, // SYSTEM_TRUSTEDAPPS_RUNTIME_INFORMATION
+    SystemBadPageInformationEx, // SYSTEM_BAD_PAGE_INFORMATION
+    SystemResourceDeadlockTimeout, // ULONG
+    SystemBreakOnContextUnwindFailureInformation, // ULONG (requires SeDebugPrivilege)
+    SystemOslRamdiskInformation, // SYSTEM_OSL_RAMDISK_INFORMATION
     MaxSystemInfoClass
 } SYSTEM_INFORMATION_CLASS;
 
@@ -1463,7 +1612,7 @@ typedef struct _SYSTEM_BASIC_INFORMATION
     ULONG AllocationGranularity;
     ULONG_PTR MinimumUserModeAddress;
     ULONG_PTR MaximumUserModeAddress;
-    ULONG_PTR ActiveProcessorsAffinityMask;
+    KAFFINITY ActiveProcessorsAffinityMask;
     CCHAR NumberOfProcessors;
 } SYSTEM_BASIC_INFORMATION, *PSYSTEM_BASIC_INFORMATION;
 
@@ -1475,6 +1624,26 @@ typedef struct _SYSTEM_PROCESSOR_INFORMATION
     USHORT MaximumProcessors;
     ULONG ProcessorFeatureBits;
 } SYSTEM_PROCESSOR_INFORMATION, *PSYSTEM_PROCESSOR_INFORMATION;
+
+// ProcessorFeatureBits // ksamd64
+#define KF_RDTSC 0x0000000000000002
+#define KF_CR4 0x0000000000000004
+#define KF_GLOBAL_PAGE 0x0000000000000010
+#define KF_LARGE_PAGE 0x0000000000000020
+#define KF_CMPXCHG8B 0x0000000000000080
+#define KF_FAST_SYSCALL 0x0000000000001000
+#define KF_BRANCH 0x0000000000020000
+#define KF_XSTATE 0x0000000000800000
+#define KF_RDTSCP 0x0000000400000000
+#define KF_CET_SS 0x0000400000000000
+#define KF_XFD 0x0080000000000000
+#define KF_XSAVEOPT_BIT 0x0F
+#define KF_XSTATE_BIT 0x17
+#define KF_RDWRFSGSBASE_BIT 0x1C
+#define KF_XSAVES_BIT 0x26
+#define KF_FPU_LEAKAGE_BIT 0x29
+#define KF_CAT_BIT 0x2C
+#define KF_XFD_BIT 0x37
 
 typedef struct _SYSTEM_PERFORMANCE_INFORMATION
 {
@@ -1575,10 +1744,10 @@ typedef struct _SYSTEM_THREAD_INFORMATION
     LARGE_INTEGER UserTime;
     LARGE_INTEGER CreateTime;
     ULONG WaitTime;
-    PVOID StartAddress;
+    ULONG_PTR StartAddress;
     CLIENT_ID ClientId;
     KPRIORITY Priority;
-    LONG BasePriority;
+    KPRIORITY BasePriority;
     ULONG ContextSwitches;
     KTHREAD_STATE ThreadState;
     KWAIT_REASON WaitReason;
@@ -1592,7 +1761,7 @@ typedef struct _SYSTEM_EXTENDED_THREAD_INFORMATION
     SYSTEM_THREAD_INFORMATION ThreadInfo;
     PVOID StackBase;
     PVOID StackLimit;
-    PVOID Win32StartAddress;
+    ULONG_PTR Win32StartAddress;
     PTEB TebBase; // since VISTA
     ULONG_PTR Reserved2;
     ULONG_PTR Reserved3;
@@ -1698,7 +1867,7 @@ typedef struct _RTL_PROCESS_LOCK_INFORMATION
 typedef struct _RTL_PROCESS_LOCKS
 {
     ULONG NumberOfLocks;
-    RTL_PROCESS_LOCK_INFORMATION Locks[1];
+    _Field_size_(NumberOfLocks) RTL_PROCESS_LOCK_INFORMATION Locks[1];
 } RTL_PROCESS_LOCKS, *PRTL_PROCESS_LOCKS;
 
 // private
@@ -1718,7 +1887,7 @@ typedef struct _RTL_PROCESS_BACKTRACES
     ULONG ReservedMemory;
     ULONG NumberOfBackTraceLookups;
     ULONG NumberOfBackTraces;
-    RTL_PROCESS_BACKTRACE_INFORMATION BackTraces[1];
+    _Field_size_(NumberOfBackTraces) RTL_PROCESS_BACKTRACE_INFORMATION BackTraces[1];
 } RTL_PROCESS_BACKTRACES, *PRTL_PROCESS_BACKTRACES;
 
 typedef struct _SYSTEM_HANDLE_TABLE_ENTRY_INFO
@@ -1735,7 +1904,7 @@ typedef struct _SYSTEM_HANDLE_TABLE_ENTRY_INFO
 typedef struct _SYSTEM_HANDLE_INFORMATION
 {
     ULONG NumberOfHandles;
-    SYSTEM_HANDLE_TABLE_ENTRY_INFO Handles[1];
+    _Field_size_(NumberOfHandles) SYSTEM_HANDLE_TABLE_ENTRY_INFO Handles[1];
 } SYSTEM_HANDLE_INFORMATION, *PSYSTEM_HANDLE_INFORMATION;
 
 typedef struct _SYSTEM_OBJECTTYPE_INFORMATION
@@ -1777,6 +1946,44 @@ typedef struct _SYSTEM_PAGEFILE_INFORMATION
     ULONG PeakUsage;
     UNICODE_STRING PageFileName;
 } SYSTEM_PAGEFILE_INFORMATION, *PSYSTEM_PAGEFILE_INFORMATION;
+
+typedef struct _SYSTEM_VDM_INSTEMUL_INFO
+{
+    ULONG SegmentNotPresent;
+    ULONG VdmOpcode0F;
+    ULONG OpcodeESPrefix;
+    ULONG OpcodeCSPrefix;
+    ULONG OpcodeSSPrefix;
+    ULONG OpcodeDSPrefix;
+    ULONG OpcodeFSPrefix;
+    ULONG OpcodeGSPrefix;
+    ULONG OpcodeOPER32Prefix;
+    ULONG OpcodeADDR32Prefix;
+    ULONG OpcodeINSB;
+    ULONG OpcodeINSW;
+    ULONG OpcodeOUTSB;
+    ULONG OpcodeOUTSW;
+    ULONG OpcodePUSHF;
+    ULONG OpcodePOPF;
+    ULONG OpcodeINTnn;
+    ULONG OpcodeINTO;
+    ULONG OpcodeIRET;
+    ULONG OpcodeINBimm;
+    ULONG OpcodeINWimm;
+    ULONG OpcodeOUTBimm;
+    ULONG OpcodeOUTWimm;
+    ULONG OpcodeINB;
+    ULONG OpcodeINW;
+    ULONG OpcodeOUTB;
+    ULONG OpcodeOUTW;
+    ULONG OpcodeLOCKPrefix;
+    ULONG OpcodeREPNEPrefix;
+    ULONG OpcodeREPPrefix;
+    ULONG OpcodeHLT;
+    ULONG OpcodeCLI;
+    ULONG OpcodeSTI;
+    ULONG BopCount;
+} SYSTEM_VDM_INSTEMUL_INFO, *PSYSTEM_VDM_INSTEMUL_INFO;
 
 #define MM_WORKING_SET_MAX_HARD_ENABLE 0x1
 #define MM_WORKING_SET_MAX_HARD_DISABLE 0x2
@@ -1822,7 +2029,7 @@ typedef struct _SYSTEM_POOLTAG
 typedef struct _SYSTEM_POOLTAG_INFORMATION
 {
     ULONG Count;
-    SYSTEM_POOLTAG TagInfo[1];
+    _Field_size_(Count) SYSTEM_POOLTAG TagInfo[1];
 } SYSTEM_POOLTAG_INFORMATION, *PSYSTEM_POOLTAG_INFORMATION;
 
 typedef struct _SYSTEM_INTERRUPT_INFORMATION
@@ -1870,184 +2077,6 @@ typedef struct _SYSTEM_SET_TIME_ADJUST_INFORMATION_PRECISE
     BOOLEAN Enable;
 } SYSTEM_SET_TIME_ADJUST_INFORMATION_PRECISE, *PSYSTEM_SET_TIME_ADJUST_INFORMATION_PRECISE;
 
-typedef enum _EVENT_TRACE_INFORMATION_CLASS
-{
-    EventTraceKernelVersionInformation, // EVENT_TRACE_VERSION_INFORMATION
-    EventTraceGroupMaskInformation, // EVENT_TRACE_GROUPMASK_INFORMATION
-    EventTracePerformanceInformation, // EVENT_TRACE_PERFORMANCE_INFORMATION
-    EventTraceTimeProfileInformation, // EVENT_TRACE_TIME_PROFILE_INFORMATION
-    EventTraceSessionSecurityInformation, // EVENT_TRACE_SESSION_SECURITY_INFORMATION
-    EventTraceSpinlockInformation, // EVENT_TRACE_SPINLOCK_INFORMATION
-    EventTraceStackTracingInformation, // EVENT_TRACE_SYSTEM_EVENT_INFORMATION
-    EventTraceExecutiveResourceInformation, // EVENT_TRACE_EXECUTIVE_RESOURCE_INFORMATION
-    EventTraceHeapTracingInformation, // EVENT_TRACE_HEAP_TRACING_INFORMATION
-    EventTraceHeapSummaryTracingInformation, // EVENT_TRACE_HEAP_TRACING_INFORMATION
-    EventTracePoolTagFilterInformation, // EVENT_TRACE_TAG_FILTER_INFORMATION
-    EventTracePebsTracingInformation, // EVENT_TRACE_SYSTEM_EVENT_INFORMATION 
-    EventTraceProfileConfigInformation, // EVENT_TRACE_PROFILE_COUNTER_INFORMATION
-    EventTraceProfileSourceListInformation, // EVENT_TRACE_PROFILE_LIST_INFORMATION
-    EventTraceProfileEventListInformation, // EVENT_TRACE_SYSTEM_EVENT_INFORMATION 
-    EventTraceProfileCounterListInformation, // EVENT_TRACE_PROFILE_COUNTER_INFORMATION 
-    EventTraceStackCachingInformation, // EVENT_TRACE_STACK_CACHING_INFORMATION
-    EventTraceObjectTypeFilterInformation, // EVENT_TRACE_TAG_FILTER_INFORMATION
-    EventTraceSoftRestartInformation, // EVENT_TRACE_SOFT_RESTART_INFORMATION
-    EventTraceLastBranchConfigurationInformation, // REDSTONE3
-    EventTraceLastBranchEventListInformation,
-    EventTraceProfileSourceAddInformation, // EVENT_TRACE_PROFILE_ADD_INFORMATION // REDSTONE4
-    EventTraceProfileSourceRemoveInformation, // EVENT_TRACE_PROFILE_REMOVE_INFORMATION
-    EventTraceProcessorTraceConfigurationInformation,
-    EventTraceProcessorTraceEventListInformation,
-    EventTraceCoverageSamplerInformation, // EVENT_TRACE_COVERAGE_SAMPLER_INFORMATION
-    MaxEventTraceInfoClass
-} EVENT_TRACE_INFORMATION_CLASS;
-
-typedef struct _EVENT_TRACE_VERSION_INFORMATION
-{
-    EVENT_TRACE_INFORMATION_CLASS EventTraceInformationClass;
-    ULONG EventTraceKernelVersion;
-} EVENT_TRACE_VERSION_INFORMATION, *PEVENT_TRACE_VERSION_INFORMATION;
-
-typedef struct _PERFINFO_GROUPMASK
-{
-    ULONG Masks[8];
-} PERFINFO_GROUPMASK, *PPERFINFO_GROUPMASK;
-
-typedef struct _EVENT_TRACE_GROUPMASK_INFORMATION
-{
-    EVENT_TRACE_INFORMATION_CLASS EventTraceInformationClass;
-    HANDLE TraceHandle;
-    PERFINFO_GROUPMASK EventTraceGroupMasks;
-} EVENT_TRACE_GROUPMASK_INFORMATION, *PEVENT_TRACE_GROUPMASK_INFORMATION;
-
-typedef struct _EVENT_TRACE_PERFORMANCE_INFORMATION
-{
-    EVENT_TRACE_INFORMATION_CLASS EventTraceInformationClass;
-    LARGE_INTEGER LogfileBytesWritten;
-} EVENT_TRACE_PERFORMANCE_INFORMATION, *PEVENT_TRACE_PERFORMANCE_INFORMATION;
-
-typedef struct _EVENT_TRACE_TIME_PROFILE_INFORMATION
-{
-    EVENT_TRACE_INFORMATION_CLASS EventTraceInformationClass;
-    ULONG ProfileInterval;
-} EVENT_TRACE_TIME_PROFILE_INFORMATION, *PEVENT_TRACE_TIME_PROFILE_INFORMATION;
-
-typedef struct _EVENT_TRACE_SESSION_SECURITY_INFORMATION
-{
-    EVENT_TRACE_INFORMATION_CLASS EventTraceInformationClass;
-    ULONG SecurityInformation;
-    HANDLE TraceHandle;
-    UCHAR SecurityDescriptor[1];
-} EVENT_TRACE_SESSION_SECURITY_INFORMATION, *PEVENT_TRACE_SESSION_SECURITY_INFORMATION;
-
-typedef struct _EVENT_TRACE_SPINLOCK_INFORMATION
-{
-    EVENT_TRACE_INFORMATION_CLASS EventTraceInformationClass;
-    ULONG SpinLockSpinThreshold;
-    ULONG SpinLockAcquireSampleRate;
-    ULONG SpinLockContentionSampleRate;
-    ULONG SpinLockHoldThreshold;
-} EVENT_TRACE_SPINLOCK_INFORMATION, *PEVENT_TRACE_SPINLOCK_INFORMATION;
-
-typedef struct _EVENT_TRACE_SYSTEM_EVENT_INFORMATION
-{
-    EVENT_TRACE_INFORMATION_CLASS EventTraceInformationClass;
-    HANDLE TraceHandle;
-    ULONG HookId[1];
-} EVENT_TRACE_SYSTEM_EVENT_INFORMATION, *PEVENT_TRACE_SYSTEM_EVENT_INFORMATION;
-
-typedef struct _EVENT_TRACE_EXECUTIVE_RESOURCE_INFORMATION
-{
-    EVENT_TRACE_INFORMATION_CLASS EventTraceInformationClass;
-    ULONG ReleaseSamplingRate;
-    ULONG ContentionSamplingRate;
-    ULONG NumberOfExcessiveTimeouts;
-} EVENT_TRACE_EXECUTIVE_RESOURCE_INFORMATION, *PEVENT_TRACE_EXECUTIVE_RESOURCE_INFORMATION;
-
-typedef struct _EVENT_TRACE_HEAP_TRACING_INFORMATION
-{
-    EVENT_TRACE_INFORMATION_CLASS EventTraceInformationClass;
-    ULONG ProcessId;
-} EVENT_TRACE_HEAP_TRACING_INFORMATION, *PEVENT_TRACE_HEAP_TRACING_INFORMATION;
-
-typedef struct _EVENT_TRACE_TAG_FILTER_INFORMATION
-{
-    EVENT_TRACE_INFORMATION_CLASS EventTraceInformationClass;
-    HANDLE TraceHandle;
-    ULONG Filter[1];
-} EVENT_TRACE_TAG_FILTER_INFORMATION, *PEVENT_TRACE_TAG_FILTER_INFORMATION;
-
-typedef struct _EVENT_TRACE_PROFILE_COUNTER_INFORMATION
-{
-    EVENT_TRACE_INFORMATION_CLASS EventTraceInformationClass;
-    HANDLE TraceHandle;
-    ULONG ProfileSource[1];
-} EVENT_TRACE_PROFILE_COUNTER_INFORMATION, *PEVENT_TRACE_PROFILE_COUNTER_INFORMATION;
-
-//typedef struct _PROFILE_SOURCE_INFO
-//{
-//    ULONG NextEntryOffset;
-//    ULONG Source;
-//    ULONG MinInterval;
-//    ULONG MaxInterval;
-//    PVOID Reserved;
-//    WCHAR Description[1];
-//} PROFILE_SOURCE_INFO, *PPROFILE_SOURCE_INFO;
-
-typedef struct _EVENT_TRACE_PROFILE_LIST_INFORMATION
-{
-    EVENT_TRACE_INFORMATION_CLASS EventTraceInformationClass;
-    ULONG Spare;
-    struct _PROFILE_SOURCE_INFO* Profile[1];
-} EVENT_TRACE_PROFILE_LIST_INFORMATION, *PEVENT_TRACE_PROFILE_LIST_INFORMATION;
-
-typedef struct _EVENT_TRACE_STACK_CACHING_INFORMATION
-{
-    EVENT_TRACE_INFORMATION_CLASS EventTraceInformationClass;
-    HANDLE TraceHandle;
-    BOOLEAN Enabled;
-    UCHAR Reserved[3];
-    ULONG CacheSize;
-    ULONG BucketCount;
-} EVENT_TRACE_STACK_CACHING_INFORMATION, *PEVENT_TRACE_STACK_CACHING_INFORMATION;
-
-typedef struct _EVENT_TRACE_SOFT_RESTART_INFORMATION
-{
-    EVENT_TRACE_INFORMATION_CLASS EventTraceInformationClass;
-    HANDLE TraceHandle;
-    BOOLEAN PersistTraceBuffers;
-    WCHAR FileName[1];
-} EVENT_TRACE_SOFT_RESTART_INFORMATION, *PEVENT_TRACE_SOFT_RESTART_INFORMATION;
-
-typedef struct _EVENT_TRACE_PROFILE_ADD_INFORMATION
-{
-    EVENT_TRACE_INFORMATION_CLASS EventTraceInformationClass;
-    BOOLEAN PerfEvtEventSelect;
-    BOOLEAN PerfEvtUnitSelect;
-    ULONG PerfEvtType;
-    ULONG CpuInfoHierarchy[0x3];
-    ULONG InitialInterval;
-    BOOLEAN AllowsHalt;
-    BOOLEAN Persist;
-    WCHAR ProfileSourceDescription[0x1];
-} EVENT_TRACE_PROFILE_ADD_INFORMATION, *PEVENT_TRACE_PROFILE_ADD_INFORMATION;
-
-typedef struct _EVENT_TRACE_PROFILE_REMOVE_INFORMATION
-{
-    EVENT_TRACE_INFORMATION_CLASS EventTraceInformationClass;
-    KPROFILE_SOURCE ProfileSource;
-    ULONG CpuInfoHierarchy[0x3];
-} EVENT_TRACE_PROFILE_REMOVE_INFORMATION, *PEVENT_TRACE_PROFILE_REMOVE_INFORMATION;
-
-typedef struct _EVENT_TRACE_COVERAGE_SAMPLER_INFORMATION
-{
-    EVENT_TRACE_INFORMATION_CLASS EventTraceInformationClass;
-    BOOLEAN CoverageSamplerInformationClass;
-    UCHAR MajorVersion;
-    UCHAR MinorVersion;
-    UCHAR Reserved;
-    HANDLE SamplerHandle;
-} EVENT_TRACE_COVERAGE_SAMPLER_INFORMATION, *PEVENT_TRACE_COVERAGE_SAMPLER_INFORMATION;
-
 typedef struct _SYSTEM_EXCEPTION_INFORMATION
 {
     ULONG AlignmentFixupCount;
@@ -2055,6 +2084,18 @@ typedef struct _SYSTEM_EXCEPTION_INFORMATION
     ULONG FloatingEmulationCount;
     ULONG ByteWordEmulationCount;
 } SYSTEM_EXCEPTION_INFORMATION, *PSYSTEM_EXCEPTION_INFORMATION;
+
+typedef enum _SYSTEM_CRASH_DUMP_CONFIGURATION_CLASS
+{
+    SystemCrashDumpDisable,
+    SystemCrashDumpReconfigure,
+    SystemCrashDumpInitializationComplete
+} SYSTEM_CRASH_DUMP_CONFIGURATION_CLASS, *PSYSTEM_CRASH_DUMP_CONFIGURATION_CLASS;
+
+typedef struct _SYSTEM_CRASH_DUMP_STATE_INFORMATION
+{
+    SYSTEM_CRASH_DUMP_CONFIGURATION_CLASS CrashDumpConfigurationClass;
+} SYSTEM_CRASH_DUMP_STATE_INFORMATION, *PSYSTEM_CRASH_DUMP_STATE_INFORMATION;
 
 typedef struct _SYSTEM_KERNEL_DEBUGGER_INFORMATION
 {
@@ -2119,7 +2160,7 @@ typedef struct _SYSTEM_LOOKASIDE_INFORMATION
 // private
 typedef struct _SYSTEM_RANGE_START_INFORMATION
 {
-    PVOID SystemRangeStart;
+    ULONG_PTR SystemRangeStart;
 } SYSTEM_RANGE_START_INFORMATION, *PSYSTEM_RANGE_START_INFORMATION;
 
 typedef struct _SYSTEM_VERIFIER_INFORMATION_LEGACY // pre-19H1
@@ -2196,12 +2237,49 @@ typedef struct _SYSTEM_VERIFIER_INFORMATION
     SIZE_T PeakNonPagedPoolUsageInBytes;
 } SYSTEM_VERIFIER_INFORMATION, *PSYSTEM_VERIFIER_INFORMATION;
 
+// private
 typedef struct _SYSTEM_SESSION_PROCESS_INFORMATION
 {
     ULONG SessionId;
     ULONG SizeOfBuf;
     PVOID Buffer;
 } SYSTEM_SESSION_PROCESS_INFORMATION, *PSYSTEM_SESSION_PROCESS_INFORMATION;
+
+#if (PHNT_MODE != PHNT_MODE_KERNEL)
+
+typedef struct _IMAGE_EXPORT_DIRECTORY *PIMAGE_EXPORT_DIRECTORY; // from ntrtl.h
+
+// private
+typedef struct _SYSTEM_GDI_DRIVER_INFORMATION
+{
+    UNICODE_STRING DriverName;
+    PVOID ImageAddress;
+    PVOID SectionPointer;
+    PVOID EntryPoint;
+    PIMAGE_EXPORT_DIRECTORY ExportSectionPointer;
+    ULONG ImageLength;
+} SYSTEM_GDI_DRIVER_INFORMATION, *PSYSTEM_GDI_DRIVER_INFORMATION;
+#endif
+
+// geoffchappell
+#ifdef _WIN64
+#define MAXIMUM_NODE_COUNT 0x40
+#else
+#define MAXIMUM_NODE_COUNT 0x10
+#endif
+
+// private
+typedef struct _SYSTEM_NUMA_INFORMATION
+{
+    ULONG HighestNodeNumber;
+    ULONG Reserved;
+    union
+    {
+        GROUP_AFFINITY ActiveProcessorsGroupAffinity[MAXIMUM_NODE_COUNT];
+        ULONGLONG AvailableMemory[MAXIMUM_NODE_COUNT];
+        ULONGLONG Pad[MAXIMUM_NODE_COUNT * 2];
+    };
+} SYSTEM_NUMA_INFORMATION, *PSYSTEM_NUMA_INFORMATION;
 
 typedef struct _SYSTEM_PROCESSOR_POWER_INFORMATION
 {
@@ -2243,7 +2321,7 @@ typedef struct _SYSTEM_HANDLE_INFORMATION_EX
 {
     ULONG_PTR NumberOfHandles;
     ULONG_PTR Reserved;
-    SYSTEM_HANDLE_TABLE_ENTRY_INFO_EX Handles[1];
+    _Field_size_(NumberOfHandles) SYSTEM_HANDLE_TABLE_ENTRY_INFO_EX Handles[1];
 } SYSTEM_HANDLE_INFORMATION_EX, *PSYSTEM_HANDLE_INFORMATION_EX;
 
 typedef struct _SYSTEM_BIGPOOL_ENTRY
@@ -2264,7 +2342,7 @@ typedef struct _SYSTEM_BIGPOOL_ENTRY
 typedef struct _SYSTEM_BIGPOOL_INFORMATION
 {
     ULONG Count;
-    SYSTEM_BIGPOOL_ENTRY AllocatedInfo[1];
+    _Field_size_(Count) SYSTEM_BIGPOOL_ENTRY AllocatedInfo[1];
 } SYSTEM_BIGPOOL_INFORMATION, *PSYSTEM_BIGPOOL_INFORMATION;
 
 typedef struct _SYSTEM_POOL_ENTRY
@@ -2289,7 +2367,7 @@ typedef struct _SYSTEM_POOL_INFORMATION
     BOOLEAN PoolTagPresent;
     BOOLEAN Spare0;
     ULONG NumberOfEntries;
-    SYSTEM_POOL_ENTRY Entries[1];
+    _Field_size_(NumberOfEntries) SYSTEM_POOL_ENTRY Entries[1];
 } SYSTEM_POOL_INFORMATION, *PSYSTEM_POOL_INFORMATION;
 
 typedef struct _SYSTEM_SESSION_POOLTAG_INFORMATION
@@ -2297,7 +2375,7 @@ typedef struct _SYSTEM_SESSION_POOLTAG_INFORMATION
     SIZE_T NextEntryOffset;
     ULONG SessionId;
     ULONG Count;
-    SYSTEM_POOLTAG TagInfo[1];
+    _Field_size_(Count) SYSTEM_POOLTAG TagInfo[1];
 } SYSTEM_SESSION_POOLTAG_INFORMATION, *PSYSTEM_SESSION_POOLTAG_INFORMATION;
 
 typedef struct _SYSTEM_SESSION_MAPPED_VIEW_INFORMATION
@@ -2308,6 +2386,48 @@ typedef struct _SYSTEM_SESSION_MAPPED_VIEW_INFORMATION
     SIZE_T NumberOfBytesAvailable;
     SIZE_T NumberOfBytesAvailableContiguous;
 } SYSTEM_SESSION_MAPPED_VIEW_INFORMATION, *PSYSTEM_SESSION_MAPPED_VIEW_INFORMATION;
+
+typedef enum _WATCHDOG_HANDLER_ACTION
+{
+    WdActionSetTimeoutValue,
+    WdActionQueryTimeoutValue,
+    WdActionResetTimer,
+    WdActionStopTimer,
+    WdActionStartTimer,
+    WdActionSetTriggerAction,
+    WdActionQueryTriggerAction,
+    WdActionQueryState
+} WATCHDOG_HANDLER_ACTION;
+
+typedef NTSTATUS (NTAPI *PSYSTEM_WATCHDOG_HANDLER)(_In_ WATCHDOG_HANDLER_ACTION Action, _In_ PVOID Context, _Inout_ PULONG DataValue, _In_ BOOLEAN NoLocks);
+
+// private
+typedef struct _SYSTEM_WATCHDOG_HANDLER_INFORMATION
+{
+    PSYSTEM_WATCHDOG_HANDLER WdHandler;
+    PVOID Context;
+} SYSTEM_WATCHDOG_HANDLER_INFORMATION, *PSYSTEM_WATCHDOG_HANDLER_INFORMATION;
+
+typedef enum _WATCHDOG_INFORMATION_CLASS
+{
+    WdInfoTimeoutValue = 0,
+    WdInfoResetTimer = 1,
+    WdInfoStopTimer = 2,
+    WdInfoStartTimer = 3,
+    WdInfoTriggerAction = 4,
+    WdInfoState = 5,
+    WdInfoTriggerReset = 6,
+    WdInfoNop = 7,
+    WdInfoGeneratedLastReset = 8,
+    WdInfoInvalid = 9,
+} WATCHDOG_INFORMATION_CLASS;
+
+// private
+typedef struct _SYSTEM_WATCHDOG_TIMER_INFORMATION
+{
+    WATCHDOG_INFORMATION_CLASS WdInfoClass;
+    ULONG DataValue;
+} SYSTEM_WATCHDOG_TIMER_INFORMATION, *PSYSTEM_WATCHDOG_TIMER_INFORMATION;
 
 #if (PHNT_MODE != PHNT_MODE_KERNEL)
 // private
@@ -2325,8 +2445,24 @@ typedef struct _SYSTEM_FIRMWARE_TABLE_INFORMATION
     SYSTEM_FIRMWARE_TABLE_ACTION Action;
     ULONG TableID;
     ULONG TableBufferLength;
-    UCHAR TableBuffer[1];
+    _Field_size_bytes_(TableBufferLength) UCHAR TableBuffer[1];
 } SYSTEM_FIRMWARE_TABLE_INFORMATION, *PSYSTEM_FIRMWARE_TABLE_INFORMATION;
+#endif
+
+#if (PHNT_MODE != PHNT_MODE_KERNEL)
+// private
+typedef NTSTATUS (__cdecl* PFNFTH)(
+    _Inout_ PSYSTEM_FIRMWARE_TABLE_INFORMATION SystemFirmwareTableInfo
+    );
+
+// private
+typedef struct _SYSTEM_FIRMWARE_TABLE_HANDLER
+{
+    ULONG ProviderSignature;
+    BOOLEAN Register;
+    PFNFTH FirmwareTableHandler;
+    PVOID DriverObject;
+} SYSTEM_FIRMWARE_TABLE_HANDLER, *PSYSTEM_FIRMWARE_TABLE_HANDLER;
 #endif
 
 // private
@@ -2368,6 +2504,25 @@ typedef struct _SYSTEM_PROCESSOR_IDLE_CYCLE_TIME_INFORMATION
 } SYSTEM_PROCESSOR_IDLE_CYCLE_TIME_INFORMATION, *PSYSTEM_PROCESSOR_IDLE_CYCLE_TIME_INFORMATION;
 
 // private
+typedef struct _SYSTEM_VERIFIER_ISSUE
+{
+    ULONGLONG IssueType;
+    PVOID Address;
+    ULONGLONG Parameters[2];
+} SYSTEM_VERIFIER_ISSUE, *PSYSTEM_VERIFIER_ISSUE;
+
+// private
+typedef struct _SYSTEM_VERIFIER_CANCELLATION_INFORMATION
+{
+    ULONG CancelProbability;
+    ULONG CancelThreshold;
+    ULONG CompletionThreshold;
+    ULONG CancellationVerifierDisabled;
+    ULONG AvailableIssues;
+    SYSTEM_VERIFIER_ISSUE Issues[128];
+} SYSTEM_VERIFIER_CANCELLATION_INFORMATION, *PSYSTEM_VERIFIER_CANCELLATION_INFORMATION;
+
+// private
 typedef struct _SYSTEM_REF_TRACE_INFORMATION
 {
     BOOLEAN TraceEnable;
@@ -2377,11 +2532,28 @@ typedef struct _SYSTEM_REF_TRACE_INFORMATION
 } SYSTEM_REF_TRACE_INFORMATION, *PSYSTEM_REF_TRACE_INFORMATION;
 
 // private
+typedef struct _SYSTEM_SPECIAL_POOL_INFORMATION
+{
+    ULONG PoolTag;
+    ULONG Flags;
+} SYSTEM_SPECIAL_POOL_INFORMATION, *PSYSTEM_SPECIAL_POOL_INFORMATION;
+
+// private
 typedef struct _SYSTEM_PROCESS_ID_INFORMATION
 {
     HANDLE ProcessId;
     UNICODE_STRING ImageName;
 } SYSTEM_PROCESS_ID_INFORMATION, *PSYSTEM_PROCESS_ID_INFORMATION;
+
+// private
+typedef struct _SYSTEM_HYPERVISOR_QUERY_INFORMATION
+{
+    BOOLEAN HypervisorConnected;
+    BOOLEAN HypervisorDebuggingEnabled;
+    BOOLEAN HypervisorPresent;
+    BOOLEAN Spare0[5];
+    ULONGLONG EnabledEnlightenments;
+} SYSTEM_HYPERVISOR_QUERY_INFORMATION, *PSYSTEM_HYPERVISOR_QUERY_INFORMATION;
 
 // private
 typedef struct _SYSTEM_BOOT_ENVIRONMENT_INFORMATION
@@ -2400,6 +2572,10 @@ typedef struct _SYSTEM_BOOT_ENVIRONMENT_INFORMATION
             ULONGLONG DbgMeasuredLaunchCapable : 1; // 19H1
             ULONGLONG DbgSystemHiveReplace : 1;
             ULONGLONG DbgMeasuredLaunchSmmProtections : 1;
+            ULONGLONG DbgMeasuredLaunchSmmLevel : 7; // 20H1
+            ULONGLONG DbgBugCheckRecovery : 1; // 24H2
+            ULONGLONG DbgFASR : 1;
+            ULONGLONG DbgUseCachedBcd : 1;
         };
     };
 } SYSTEM_BOOT_ENVIRONMENT_INFORMATION, *PSYSTEM_BOOT_ENVIRONMENT_INFORMATION;
@@ -2410,6 +2586,59 @@ typedef struct _SYSTEM_IMAGE_FILE_EXECUTION_OPTIONS_INFORMATION
     ULONG FlagsToEnable;
     ULONG FlagsToDisable;
 } SYSTEM_IMAGE_FILE_EXECUTION_OPTIONS_INFORMATION, *PSYSTEM_IMAGE_FILE_EXECUTION_OPTIONS_INFORMATION;
+
+// private
+typedef enum _COVERAGE_REQUEST_CODES
+{
+    CoverageAllModules = 0,
+    CoverageSearchByHash = 1,
+    CoverageSearchByName = 2
+} COVERAGE_REQUEST_CODES;
+
+// private
+typedef struct _COVERAGE_MODULE_REQUEST
+{
+    COVERAGE_REQUEST_CODES RequestType;
+    union
+    {
+        UCHAR MD5Hash[16];
+        UNICODE_STRING ModuleName;
+    } SearchInfo;
+} COVERAGE_MODULE_REQUEST, *PCOVERAGE_MODULE_REQUEST;
+
+// private
+typedef struct _COVERAGE_MODULE_INFO
+{
+    ULONG ModuleInfoSize;
+    ULONG IsBinaryLoaded;
+    UNICODE_STRING ModulePathName;
+    ULONG CoverageSectionSize;
+    UCHAR CoverageSection[1];
+} COVERAGE_MODULE_INFO, *PCOVERAGE_MODULE_INFO;
+
+// private
+typedef struct _COVERAGE_MODULES
+{
+    ULONG ListAndReset;
+    ULONG NumberOfModules;
+    COVERAGE_MODULE_REQUEST ModuleRequestInfo;
+    COVERAGE_MODULE_INFO Modules[1];
+} COVERAGE_MODULES, *PCOVERAGE_MODULES;
+
+// private
+typedef struct _SYSTEM_PREFETCH_PATCH_INFORMATION
+{
+    ULONG PrefetchPatchCount;
+} SYSTEM_PREFETCH_PATCH_INFORMATION, *PSYSTEM_PREFETCH_PATCH_INFORMATION;
+
+// private
+typedef struct _SYSTEM_VERIFIER_FAULTS_INFORMATION
+{
+    ULONG Probability;
+    ULONG MaxProbability;
+    UNICODE_STRING PoolTags;
+    UNICODE_STRING Applications;
+} SYSTEM_VERIFIER_FAULTS_INFORMATION, *PSYSTEM_VERIFIER_FAULTS_INFORMATION;
 
 // private
 typedef struct _SYSTEM_VERIFIER_INFORMATION_EX
@@ -2438,6 +2667,13 @@ typedef struct _SYSTEM_SYSTEM_DISK_INFORMATION
     UNICODE_STRING SystemDisk;
 } SYSTEM_SYSTEM_DISK_INFORMATION, *PSYSTEM_SYSTEM_DISK_INFORMATION;
 
+// private
+typedef struct _SYSTEM_NUMA_PROXIMITY_MAP
+{
+    ULONG NodeProximityId;
+    USHORT NodeNumber;
+} SYSTEM_NUMA_PROXIMITY_MAP, *PSYSTEM_NUMA_PROXIMITY_MAP;
+
 // private (Windows 8.1 and above)
 typedef struct _SYSTEM_PROCESSOR_PERFORMANCE_HITCOUNT
 {
@@ -2457,7 +2693,7 @@ typedef struct _SYSTEM_PROCESSOR_PERFORMANCE_STATE_DISTRIBUTION
 {
     ULONG ProcessorNumber;
     ULONG StateCount;
-    SYSTEM_PROCESSOR_PERFORMANCE_HITCOUNT States[1];
+    _Field_size_(StateCount) SYSTEM_PROCESSOR_PERFORMANCE_HITCOUNT States[1];
 } SYSTEM_PROCESSOR_PERFORMANCE_STATE_DISTRIBUTION, *PSYSTEM_PROCESSOR_PERFORMANCE_STATE_DISTRIBUTION;
 
 // private
@@ -2481,6 +2717,8 @@ typedef struct _SYSTEM_PROCESSOR_PERFORMANCE_DISTRIBUTION
 #define CODEINTEGRITY_OPTION_HVCI_KMCI_AUDITMODE_ENABLED 0x800
 #define CODEINTEGRITY_OPTION_HVCI_KMCI_STRICTMODE_ENABLED 0x1000
 #define CODEINTEGRITY_OPTION_HVCI_IUM_ENABLED 0x2000
+#define CODEINTEGRITY_OPTION_WHQL_ENFORCEMENT_ENABLED 0x4000
+#define CODEINTEGRITY_OPTION_WHQL_AUDITMODE_ENABLED 0x8000
 
 // private
 typedef struct _SYSTEM_CODEINTEGRITY_INFORMATION
@@ -2488,6 +2726,12 @@ typedef struct _SYSTEM_CODEINTEGRITY_INFORMATION
     ULONG Length;
     ULONG CodeIntegrityOptions;
 } SYSTEM_CODEINTEGRITY_INFORMATION, *PSYSTEM_CODEINTEGRITY_INFORMATION;
+
+// private
+typedef struct _SYSTEM_PROCESSOR_MICROCODE_UPDATE_INFORMATION
+{
+    ULONG Operation;
+} SYSTEM_PROCESSOR_MICROCODE_UPDATE_INFORMATION, *PSYSTEM_PROCESSOR_MICROCODE_UPDATE_INFORMATION;
 
 // private
 typedef enum _SYSTEM_VA_TYPE
@@ -2511,10 +2755,33 @@ typedef struct _SYSTEM_VA_LIST_INFORMATION
 } SYSTEM_VA_LIST_INFORMATION, *PSYSTEM_VA_LIST_INFORMATION;
 
 // rev
-typedef enum _SYSTEM_STORE_INFORMATION_CLASS
+typedef enum _STORE_INFORMATION_CLASS
 {
-    SystemStoreCompressionInformation = 22 // q: SYSTEM_STORE_COMPRESSION_INFORMATION
-} SYSTEM_STORE_INFORMATION_CLASS;
+    StorePageRequest = 1,
+    StoreStatsRequest = 2, // q: SM_STATS_REQUEST // SmProcessStatsRequest
+    StoreCreateRequest = 3, // s: SM_CREATE_REQUEST (requires SeProfileSingleProcessPrivilege)
+    StoreDeleteRequest = 4, // s: SM_DELETE_REQUEST (requires SeProfileSingleProcessPrivilege)
+    StoreListRequest = 5, // q: SM_STORE_LIST_REQUEST / SM_STORE_LIST_REQUEST_EX // SmProcessListRequest
+    Available1 = 6,
+    StoreEmptyRequest = 7,
+    CacheListRequest = 8, // q: SMC_CACHE_LIST_REQUEST // SmcProcessListRequest
+    CacheCreateRequest = 9, // s: SMC_CACHE_CREATE_REQUEST (requires SeProfileSingleProcessPrivilege)
+    CacheDeleteRequest = 10, // s: SMC_CACHE_DELETE_REQUEST (requires SeProfileSingleProcessPrivilege)
+    CacheStoreCreateRequest = 11, // s: SMC_STORE_CREATE_REQUEST (requires SeProfileSingleProcessPrivilege)
+    CacheStoreDeleteRequest = 12, // s: SMC_STORE_DELETE_REQUEST (requires SeProfileSingleProcessPrivilege)
+    CacheStatsRequest = 13, // q: SMC_CACHE_STATS_REQUEST // SmcProcessStatsRequest
+    Available2 = 14,
+    RegistrationRequest = 15, // q: SM_REGISTRATION_REQUEST (requires SeProfileSingleProcessPrivilege) // SmProcessRegistrationRequest
+    GlobalCacheStatsRequest = 16,
+    StoreResizeRequest = 17, // s: SM_STORE_RESIZE_REQUEST (requires SeProfileSingleProcessPrivilege)
+    CacheStoreResizeRequest = 18, // s: SMC_STORE_RESIZE_REQUEST (requires SeProfileSingleProcessPrivilege)
+    SmConfigRequest = 19, // s: SM_CONFIG_REQUEST (requires SeProfileSingleProcessPrivilege)
+    StoreHighMemoryPriorityRequest = 20, // s: SM_STORE_HIGH_MEM_PRIORITY_REQUEST (requires SeProfileSingleProcessPrivilege)
+    SystemStoreTrimRequest = 21, // s: SM_SYSTEM_STORE_TRIM_REQUEST (requires SeProfileSingleProcessPrivilege)
+    MemCompressionInfoRequest = 22,  // q: SM_MEM_COMPRESSION_INFO_REQUEST // SmProcessCompressionInfoRequest
+    ProcessStoreInfoRequest = 23, // SmProcessProcessStoreInfoRequest
+    StoreInformationMax
+} STORE_INFORMATION_CLASS;
 
 // rev
 #define SYSTEM_STORE_INFORMATION_VERSION 1
@@ -2523,24 +2790,423 @@ typedef enum _SYSTEM_STORE_INFORMATION_CLASS
 typedef struct _SYSTEM_STORE_INFORMATION
 {
     _In_ ULONG Version;
-    _In_ SYSTEM_STORE_INFORMATION_CLASS StoreInformationClass;
+    _In_ STORE_INFORMATION_CLASS StoreInformationClass;
     _Inout_ PVOID Data;
     _Inout_ ULONG Length;
 } SYSTEM_STORE_INFORMATION, *PSYSTEM_STORE_INFORMATION;
+
+#define SYSTEM_STORE_STATS_INFORMATION_VERSION 2
+
+typedef enum _ST_STATS_LEVEL
+{
+    StStatsLevelBasic = 0,
+    StStatsLevelIoStats = 1,
+    StStatsLevelRegionSpace = 2, // requires SeProfileSingleProcessPrivilege
+    StStatsLevelSpaceBitmap = 3, // requires SeProfileSingleProcessPrivilege
+    StStatsLevelMax = 4
+} ST_STATS_LEVEL;
+
+typedef struct _SM_STATS_REQUEST
+{
+    ULONG Version : 8; // SYSTEM_STORE_STATS_INFORMATION_VERSION
+    ULONG DetailLevel : 8; // ST_STATS_LEVEL
+    ULONG StoreId : 16;
+    ULONG BufferSize;
+    PVOID Buffer; // PST_STATS
+} SM_STATS_REQUEST, *PSM_STATS_REQUEST;
+
+typedef struct _ST_DATA_MGR_STATS
+{
+    ULONG RegionCount;
+    ULONG PagesStored;
+    ULONG UniquePagesStored;
+    ULONG LazyCleanupRegionCount;
+    struct {
+        ULONG RegionsInUse;
+        ULONG SpaceUsed;
+    } Space[8];
+} ST_DATA_MGR_STATS, *PST_DATA_MGR_STATS;
+
+typedef struct _ST_IO_STATS_PERIOD
+{
+    ULONG PageCounts[5];
+} ST_IO_STATS_PERIOD, *PST_IO_STATS_PERIOD;
+
+typedef struct _ST_IO_STATS
+{
+    ULONG PeriodCount;
+    ST_IO_STATS_PERIOD Periods[64];
+} ST_IO_STATS, *PST_IO_STATS;
+
+typedef struct _ST_READ_LATENCY_BUCKET
+{
+    ULONG LatencyUs;
+    ULONG Count;
+} ST_READ_LATENCY_BUCKET, *PST_READ_LATENCY_BUCKET;
+
+typedef struct _ST_READ_LATENCY_STATS
+{
+    ST_READ_LATENCY_BUCKET Buckets[8];
+} ST_READ_LATENCY_STATS, *PST_READ_LATENCY_STATS;
+
+// rev
+typedef struct _ST_STATS_REGION_INFO
+{
+    USHORT SpaceUsed;
+    UCHAR Priority;
+    UCHAR Spare;
+} ST_STATS_REGION_INFO, *PST_STATS_REGION_INFO;
+
+// rev
+typedef struct _ST_STATS_SPACE_BITMAP
+{
+    SIZE_T CompressedBytes;
+    ULONG BytesPerBit;
+    UCHAR StoreBitmap[1];
+} ST_STATS_SPACE_BITMAP, *PST_STATS_SPACE_BITMAP;
+
+// rev
+typedef struct _ST_STATS
+{
+    ULONG Version : 8;
+    ULONG Level : 4;
+    ULONG StoreType : 4;
+    ULONG NoDuplication : 1;
+    ULONG NoCompression : 1;
+    ULONG EncryptionStrength : 12;
+    ULONG VirtualRegions : 1;
+    ULONG Spare0 : 1;
+    ULONG Size;
+    USHORT CompressionFormat;
+    USHORT Spare;
+
+    struct
+    {
+        ULONG RegionSize;
+        ULONG RegionCount;
+        ULONG RegionCountMax;
+        ULONG Granularity;
+        ST_DATA_MGR_STATS UserData;
+        ST_DATA_MGR_STATS Metadata;
+    } Basic;
+
+    struct
+    {
+        ST_IO_STATS IoStats;
+        ST_READ_LATENCY_STATS ReadLatencyStats;
+    } Io;
+
+    // ST_STATS_REGION_INFO[RegionCountMax]
+    // ST_STATS_SPACE_BITMAP
+} ST_STATS, *PST_STATS;
+
+#define SYSTEM_STORE_CREATE_INFORMATION_VERSION 6
+
+typedef enum _SM_STORE_TYPE
+{
+    StoreTypeInMemory=0,
+    StoreTypeFile=1,
+    StoreTypeMax=2
+} SM_STORE_TYPE;
+
+typedef struct _SM_STORE_BASIC_PARAMS
+{
+    union
+    {
+        struct
+        {
+            ULONG StoreType : 8; // SM_STORE_TYPE
+            ULONG NoDuplication : 1;
+            ULONG FailNoCompression : 1;
+            ULONG NoCompression : 1 ;
+            ULONG NoEncryption : 1;
+            ULONG NoEvictOnAdd : 1;
+            ULONG PerformsFileIo : 1;
+            ULONG VdlNotSet : 1 ;
+            ULONG UseIntermediateAddBuffer : 1;
+            ULONG CompressNoHuff : 1;
+            ULONG LockActiveRegions : 1;
+            ULONG VirtualRegions : 1;
+            ULONG Spare : 13;
+        };
+        ULONG StoreFlags;
+    };
+    ULONG Granularity;
+    ULONG RegionSize;
+    ULONG RegionCountMax;
+} SM_STORE_BASIC_PARAMS, *PSM_STORE_BASIC_PARAMS;
+
+typedef struct _SMKM_REGION_EXTENT
+{
+    ULONG RegionCount;
+    SIZE_T ByteOffset;
+} SMKM_REGION_EXTENT, *PSMKM_REGION_EXTENT;
+
+typedef struct _FILE_OBJECT *PFILE_OBJECT;
+typedef struct _DEVICE_OBJECT *PDEVICE_OBJECT;
+typedef struct _IRP *PIRP;
+typedef struct _RTL_BITMAP *PRTL_BITMAP;
+
+typedef struct _SMKM_FILE_INFO
+{
+    HANDLE FileHandle;
+    PFILE_OBJECT FileObject;
+    PFILE_OBJECT VolumeFileObject;
+    PDEVICE_OBJECT VolumeDeviceObject;
+    HANDLE VolumePnpHandle;
+    PIRP UsageNotificationIrp;
+    PSMKM_REGION_EXTENT Extents;
+    ULONG ExtentCount;
+} SMKM_FILE_INFO, *PSMKM_FILE_INFO;
+
+typedef struct _SM_STORE_CACHE_BACKED_PARAMS
+{
+    ULONG SectorSize;
+    PCHAR EncryptionKey;
+    ULONG EncryptionKeySize;
+    PSMKM_FILE_INFO FileInfo;
+    PVOID EtaContext;
+    PRTL_BITMAP StoreRegionBitmap;
+} SM_STORE_CACHE_BACKED_PARAMS, *PSM_STORE_CACHE_BACKED_PARAMS;
+
+typedef struct _SM_STORE_PARAMETERS
+{
+    SM_STORE_BASIC_PARAMS Store;
+    ULONG Priority;
+    ULONG Flags;
+    SM_STORE_CACHE_BACKED_PARAMS CacheBacked;
+} SM_STORE_PARAMETERS, *PSM_STORE_PARAMETERS;
+
+typedef struct _SM_CREATE_REQUEST
+{
+    ULONG Version : 8; // SYSTEM_STORE_CREATE_INFORMATION_VERSION
+    ULONG AcquireReference : 1;
+    ULONG KeyedStore : 1;
+    ULONG Spare : 22;
+    SM_STORE_PARAMETERS Params;
+    ULONG StoreId;
+} SM_CREATE_REQUEST, *PSM_CREATE_REQUEST;
+
+#define SYSTEM_STORE_DELETE_INFORMATION_VERSION 1
+
+typedef struct _SM_DELETE_REQUEST
+{
+    ULONG Version : 8; // SYSTEM_STORE_DELETE_INFORMATION_VERSION
+    ULONG Spare : 24;
+    ULONG StoreId;
+} SM_DELETE_REQUEST, *PSM_DELETE_REQUEST;
+
+#define SYSTEM_STORE_LIST_INFORMATION_VERSION 2
+
+typedef struct _SM_STORE_LIST_REQUEST
+{
+    ULONG Version : 8; // SYSTEM_STORE_LIST_INFORMATION_VERSION
+    ULONG StoreCount : 8; // = 0
+    ULONG ExtendedRequest : 1; // SM_STORE_LIST_REQUEST_EX if set
+    ULONG Spare : 15;
+    ULONG StoreId[32];
+} SM_STORE_LIST_REQUEST, *PSM_STORE_LIST_REQUEST;
+
+typedef struct _SM_STORE_LIST_REQUEST_EX
+{
+    SM_STORE_LIST_REQUEST Request;
+    WCHAR NameBuffer[32][64];
+} SM_STORE_LIST_REQUEST_EX, *PSM_STORE_LIST_REQUEST_EX;
+
+#define SYSTEM_CACHE_LIST_INFORMATION_VERSION 2
+
+typedef struct _SMC_CACHE_LIST_REQUEST
+{
+    ULONG Version : 8; // SYSTEM_CACHE_LIST_INFORMATION_VERSION
+    ULONG CacheCount : 8; // = 0
+    ULONG Spare : 16;
+    ULONG CacheId[16];
+} SMC_CACHE_LIST_REQUEST, *PSMC_CACHE_LIST_REQUEST;
+
+#define SYSTEM_CACHE_CREATE_INFORMATION_VERSION 3
+
+typedef struct _SMC_CACHE_PARAMETERS
+{
+    SIZE_T CacheFileSize;
+    ULONG StoreAlignment;
+    ULONG PerformsFileIo : 1;
+    ULONG VdlNotSet : 1;
+    ULONG Spare : 30;
+    ULONG CacheFlags;
+    ULONG Priority;
+} SMC_CACHE_PARAMETERS, *PSMC_CACHE_PARAMETERS;
+
+typedef struct _SMC_CACHE_CREATE_PARAMETERS
+{
+    SMC_CACHE_PARAMETERS CacheParameters;
+    WCHAR TemplateFilePath[512];
+} SMC_CACHE_CREATE_PARAMETERS, *PSMC_CACHE_CREATE_PARAMETERS;
+
+typedef struct _SMC_CACHE_CREATE_REQUEST
+{
+    ULONG Version : 8; // SYSTEM_CACHE_CREATE_INFORMATION_VERSION
+    ULONG Spare : 24;
+    ULONG CacheId;
+    SMC_CACHE_CREATE_PARAMETERS CacheCreateParams;
+} SMC_CACHE_CREATE_REQUEST, *PSMC_CACHE_CREATE_REQUEST;
+
+#define SYSTEM_CACHE_DELETE_INFORMATION_VERSION 1
+
+typedef struct _SMC_CACHE_DELETE_REQUEST
+{
+    ULONG Version : 8; // SYSTEM_CACHE_DELETE_INFORMATION_VERSION
+    ULONG Spare : 24;
+    ULONG CacheId;
+} SMC_CACHE_DELETE_REQUEST, *PSMC_CACHE_DELETE_REQUEST;
+
+#define SYSTEM_CACHE_STORE_CREATE_INFORMATION_VERSION 2
+
+typedef enum _SM_STORE_MANAGER_TYPE
+{
+    SmStoreManagerTypePhysical=0,
+    SmStoreManagerTypeVirtual=1,
+    SmStoreManagerTypeMax=2
+} SM_STORE_MANAGER_TYPE;
+
+typedef struct _SMC_STORE_CREATE_REQUEST
+{
+    ULONG Version : 8; // SYSTEM_CACHE_STORE_CREATE_INFORMATION_VERSION
+    ULONG Spare : 24;
+    SM_STORE_BASIC_PARAMS StoreParams;
+    ULONG CacheId;
+    SM_STORE_MANAGER_TYPE StoreManagerType;
+    ULONG StoreId;
+} SMC_STORE_CREATE_REQUEST, *PSMC_STORE_CREATE_REQUEST;
+
+#define SYSTEM_CACHE_STORE_DELETE_INFORMATION_VERSION 1
+
+typedef struct _SMC_STORE_DELETE_REQUEST
+{
+    ULONG Version : 8; // SYSTEM_CACHE_STORE_DELETE_INFORMATION_VERSION
+    ULONG Spare : 24;
+    ULONG CacheId;
+    SM_STORE_MANAGER_TYPE StoreManagerType;
+    ULONG StoreId;
+} SMC_STORE_DELETE_REQUEST, *PSMC_STORE_DELETE_REQUEST;
+
+#define SYSTEM_CACHE_STATS_INFORMATION_VERSION 3
+
+typedef struct _SMC_CACHE_STATS
+{
+    SIZE_T TotalFileSize;
+    ULONG StoreCount;
+    ULONG RegionCount;
+    ULONG RegionSizeBytes;
+    ULONG FileCount : 6;
+    ULONG PerformsFileIo : 1;
+    ULONG Spare : 25;
+    ULONG StoreIds[16];
+    ULONG PhysicalStoreBitmap;
+    ULONG Priority;
+    WCHAR TemplateFilePath[512];
+} SMC_CACHE_STATS, *PSMC_CACHE_STATS;
+
+typedef struct _SMC_CACHE_STATS_REQUEST
+{
+    ULONG Version : 8; // SYSTEM_CACHE_STATS_INFORMATION_VERSION
+    ULONG NoFilePath : 1;
+    ULONG Spare : 23;
+    ULONG CacheId;
+    SMC_CACHE_STATS CacheStats;
+} SMC_CACHE_STATS_REQUEST, *PSMC_CACHE_STATS_REQUEST;
+
+#define SYSTEM_STORE_REGISTRATION_INFORMATION_VERSION 2
+
+typedef struct _SM_REGISTRATION_INFO
+{
+    HANDLE CachesUpdatedEvent;
+} SM_REGISTRATION_INFO, *PSM_REGISTRATION_INFO;
+
+typedef struct _SM_REGISTRATION_REQUEST
+{
+    ULONG Version : 8; // SYSTEM_STORE_REGISTRATION_INFORMATION_VERSION
+    ULONG Spare : 24;
+    SM_REGISTRATION_INFO RegInfo;
+} SM_REGISTRATION_REQUEST, *PSM_REGISTRATION_REQUEST;
+
+#define SYSTEM_STORE_RESIZE_INFORMATION_VERSION 6
+
+typedef struct _SM_STORE_RESIZE_REQUEST
+{
+    ULONG Version : 8; // SYSTEM_STORE_RESIZE_INFORMATION_VERSION
+    ULONG AddRegions : 1;
+    ULONG Spare : 23;
+    ULONG StoreId;
+    ULONG NumberOfRegions;
+    PRTL_BITMAP RegionBitmap;
+} SM_STORE_RESIZE_REQUEST, *PSM_STORE_RESIZE_REQUEST;
+
+#define SYSTEM_CACHE_STORE_RESIZE_INFORMATION_VERSION 1
+
+typedef struct _SMC_STORE_RESIZE_REQUEST
+{
+    ULONG Version : 8; // SYSTEM_CACHE_STORE_RESIZE_INFORMATION_VERSION
+    ULONG AddRegions : 1;
+    ULONG Spare : 23;
+    ULONG CacheId;
+    ULONG StoreId;
+    SM_STORE_MANAGER_TYPE StoreManagerType;
+    ULONG RegionCount;
+} SMC_STORE_RESIZE_REQUEST, *PSMC_STORE_RESIZE_REQUEST;
+
+#define SYSTEM_STORE_CONFIG_INFORMATION_VERSION 4
+
+typedef enum _SM_CONFIG_TYPE
+{
+    SmConfigDirtyPageCompression = 0,
+    SmConfigAsyncInswap = 1,
+    SmConfigPrefetchSeekThreshold = 2,
+    SmConfigTypeMax = 3
+} SM_CONFIG_TYPE;
+
+typedef struct _SM_CONFIG_REQUEST
+{
+    ULONG Version : 8; // SYSTEM_STORE_CONFIG_INFORMATION_VERSION
+    ULONG Spare : 16;
+    ULONG ConfigType : 8; // SM_CONFIG_TYPE
+    ULONG ConfigValue;
+} SM_CONFIG_REQUEST, *PSM_CONFIG_REQUEST;
+
+#define SYSTEM_STORE_HIGH_MEM_PRIORITY_INFORMATION_VERSION 1
+
+// rev
+typedef struct _SM_STORE_HIGH_MEM_PRIORITY_REQUEST
+{
+    ULONG Version : 8; // SYSTEM_STORE_HIGH_MEM_PRIORITY_INFORMATION_VERSION
+    ULONG SetHighMemoryPriority : 1;
+    ULONG Spare : 23;
+    HANDLE ProcessHandle;
+} SM_STORE_HIGH_MEM_PRIORITY_REQUEST, *PSM_STORE_HIGH_MEM_PRIORITY_REQUEST;
+
+#define SYSTEM_STORE_TRIM_INFORMATION_VERSION 1
+
+// rev
+typedef struct _SM_SYSTEM_STORE_TRIM_REQUEST
+{
+    ULONG Version : 8; // SYSTEM_STORE_TRIM_INFORMATION_VERSION
+    ULONG Spare : 24;
+    SIZE_T PagesToTrim; // ULONG?
+} SM_SYSTEM_STORE_TRIM_REQUEST, *PSM_SYSTEM_STORE_TRIM_REQUEST;
 
 // rev
 #define SYSTEM_STORE_COMPRESSION_INFORMATION_VERSION 3
 
 // rev
-typedef struct _SYSTEM_STORE_COMPRESSION_INFORMATION
+typedef struct _SM_MEM_COMPRESSION_INFO_REQUEST
 {
-    ULONG Version;
+    ULONG Version : 8; // SYSTEM_STORE_COMPRESSION_INFORMATION_VERSION
+    ULONG Spare : 24;
     ULONG CompressionPid;
-    ULONGLONG CompressionWorkingSetSize;
-    ULONGLONG CompressSize;
-    ULONGLONG CompressedSize;
-    ULONGLONG NonCompressedSize;
-} SYSTEM_STORE_COMPRESSION_INFORMATION, *PSYSTEM_STORE_COMPRESSION_INFORMATION;
+    ULONG WorkingSetSize;
+    SIZE_T TotalDataCompressed;
+    SIZE_T TotalCompressedSize;
+    SIZE_T TotalUniqueDataCompressed;
+} SM_MEM_COMPRESSION_INFO_REQUEST, *PSM_MEM_COMPRESSION_INFO_REQUEST;
 
 // private
 typedef struct _SYSTEM_REGISTRY_APPEND_STRING_PARAMETERS
@@ -2562,8 +3228,29 @@ typedef struct _SYSTEM_VHD_BOOT_INFORMATION
 {
     BOOLEAN OsDiskIsVhd;
     ULONG OsVhdFilePathOffset;
-    WCHAR OsVhdParentVolume[ANYSIZE_ARRAY];
+    WCHAR OsVhdParentVolume[1];
 } SYSTEM_VHD_BOOT_INFORMATION, *PSYSTEM_VHD_BOOT_INFORMATION;
+
+// private
+typedef struct _PS_CPU_QUOTA_QUERY_ENTRY
+{
+    ULONG SessionId;
+    ULONG Weight;
+} PS_CPU_QUOTA_QUERY_ENTRY, *PPS_CPU_QUOTA_QUERY_ENTRY;
+
+// private
+typedef struct _PS_CPU_QUOTA_QUERY_INFORMATION
+{
+    ULONG SessionCount;
+    PS_CPU_QUOTA_QUERY_ENTRY SessionInformation[1];
+} PS_CPU_QUOTA_QUERY_INFORMATION, *PPS_CPU_QUOTA_QUERY_INFORMATION;
+
+// private
+typedef struct _SYSTEM_ERROR_PORT_TIMEOUTS
+{
+    ULONG StartTimeout;
+    ULONG CommTimeout;
+} SYSTEM_ERROR_PORT_TIMEOUTS, *PSYSTEM_ERROR_PORT_TIMEOUTS;
 
 // private
 typedef struct _SYSTEM_LOW_PRIORITY_IO_INFORMATION
@@ -2701,8 +3388,21 @@ typedef struct _SYSTEM_BOOT_GRAPHICS_INFORMATION
 typedef struct _MEMORY_SCRUB_INFORMATION
 {
     HANDLE Handle;
-    ULONG PagesScrubbed;
+    ULONG_PTR PagesScrubbed;
 } MEMORY_SCRUB_INFORMATION, *PMEMORY_SCRUB_INFORMATION;
+
+// private
+typedef union _SYSTEM_BAD_PAGE_INFORMATION
+{
+#ifdef _WIN64
+    ULONG_PTR PhysicalPageNumber : 52;
+#else
+    ULONG PhysicalPageNumber : 20;
+#endif
+    ULONG_PTR Reserved : 10;
+    ULONG_PTR Pending : 1;
+    ULONG_PTR Poisoned : 1;
+} SYSTEM_BAD_PAGE_INFORMATION, *PSYSTEM_BAD_PAGE_INFORMATION;
 
 // private
 typedef struct _PEBS_DS_SAVE_AREA32
@@ -2782,6 +3482,14 @@ typedef struct _MEMORY_COMBINE_INFORMATION_EX2
 } MEMORY_COMBINE_INFORMATION_EX2, *PMEMORY_COMBINE_INFORMATION_EX2;
 
 // private
+typedef struct _SYSTEM_ENTROPY_TIMING_INFORMATION
+{
+    VOID (NTAPI *EntropyRoutine)(PVOID, ULONG);
+    VOID (NTAPI *InitializationRoutine)(PVOID, ULONG, PVOID);
+    PVOID InitializationContext;
+} SYSTEM_ENTROPY_TIMING_INFORMATION, *PSYSTEM_ENTROPY_TIMING_INFORMATION;
+
+// private
 typedef struct _SYSTEM_CONSOLE_INFORMATION
 {
     ULONG DriverLoaded : 1;
@@ -2797,6 +3505,16 @@ typedef struct _SYSTEM_PLATFORM_BINARY_INFORMATION
     ULONG HandoffBufferSize;
     ULONG CommandLineBufferSize;
 } SYSTEM_PLATFORM_BINARY_INFORMATION, *PSYSTEM_PLATFORM_BINARY_INFORMATION;
+
+// private
+typedef struct _SYSTEM_POLICY_INFORMATION
+{
+    PVOID InputData;
+    PVOID OutputData;
+    ULONG InputDataSize;
+    ULONG OutputDataSize;
+    ULONG Version;
+} SYSTEM_POLICY_INFORMATION, *PSYSTEM_POLICY_INFORMATION;
 
 // private
 typedef struct _SYSTEM_HYPERVISOR_PROCESSOR_COUNT_INFORMATION
@@ -2868,7 +3586,7 @@ typedef struct _SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION_EX
 } SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION_EX, *PSYSTEM_PROCESSOR_PERFORMANCE_INFORMATION_EX;
 
 // private
-typedef struct _SYSTEM_SECUREBOOT_POLICY_INFORMATION 
+typedef struct _SYSTEM_SECUREBOOT_POLICY_INFORMATION
 {
     GUID PolicyPublisher;
     ULONG PolicyVersion;
@@ -2915,14 +3633,13 @@ typedef struct _PROCESS_DISK_COUNTERS
 // private
 typedef union _ENERGY_STATE_DURATION
 {
-    union
+    ULONGLONG Value;
+    struct
     {
-        ULONGLONG Value;
         ULONG LastChangeTime;
+        ULONG Duration : 31;
+        ULONG IsInState : 1;
     };
-
-    ULONG Duration : 31;
-    ULONG IsInState : 1;
 } ENERGY_STATE_DURATION, *PENERGY_STATE_DURATION;
 
 typedef struct _PROCESS_ENERGY_VALUES
@@ -2951,11 +3668,14 @@ typedef struct _PROCESS_ENERGY_VALUES
     ULONGLONG WorkOnBehalfCycles[4][2];
 } PROCESS_ENERGY_VALUES, *PPROCESS_ENERGY_VALUES;
 
-typedef struct _TIMELINE_BITMAP
+typedef union _TIMELINE_BITMAP
 {
     ULONGLONG Value;
-    ULONG EndTime;
-    ULONG Bitmap;
+    struct
+    {
+        ULONG EndTime;
+        ULONG Bitmap;
+    };
 } TIMELINE_BITMAP, *PTIMELINE_BITMAP;
 
 typedef struct _PROCESS_ENERGY_VALUES_EXTENSION
@@ -2994,7 +3714,7 @@ typedef struct _PROCESS_ENERGY_VALUES_EXTENSION
             ENERGY_STATE_DURATION PSMBackgroundDuration;
         };
     };
-    
+
     ULONG KeyboardInput;
     ULONG MouseInput;
 } PROCESS_ENERGY_VALUES_EXTENSION, *PPROCESS_ENERGY_VALUES_EXTENSION;
@@ -3063,11 +3783,35 @@ typedef struct _SYSTEM_ELAM_CERTIFICATE_INFORMATION
 } SYSTEM_ELAM_CERTIFICATE_INFORMATION, *PSYSTEM_ELAM_CERTIFICATE_INFORMATION;
 
 // private
+typedef struct _OFFLINE_CRASHDUMP_CONFIGURATION_TABLE_V2
+{
+    ULONG Version;
+    ULONG AbnormalResetOccurred;
+    ULONG OfflineMemoryDumpCapable;
+    LARGE_INTEGER ResetDataAddress;
+    ULONG ResetDataSize;
+} OFFLINE_CRASHDUMP_CONFIGURATION_TABLE_V2, *POFFLINE_CRASHDUMP_CONFIGURATION_TABLE_V2;
+
+// private
+typedef struct _OFFLINE_CRASHDUMP_CONFIGURATION_TABLE_V1
+{
+    ULONG Version;
+    ULONG AbnormalResetOccurred;
+    ULONG OfflineMemoryDumpCapable;
+} OFFLINE_CRASHDUMP_CONFIGURATION_TABLE_V1, *POFFLINE_CRASHDUMP_CONFIGURATION_TABLE_V1;
+
+// private
 typedef struct _SYSTEM_PROCESSOR_FEATURES_INFORMATION
 {
     ULONGLONG ProcessorFeatureBits;
     ULONGLONG Reserved[3];
 } SYSTEM_PROCESSOR_FEATURES_INFORMATION, *PSYSTEM_PROCESSOR_FEATURES_INFORMATION;
+
+// EDID v1.4 standard data format
+typedef struct _SYSTEM_EDID_INFORMATION
+{
+    UCHAR Edid[128];
+} SYSTEM_EDID_INFORMATION, *PSYSTEM_EDID_INFORMATION;
 
 // private
 typedef struct _SYSTEM_MANUFACTURING_INFORMATION
@@ -3118,13 +3862,34 @@ typedef struct _SYSTEM_VSM_PROTECTION_INFORMATION
     BOOLEAN DmaProtectionsAvailable;
     BOOLEAN DmaProtectionsInUse;
     BOOLEAN HardwareMbecAvailable; // REDSTONE4 (CVE-2018-3639)
+    BOOLEAN ApicVirtualizationAvailable; // 20H1
 } SYSTEM_VSM_PROTECTION_INFORMATION, *PSYSTEM_VSM_PROTECTION_INFORMATION;
 
 // private
 typedef struct _SYSTEM_KERNEL_DEBUGGER_FLAGS
 {
-    UCHAR KernelDebuggerIgnoreUmExceptions;
+    BOOLEAN KernelDebuggerIgnoreUmExceptions;
 } SYSTEM_KERNEL_DEBUGGER_FLAGS, *PSYSTEM_KERNEL_DEBUGGER_FLAGS;
+
+// SYSTEM_CODEINTEGRITYPOLICY_INFORMATION Options
+#define CODEINTEGRITYPOLICY_OPTION_ENABLED 0x01
+#define CODEINTEGRITYPOLICY_OPTION_AUDIT 0x02
+#define CODEINTEGRITYPOLICY_OPTION_REQUIRE_WHQL 0x04
+#define CODEINTEGRITYPOLICY_OPTION_DISABLED_FLIGHTSIGNING 0x08
+#define CODEINTEGRITYPOLICY_OPTION_ENABLED_UMCI 0x10
+#define CODEINTEGRITYPOLICY_OPTION_ENABLED_UPDATE_POLICY_NOREBOOT 0x20
+#define CODEINTEGRITYPOLICY_OPTION_ENABLED_SECURE_SETTING_POLICY 0x40
+#define CODEINTEGRITYPOLICY_OPTION_ENABLED_UNSIGNED_SYSTEMINTEGRITY_POLICY 0x80
+#define CODEINTEGRITYPOLICY_OPTION_DYNAMIC_CODE_POLICY_ENABLED 0x100
+#define CODEINTEGRITYPOLICY_OPTION_RELOAD_POLICY_NO_REBOOT 0x10000000 // NtSetSystemInformation reloads SiPolicy.p7b
+#define CODEINTEGRITYPOLICY_OPTION_CONDITIONAL_LOCKDOWN 0x20000000
+#define CODEINTEGRITYPOLICY_OPTION_NOLOCKDOWN 0x40000000
+#define CODEINTEGRITYPOLICY_OPTION_LOCKDOWN 0x80000000
+
+// SYSTEM_CODEINTEGRITYPOLICY_INFORMATION HVCIOptions
+#define CODEINTEGRITYPOLICY_HVCIOPTION_ENABLED 0x01
+#define CODEINTEGRITYPOLICY_HVCIOPTION_STRICT 0x02
+#define CODEINTEGRITYPOLICY_HVCIOPTION_DEBUG 0x04
 
 // private
 typedef struct _SYSTEM_CODEINTEGRITYPOLICY_INFORMATION
@@ -3147,7 +3912,12 @@ typedef struct _SYSTEM_ISOLATED_USER_MODE_INFORMATION
     BOOLEAN SpareFlags : 2;
     BOOLEAN TrustletRunning : 1;
     BOOLEAN HvciDisableAllowed : 1;
-    BOOLEAN SpareFlags2 : 6;
+    BOOLEAN HardwareEnforcedVbs : 1;
+    BOOLEAN NoSecrets : 1;
+    BOOLEAN EncryptionKeyPersistent : 1;
+    BOOLEAN HardwareEnforcedHvpt : 1;
+    BOOLEAN HardwareHvptAvailable : 1;
+    BOOLEAN SpareFlags2 : 1;
     BOOLEAN Spare0[6];
     ULONGLONG Spare1;
 } SYSTEM_ISOLATED_USER_MODE_INFORMATION, *PSYSTEM_ISOLATED_USER_MODE_INFORMATION;
@@ -3224,6 +3994,41 @@ typedef struct _SYSTEM_SECUREBOOT_PLATFORM_MANIFEST_INFORMATION
     ULONG PlatformManifestSize;
     UCHAR PlatformManifest[1];
 } SYSTEM_SECUREBOOT_PLATFORM_MANIFEST_INFORMATION, *PSYSTEM_SECUREBOOT_PLATFORM_MANIFEST_INFORMATION;
+
+// private
+typedef struct _SYSTEM_INTERRUPT_STEERING_INFORMATION_INPUT
+{
+    ULONG Gsiv;
+    UCHAR ControllerInterrupt;
+    UCHAR EdgeInterrupt;
+    UCHAR IsPrimaryInterrupt;
+    GROUP_AFFINITY TargetAffinity;
+} SYSTEM_INTERRUPT_STEERING_INFORMATION_INPUT, *PSYSTEM_INTERRUPT_STEERING_INFORMATION_INPUT;
+
+// private
+typedef union _SYSTEM_INTERRUPT_STEERING_INFORMATION_OUTPUT
+{
+    ULONG AsULONG;
+    struct
+    {
+        ULONG Enabled : 1;
+        ULONG Reserved : 31;
+    };
+} SYSTEM_INTERRUPT_STEERING_INFORMATION_OUTPUT, *PSYSTEM_INTERRUPT_STEERING_INFORMATION_OUTPUT;
+
+#if !defined(NTDDI_WIN10_FE) || (NTDDI_VERSION < NTDDI_WIN10_FE)
+// private
+typedef struct _SYSTEM_SUPPORTED_PROCESSOR_ARCHITECTURES_INFORMATION
+{
+    ULONG Machine : 16;
+    ULONG KernelMode : 1;
+    ULONG UserMode : 1;
+    ULONG Native : 1;
+    ULONG Process : 1;
+    ULONG WoW64Container : 1;
+    ULONG ReservedZero0 : 11;
+} SYSTEM_SUPPORTED_PROCESSOR_ARCHITECTURES_INFORMATION, *PSYSTEM_SUPPORTED_PROCESSOR_ARCHITECTURES_INFORMATION;
+#endif
 
 // private
 typedef struct _SYSTEM_MEMORY_USAGE_INFORMATION
@@ -3327,7 +4132,7 @@ typedef struct _SYSTEM_KERNEL_VA_SHADOW_INFORMATION
 {
     union
     {
-        ULONG Flags;
+        ULONG KvaShadowFlags;
         struct
         {
             ULONG KvaShadowEnabled : 1;
@@ -3352,10 +4157,18 @@ typedef struct _SYSTEM_CODEINTEGRITYVERIFICATION_INFORMATION
     PVOID Image;
 } SYSTEM_CODEINTEGRITYVERIFICATION_INFORMATION, *PSYSTEM_CODEINTEGRITYVERIFICATION_INFORMATION;
 
+// rev
+typedef struct _SYSTEM_HYPERVISOR_USER_SHARED_DATA
+{
+    ULONGLONG TimeUpdateLock; // QpcSystemTimeIncrement?
+    volatile ULONGLONG QpcMultiplier;
+    volatile ULONGLONG QpcBias; // HvlGetQpcBias
+} SYSTEM_HYPERVISOR_USER_SHARED_DATA, *PSYSTEM_HYPERVISOR_USER_SHARED_DATA;
+
 // private
 typedef struct _SYSTEM_HYPERVISOR_SHARED_PAGE_INFORMATION
 {
-    PVOID HypervisorSharedUserVa;
+    PSYSTEM_HYPERVISOR_USER_SHARED_DATA HypervisorSharedUserVa;
 } SYSTEM_HYPERVISOR_SHARED_PAGE_INFORMATION, *PSYSTEM_HYPERVISOR_SHARED_PAGE_INFORMATION;
 
 // private
@@ -3399,9 +4212,35 @@ typedef struct _SYSTEM_SPECULATION_CONTROL_INFORMATION
             ULONG MdsHardwareProtected : 1; // since 19H2
             ULONG MbClearEnabled : 1;
             ULONG MbClearReported : 1;
-            ULONG Reserved : 5;
+            ULONG ReservedTaa : 4;
+            ULONG Reserved : 1;
         };
-    };
+    } SpeculationControlFlags;
+    union
+    {
+        ULONG Flags; // since 23H2
+        struct
+        {
+            ULONG SbdrSsdpHardwareProtected : 1;
+            ULONG FbsdpHardwareProtected : 1;
+            ULONG PsdpHardwareProtected : 1;
+            ULONG FbClearEnabled : 1;
+            ULONG FbClearReported : 1;
+            ULONG BhbEnabled : 1;
+            ULONG BhbDisabledSystemPolicy : 1;
+            ULONG BhbDisabledNoHardwareSupport : 1;
+            ULONG BranchConfusionStatus : 2;
+            ULONG BranchConfusionReported : 1;
+            ULONG RdclHardwareProtectedReported : 1;
+            ULONG RdclHardwareProtected : 1;
+            ULONG Reserved3 : 4;
+            ULONG Reserved4 : 3;
+            ULONG DivideByZeroReported : 1;
+            ULONG DivideByZeroStatus : 1;
+            ULONG Reserved5 : 3;
+            ULONG Reserved : 7;
+        };
+    } SpeculationControlFlags2;
 } SYSTEM_SPECULATION_CONTROL_INFORMATION, *PSYSTEM_SPECULATION_CONTROL_INFORMATION;
 
 // private
@@ -3431,12 +4270,324 @@ typedef struct _SYSTEM_SECURITY_MODEL_INFORMATION
         ULONG SecurityModelFlags;
         struct
         {
-            ULONG SModeAdminlessEnabled : 1;
+            ULONG ReservedFlag : 1; // SModeAdminlessEnabled
             ULONG AllowDeviceOwnerProtectionDowngrade : 1;
             ULONG Reserved : 30;
         };
     };
 } SYSTEM_SECURITY_MODEL_INFORMATION, *PSYSTEM_SECURITY_MODEL_INFORMATION;
+
+// private
+typedef union _SECURE_SPECULATION_CONTROL_INFORMATION
+{
+    ULONG KvaShadowSupported : 1;
+    ULONG KvaShadowEnabled : 1;
+    ULONG KvaShadowUserGlobal : 1;
+    ULONG KvaShadowPcid : 1;
+    ULONG MbClearEnabled : 1;
+    ULONG L1TFMitigated : 1; // since 20H2
+    ULONG BpbEnabled : 1;
+    ULONG IbrsPresent : 1;
+    ULONG EnhancedIbrs : 1;
+    ULONG StibpPresent : 1;
+    ULONG SsbdSupported : 1;
+    ULONG SsbdRequired : 1;
+    ULONG BpbKernelToUser : 1;
+    ULONG BpbUserToKernel : 1;
+    ULONG ReturnSpeculate : 1;
+    ULONG BranchConfusionSafe : 1;
+    ULONG SsbsEnabledAlways : 1; // 24H2
+    ULONG SsbsEnabledKernel : 1;
+    ULONG Reserved : 14;
+} SECURE_SPECULATION_CONTROL_INFORMATION, *PSECURE_SPECULATION_CONTROL_INFORMATION;
+
+// private
+typedef struct _SYSTEM_FIRMWARE_RAMDISK_INFORMATION
+{
+    ULONG Version;
+    ULONG BlockSize;
+    ULONG_PTR BaseAddress;
+    SIZE_T Size;
+} SYSTEM_FIRMWARE_RAMDISK_INFORMATION, *PSYSTEM_FIRMWARE_RAMDISK_INFORMATION;
+
+// private
+typedef struct _SYSTEM_SHADOW_STACK_INFORMATION
+{
+    union
+    {
+        ULONG Flags;
+        struct
+        {
+            ULONG CetCapable : 1;
+            ULONG UserCetAllowed : 1;
+            ULONG ReservedForUserCet : 6;
+            ULONG KernelCetEnabled : 1;
+            ULONG KernelCetAuditModeEnabled : 1;
+            ULONG ReservedForKernelCet : 6; // since Windows 10 build 21387
+            ULONG Reserved : 16;
+        };
+    };
+} SYSTEM_SHADOW_STACK_INFORMATION, *PSYSTEM_SHADOW_STACK_INFORMATION;
+
+// private
+typedef union _SYSTEM_BUILD_VERSION_INFORMATION_FLAGS
+{
+    ULONG Value32;
+    struct
+    {
+        ULONG IsTopLevel : 1;
+        ULONG IsChecked : 1;
+    };
+} SYSTEM_BUILD_VERSION_INFORMATION_FLAGS, *PSYSTEM_BUILD_VERSION_INFORMATION_FLAGS;
+
+// private
+typedef struct _SYSTEM_BUILD_VERSION_INFORMATION
+{
+    USHORT LayerNumber;
+    USHORT LayerCount;
+    ULONG OsMajorVersion;
+    ULONG OsMinorVersion;
+    ULONG NtBuildNumber;
+    ULONG NtBuildQfe;
+    UCHAR LayerName[128];
+    UCHAR NtBuildBranch[128];
+    UCHAR NtBuildLab[128];
+    UCHAR NtBuildLabEx[128];
+    UCHAR NtBuildStamp[26];
+    UCHAR NtBuildArch[16];
+    SYSTEM_BUILD_VERSION_INFORMATION_FLAGS Flags;
+} SYSTEM_BUILD_VERSION_INFORMATION, *PSYSTEM_BUILD_VERSION_INFORMATION;
+
+// private
+typedef struct _SYSTEM_POOL_LIMIT_MEM_INFO
+{
+    ULONGLONG MemoryLimit;
+    ULONGLONG NotificationLimit;
+} SYSTEM_POOL_LIMIT_MEM_INFO, *PSYSTEM_POOL_LIMIT_MEM_INFO;
+
+// private
+typedef struct _SYSTEM_POOL_LIMIT_INFO
+{
+    ULONG PoolTag;
+    SYSTEM_POOL_LIMIT_MEM_INFO MemLimits[2];
+    WNF_STATE_NAME NotificationHandle;
+} SYSTEM_POOL_LIMIT_INFO, *PSYSTEM_POOL_LIMIT_INFO;
+
+// private
+typedef struct _SYSTEM_POOL_LIMIT_INFORMATION
+{
+    ULONG Version;
+    ULONG EntryCount;
+    _Field_size_(EntryCount) SYSTEM_POOL_LIMIT_INFO LimitEntries[1];
+} SYSTEM_POOL_LIMIT_INFORMATION, *PSYSTEM_POOL_LIMIT_INFORMATION;
+
+// private
+//typedef struct _SYSTEM_POOL_ZEROING_INFORMATION
+//{
+//    BOOLEAN PoolZeroingSupportPresent;
+//} SYSTEM_POOL_ZEROING_INFORMATION, *PSYSTEM_POOL_ZEROING_INFORMATION;
+
+// private
+typedef struct _HV_MINROOT_NUMA_LPS
+{
+    ULONG NodeIndex;
+    ULONG_PTR Mask[16];
+} HV_MINROOT_NUMA_LPS, *PHV_MINROOT_NUMA_LPS;
+
+// private
+typedef struct _SYSTEM_XFG_FAILURE_INFORMATION
+{
+    PVOID ReturnAddress;
+    PVOID TargetAddress;
+    ULONG DispatchMode;
+    ULONGLONG XfgValue;
+} SYSTEM_XFG_FAILURE_INFORMATION, *PSYSTEM_XFG_FAILURE_INFORMATION;
+
+// private
+typedef enum _SYSTEM_IOMMU_STATE
+{
+    IommuStateBlock,
+    IommuStateUnblock
+} SYSTEM_IOMMU_STATE;
+
+// private
+typedef struct _SYSTEM_IOMMU_STATE_INFORMATION
+{
+    SYSTEM_IOMMU_STATE State;
+    PVOID Pdo;
+} SYSTEM_IOMMU_STATE_INFORMATION, *PSYSTEM_IOMMU_STATE_INFORMATION;
+
+// private
+typedef struct _SYSTEM_HYPERVISOR_MINROOT_INFORMATION
+{
+    ULONG NumProc;
+    ULONG RootProc;
+    ULONG RootProcNumaNodesSpecified;
+    USHORT RootProcNumaNodes[64];
+    ULONG RootProcPerCore;
+    ULONG RootProcPerNode;
+    ULONG RootProcNumaNodesLpsSpecified;
+    HV_MINROOT_NUMA_LPS RootProcNumaNodeLps[64];
+} SYSTEM_HYPERVISOR_MINROOT_INFORMATION, *PSYSTEM_HYPERVISOR_MINROOT_INFORMATION;
+
+// private
+typedef struct _SYSTEM_HYPERVISOR_BOOT_PAGES_INFORMATION
+{
+    ULONG RangeCount;
+    ULONG_PTR RangeArray[1];
+} SYSTEM_HYPERVISOR_BOOT_PAGES_INFORMATION, *PSYSTEM_HYPERVISOR_BOOT_PAGES_INFORMATION;
+
+// private
+typedef struct _SYSTEM_POINTER_AUTH_INFORMATION
+{
+    union
+    {
+        USHORT SupportedFlags;
+        struct
+        {
+            USHORT AddressAuthSupported : 1;
+            USHORT AddressAuthQarma : 1;
+            USHORT GenericAuthSupported : 1;
+            USHORT GenericAuthQarma : 1;
+            USHORT AddressAuthFaulting : 1;
+            USHORT SupportedReserved : 11;
+        };
+    };
+    union
+    {
+        USHORT EnabledFlags;
+        struct
+        {
+            USHORT UserPerProcessIpAuthEnabled : 1;
+            USHORT UserGlobalIpAuthEnabled : 1;
+            USHORT UserEnabledReserved : 6;
+            USHORT KernelIpAuthEnabled : 1;
+            USHORT KernelEnabledReserved : 7;
+        };
+    };
+} SYSTEM_POINTER_AUTH_INFORMATION, *PSYSTEM_POINTER_AUTH_INFORMATION;
+
+// private
+typedef struct _SYSTEM_ORIGINAL_IMAGE_FEATURE_INFORMATION_INPUT
+{
+    ULONG Version;
+    PWSTR FeatureName;
+    ULONG BornOnVersion;
+} SYSTEM_ORIGINAL_IMAGE_FEATURE_INFORMATION_INPUT, *PSYSTEM_ORIGINAL_IMAGE_FEATURE_INFORMATION_INPUT;
+
+// private
+typedef struct _SYSTEM_ORIGINAL_IMAGE_FEATURE_INFORMATION_OUTPUT
+{
+    ULONG Version;
+    BOOLEAN FeatureIsEnabled;
+} SYSTEM_ORIGINAL_IMAGE_FEATURE_INFORMATION_OUTPUT, *PSYSTEM_ORIGINAL_IMAGE_FEATURE_INFORMATION_OUTPUT;
+
+// private
+typedef struct _SYSTEM_MEMORY_NUMA_INFORMATION_INPUT
+{
+    ULONG Version;
+    ULONG TargetNodeNumber;
+    ULONG Flags;
+} SYSTEM_MEMORY_NUMA_INFORMATION_INPUT, *PSYSTEM_MEMORY_NUMA_INFORMATION_INPUT;
+
+// private
+typedef struct _SYSTEM_MEMORY_NUMA_INFORMATION_OUTPUT
+{
+    ULONG Version;
+    ULONG Size;
+    ULONG InitiatorNode;
+    union
+    {
+        ULONG Flags;
+        struct
+        {
+            ULONG IsAttached : 1;
+            ULONG Reserved : 31;
+        };
+    };
+} SYSTEM_MEMORY_NUMA_INFORMATION_OUTPUT, *PSYSTEM_MEMORY_NUMA_INFORMATION_OUTPUT;
+
+// private
+typedef enum _SYSTEM_MEMORY_NUMA_PERFORMANCE_QUERY_DATA_TYPES
+{
+    SystemMemoryNumaPerformanceQuery_ReadLatency,
+    SystemMemoryNumaPerformanceQuery_ReadBandwidth,
+    SystemMemoryNumaPerformanceQuery_WriteLatency,
+    SystemMemoryNumaPerformanceQuery_WriteBandwidth,
+    SystemMemoryNumaPerformanceQuery_Latency,
+    SystemMemoryNumaPerformanceQuery_Bandwidth,
+    SystemMemoryNumaPerformanceQuery_AllDataTypes,
+    SystemMemoryNumaPerformanceQuery_MaxDataType
+} SYSTEM_MEMORY_NUMA_PERFORMANCE_QUERY_DATA_TYPES;
+
+// private
+typedef struct _SYSTEM_MEMORY_NUMA_PERFORMANCE_INFORMATION_INPUT
+{
+    ULONG Version;
+    ULONG TargetNodeNumber;
+    SYSTEM_MEMORY_NUMA_PERFORMANCE_QUERY_DATA_TYPES QueryDataType;
+    ULONG Flags;
+} SYSTEM_MEMORY_NUMA_PERFORMANCE_INFORMATION_INPUT, *PSYSTEM_MEMORY_NUMA_PERFORMANCE_INFORMATION_INPUT;
+
+// private
+typedef struct _SYSTEM_MEMORY_NUMA_PERFORMANCE_ENTRY
+{
+    ULONG InitiatorNodeNumber;
+    ULONG TargetNodeNumber;
+    SYSTEM_MEMORY_NUMA_PERFORMANCE_QUERY_DATA_TYPES DataType;
+    union
+    {
+        BOOLEAN Flags;
+        struct
+        {
+            BOOLEAN MinTransferSizeToAchieveValues : 1;
+            BOOLEAN NonSequentialTransfers : 1;
+            BOOLEAN Reserved : 6;
+        };
+    };
+    ULONG_PTR MinTransferSizeInBytes;
+    ULONG_PTR EntryValue;
+} SYSTEM_MEMORY_NUMA_PERFORMANCE_ENTRY, *PSYSTEM_MEMORY_NUMA_PERFORMANCE_ENTRY;
+
+// private
+typedef struct _SYSTEM_MEMORY_NUMA_PERFORMANCE_INFORMATION_OUTPUT
+{
+    ULONG Version;
+    ULONG Size;
+    ULONG EntryCount;
+    SYSTEM_MEMORY_NUMA_PERFORMANCE_ENTRY PerformanceEntries[1];
+} SYSTEM_MEMORY_NUMA_PERFORMANCE_INFORMATION_OUTPUT, *PSYSTEM_MEMORY_NUMA_PERFORMANCE_INFORMATION_OUTPUT;
+
+// private
+typedef struct _SYSTEM_OSL_RAMDISK_ENTRY
+{
+    ULONG BlockSize;
+    ULONG_PTR BaseAddress;
+    SIZE_T Size;
+} SYSTEM_OSL_RAMDISK_ENTRY, *PSYSTEM_OSL_RAMDISK_ENTRY;
+
+// private
+typedef struct _SYSTEM_TRUSTEDAPPS_RUNTIME_INFORMATION
+{
+    union
+    {
+        ULONGLONG Flags;
+        struct
+        {
+            ULONGLONG Supported : 1;
+            ULONGLONG Spare : 63;
+        };
+    };
+    PVOID RemoteBreakingRoutine;
+} SYSTEM_TRUSTEDAPPS_RUNTIME_INFORMATION, *PSYSTEM_TRUSTEDAPPS_RUNTIME_INFORMATION;
+
+// private
+typedef struct _SYSTEM_OSL_RAMDISK_INFORMATION
+{
+    ULONG Version;
+    ULONG Count;
+    SYSTEM_OSL_RAMDISK_ENTRY Entries[1];
+} SYSTEM_OSL_RAMDISK_INFORMATION, *PSYSTEM_OSL_RAMDISK_INFORMATION;
 
 #if (PHNT_MODE != PHNT_MODE_KERNEL)
 
@@ -3481,24 +4632,24 @@ typedef enum _SYSDBG_COMMAND
     SysDbgQueryModuleInformation,
     SysDbgQueryTraceInformation,
     SysDbgSetTracepoint,
-    SysDbgSetSpecialCall,
-    SysDbgClearSpecialCalls,
+    SysDbgSetSpecialCall, // PVOID
+    SysDbgClearSpecialCalls, // void
     SysDbgQuerySpecialCalls,
     SysDbgBreakPoint,
-    SysDbgQueryVersion,
-    SysDbgReadVirtual,
-    SysDbgWriteVirtual,
-    SysDbgReadPhysical,
-    SysDbgWritePhysical,
-    SysDbgReadControlSpace,
-    SysDbgWriteControlSpace,
-    SysDbgReadIoSpace,
-    SysDbgWriteIoSpace,
-    SysDbgReadMsr,
-    SysDbgWriteMsr,
-    SysDbgReadBusData,
-    SysDbgWriteBusData,
-    SysDbgCheckLowMemory,
+    SysDbgQueryVersion, // DBGKD_GET_VERSION64
+    SysDbgReadVirtual, // SYSDBG_VIRTUAL
+    SysDbgWriteVirtual, // SYSDBG_VIRTUAL
+    SysDbgReadPhysical, // SYSDBG_PHYSICAL // 10
+    SysDbgWritePhysical, // SYSDBG_PHYSICAL
+    SysDbgReadControlSpace, // SYSDBG_CONTROL_SPACE
+    SysDbgWriteControlSpace, // SYSDBG_CONTROL_SPACE
+    SysDbgReadIoSpace, // SYSDBG_IO_SPACE
+    SysDbgWriteIoSpace, // SYSDBG_IO_SPACE
+    SysDbgReadMsr, // SYSDBG_MSR
+    SysDbgWriteMsr, // SYSDBG_MSR
+    SysDbgReadBusData, // SYSDBG_BUS_DATA
+    SysDbgWriteBusData, // SYSDBG_BUS_DATA
+    SysDbgCheckLowMemory, // 20
     SysDbgEnableKernelDebugger,
     SysDbgDisableKernelDebugger,
     SysDbgGetAutoKdEnable,
@@ -3507,15 +4658,17 @@ typedef enum _SYSDBG_COMMAND
     SysDbgSetPrintBufferSize,
     SysDbgGetKdUmExceptionEnable,
     SysDbgSetKdUmExceptionEnable,
-    SysDbgGetTriageDump,
-    SysDbgGetKdBlockEnable,
+    SysDbgGetTriageDump, // SYSDBG_TRIAGE_DUMP
+    SysDbgGetKdBlockEnable, // 30
     SysDbgSetKdBlockEnable,
     SysDbgRegisterForUmBreakInfo,
     SysDbgGetUmBreakPid,
     SysDbgClearUmBreakPid,
     SysDbgGetUmAttachPid,
     SysDbgClearUmAttachPid,
-    SysDbgGetLiveKernelDump
+    SysDbgGetLiveKernelDump, // SYSDBG_LIVEDUMP_CONTROL
+    SysDbgKdPullRemoteFile, // SYSDBG_KD_PULL_REMOTE_FILE
+    SysDbgMaxInfoClass
 } SYSDBG_COMMAND, *PSYSDBG_COMMAND;
 
 typedef struct _SYSDBG_VIRTUAL
@@ -3593,7 +4746,8 @@ typedef union _SYSDBG_LIVEDUMP_CONTROL_FLAGS
         ULONG CompressMemoryPagesData : 1;
         ULONG IncludeUserSpaceMemoryPages : 1;
         ULONG AbortIfMemoryPressure : 1; // REDSTONE4
-        ULONG Reserved : 28;
+        ULONG SelectiveDump : 1; // WIN11
+        ULONG Reserved : 27;
     };
     ULONG AsUlong;
 } SYSDBG_LIVEDUMP_CONTROL_FLAGS, *PSYSDBG_LIVEDUMP_CONTROL_FLAGS;
@@ -3604,12 +4758,34 @@ typedef union _SYSDBG_LIVEDUMP_CONTROL_ADDPAGES
     struct
     {
         ULONG HypervisorPages : 1;
-        ULONG Reserved : 31;
+        ULONG NonEssentialHypervisorPages : 1; // since WIN11
+        ULONG Reserved : 30;
     };
     ULONG AsUlong;
 } SYSDBG_LIVEDUMP_CONTROL_ADDPAGES, *PSYSDBG_LIVEDUMP_CONTROL_ADDPAGES;
 
-#define SYSDBG_LIVEDUMP_CONTROL_VERSION 1
+#define SYSDBG_LIVEDUMP_SELECTIVE_CONTROL_VERSION 1
+
+// rev
+typedef struct _SYSDBG_LIVEDUMP_SELECTIVE_CONTROL
+{
+    ULONG Version;
+    ULONG Size;
+    union
+    {
+        ULONGLONG Flags;
+        struct
+        {
+            ULONGLONG ThreadKernelStacks : 1;
+            ULONGLONG ReservedFlags : 63;
+        };
+    };
+    ULONGLONG Reserved[4];
+} SYSDBG_LIVEDUMP_SELECTIVE_CONTROL, *PSYSDBG_LIVEDUMP_SELECTIVE_CONTROL;
+
+#define SYSDBG_LIVEDUMP_CONTROL_VERSION_1 1
+#define SYSDBG_LIVEDUMP_CONTROL_VERSION_2 2
+#define SYSDBG_LIVEDUMP_CONTROL_VERSION SYSDBG_LIVEDUMP_CONTROL_VERSION_2
 
 // private
 typedef struct _SYSDBG_LIVEDUMP_CONTROL
@@ -3624,7 +4800,14 @@ typedef struct _SYSDBG_LIVEDUMP_CONTROL
     HANDLE CancelEventHandle;
     SYSDBG_LIVEDUMP_CONTROL_FLAGS Flags;
     SYSDBG_LIVEDUMP_CONTROL_ADDPAGES AddPagesControl;
+    PSYSDBG_LIVEDUMP_SELECTIVE_CONTROL SelectiveControl; // since WIN11
 } SYSDBG_LIVEDUMP_CONTROL, *PSYSDBG_LIVEDUMP_CONTROL;
+
+// private
+typedef struct _SYSDBG_KD_PULL_REMOTE_FILE
+{
+    UNICODE_STRING ImageFileName;
+} SYSDBG_KD_PULL_REMOTE_FILE, *PSYSDBG_KD_PULL_REMOTE_FILE;
 
 NTSYSCALLAPI
 NTSTATUS
@@ -3682,7 +4865,9 @@ NtRaiseHardError(
     _Out_ PULONG Response
     );
 
+//
 // Kernel-user shared data
+//
 
 typedef enum _ALTERNATIVE_ARCHITECTURE_TYPE
 {
@@ -3695,62 +4880,280 @@ typedef enum _ALTERNATIVE_ARCHITECTURE_TYPE
 
 #define MAX_WOW64_SHARED_ENTRIES 16
 
-#define NX_SUPPORT_POLICY_ALWAYSOFF 0
-#define NX_SUPPORT_POLICY_ALWAYSON 1
-#define NX_SUPPORT_POLICY_OPTIN 2
-#define NX_SUPPORT_POLICY_OPTOUT 3
+//
+// Define NX support policy values.
+//
 
-#include <pshpack4.h>
+#define NX_SUPPORT_POLICY_ALWAYSOFF     0
+#define NX_SUPPORT_POLICY_ALWAYSON      1
+#define NX_SUPPORT_POLICY_OPTIN         2
+#define NX_SUPPORT_POLICY_OPTOUT        3
+
+//
+// SEH chain validation policies.
+//
+
+#define SEH_VALIDATION_POLICY_ON        0
+#define SEH_VALIDATION_POLICY_OFF       1
+#define SEH_VALIDATION_POLICY_TELEMETRY 2
+#define SEH_VALIDATION_POLICY_DEFER     3
+
+//
+// Global shared data flags and manipulation macros.
+//
+
+#define SHARED_GLOBAL_FLAGS_ERROR_PORT_V                0x0
+#define SHARED_GLOBAL_FLAGS_ERROR_PORT                  \
+    (1UL << SHARED_GLOBAL_FLAGS_ERROR_PORT_V)
+
+#define SHARED_GLOBAL_FLAGS_ELEVATION_ENABLED_V         0x1
+#define SHARED_GLOBAL_FLAGS_ELEVATION_ENABLED           \
+    (1UL << SHARED_GLOBAL_FLAGS_ELEVATION_ENABLED_V)
+
+#define SHARED_GLOBAL_FLAGS_VIRT_ENABLED_V              0x2
+#define SHARED_GLOBAL_FLAGS_VIRT_ENABLED                \
+    (1UL << SHARED_GLOBAL_FLAGS_VIRT_ENABLED_V)
+
+#define SHARED_GLOBAL_FLAGS_INSTALLER_DETECT_ENABLED_V  0x3
+#define SHARED_GLOBAL_FLAGS_INSTALLER_DETECT_ENABLED    \
+    (1UL << SHARED_GLOBAL_FLAGS_INSTALLER_DETECT_ENABLED_V)
+
+#define SHARED_GLOBAL_FLAGS_LKG_ENABLED_V               0x4
+#define SHARED_GLOBAL_FLAGS_LKG_ENABLED                 \
+    (1UL << SHARED_GLOBAL_FLAGS_LKG_ENABLED_V)
+
+#define SHARED_GLOBAL_FLAGS_DYNAMIC_PROC_ENABLED_V      0x5
+#define SHARED_GLOBAL_FLAGS_DYNAMIC_PROC_ENABLED        \
+    (1UL << SHARED_GLOBAL_FLAGS_DYNAMIC_PROC_ENABLED_V)
+
+#define SHARED_GLOBAL_FLAGS_CONSOLE_BROKER_ENABLED_V    0x6
+#define SHARED_GLOBAL_FLAGS_CONSOLE_BROKER_ENABLED      \
+    (1UL << SHARED_GLOBAL_FLAGS_CONSOLE_BROKER_ENABLED_V)
+
+#define SHARED_GLOBAL_FLAGS_SECURE_BOOT_ENABLED_V       0x7
+#define SHARED_GLOBAL_FLAGS_SECURE_BOOT_ENABLED         \
+    (1UL << SHARED_GLOBAL_FLAGS_SECURE_BOOT_ENABLED_V)
+
+#define SHARED_GLOBAL_FLAGS_MULTI_SESSION_SKU_V         0x8
+#define SHARED_GLOBAL_FLAGS_MULTI_SESSION_SKU           \
+    (1UL << SHARED_GLOBAL_FLAGS_MULTI_SESSION_SKU_V)
+
+#define SHARED_GLOBAL_FLAGS_MULTIUSERS_IN_SESSION_SKU_V 0x9
+#define SHARED_GLOBAL_FLAGS_MULTIUSERS_IN_SESSION_SKU   \
+    (1UL << SHARED_GLOBAL_FLAGS_MULTIUSERS_IN_SESSION_SKU_V)
+
+#define SHARED_GLOBAL_FLAGS_STATE_SEPARATION_ENABLED_V 0xA
+#define SHARED_GLOBAL_FLAGS_STATE_SEPARATION_ENABLED   \
+    (1UL << SHARED_GLOBAL_FLAGS_STATE_SEPARATION_ENABLED_V)
+
+#define SHARED_GLOBAL_FLAGS_SET_GLOBAL_DATA_FLAG        0x40000000
+#define SHARED_GLOBAL_FLAGS_CLEAR_GLOBAL_DATA_FLAG      0x80000000
+
+//
+// Define legal values for the SystemCall member.
+//
+
+#define SYSTEM_CALL_SYSCALL 0
+#define SYSTEM_CALL_INT_2E  1
+
+//
+// Define flags for QPC bypass information. None of these flags may be set
+// unless bypass is enabled. This is for compat with existing code which
+// compares this value to zero to detect bypass enablement.
+//
+
+#define SHARED_GLOBAL_FLAGS_QPC_BYPASS_ENABLED (0x01)
+#define SHARED_GLOBAL_FLAGS_QPC_BYPASS_USE_HV_PAGE (0x02)
+#define SHARED_GLOBAL_FLAGS_QPC_BYPASS_DISABLE_32BIT (0x04)
+#define SHARED_GLOBAL_FLAGS_QPC_BYPASS_USE_MFENCE (0x10)
+#define SHARED_GLOBAL_FLAGS_QPC_BYPASS_USE_LFENCE (0x20)
+#define SHARED_GLOBAL_FLAGS_QPC_BYPASS_A73_ERRATA (0x40)
+#define SHARED_GLOBAL_FLAGS_QPC_BYPASS_USE_RDTSCP (0x80)
+
+
 typedef struct _KUSER_SHARED_DATA
 {
+    //
+    // Current low 32-bit of tick count and tick count multiplier.
+    //
+    // N.B. The tick count is updated each time the clock ticks.
+    //
+
     ULONG TickCountLowDeprecated;
     ULONG TickCountMultiplier;
 
+    //
+    // Current 64-bit interrupt time in 100ns units.
+    //
+
     volatile KSYSTEM_TIME InterruptTime;
+
+    //
+    // Current 64-bit system time in 100ns units.
+    //
+
     volatile KSYSTEM_TIME SystemTime;
+
+    //
+    // Current 64-bit time zone bias.
+    //
+
     volatile KSYSTEM_TIME TimeZoneBias;
+
+    //
+    // Support image magic number range for the host system.
+    //
+    // N.B. This is an inclusive range.
+    //
 
     USHORT ImageNumberLow;
     USHORT ImageNumberHigh;
 
+    //
+    // Copy of system root in unicode.
+    //
+    // N.B. This field must be accessed via the RtlGetNtSystemRoot API for
+    //      an accurate result.
+    //
+
     WCHAR NtSystemRoot[260];
+
+    //
+    // Maximum stack trace depth if tracing enabled.
+    //
 
     ULONG MaxStackTraceDepth;
 
+    //
+    // Crypto exponent value.
+    //
+
     ULONG CryptoExponent;
 
+    //
+    // Time zone ID.
+    //
+
     ULONG TimeZoneId;
+
     ULONG LargePageMinimum;
+
+    //
+    // This value controls the AIT Sampling rate.
+    //
+
     ULONG AitSamplingValue;
+
+    //
+    // This value controls switchback processing.
+    //
+
     ULONG AppCompatFlag;
+
+    //
+    // Current Kernel Root RNG state seed version
+    //
+
     ULONGLONG RNGSeedVersion;
+
+    //
+    // This value controls assertion failure handling.
+    //
+
     ULONG GlobalValidationRunlevel;
-    LONG TimeZoneBiasStamp;
+
+    volatile LONG TimeZoneBiasStamp;
+
+    //
+    // The shared collective build number undecorated with C or F.
+    // GetVersionEx hides the real number
+    //
 
     ULONG NtBuildNumber;
+
+    //
+    // Product type.
+    //
+    // N.B. This field must be accessed via the RtlGetNtProductType API for
+    //      an accurate result.
+    //
+
     NT_PRODUCT_TYPE NtProductType;
     BOOLEAN ProductTypeIsValid;
-    UCHAR Reserved0[1];
+    BOOLEAN Reserved0[1];
     USHORT NativeProcessorArchitecture;
+
+    //
+    // The NT Version.
+    //
+    // N. B. Note that each process sees a version from its PEB, but if the
+    //       process is running with an altered view of the system version,
+    //       the following two fields are used to correctly identify the
+    //       version
+    //
 
     ULONG NtMajorVersion;
     ULONG NtMinorVersion;
 
+    //
+    // Processor features.
+    //
+
     BOOLEAN ProcessorFeatures[PROCESSOR_FEATURE_MAX];
+
+    //
+    // Reserved fields - do not use.
+    //
 
     ULONG Reserved1;
     ULONG Reserved3;
 
+    //
+    // Time slippage while in debugger.
+    //
+
     volatile ULONG TimeSlip;
 
+    //
+    // Alternative system architecture, e.g., NEC PC98xx on x86.
+    //
+
     ALTERNATIVE_ARCHITECTURE_TYPE AlternativeArchitecture;
+
+    //
+    // Boot sequence, incremented for each boot attempt by the OS loader.
+    //
+
     ULONG BootId;
+
+    //
+    // If the system is an evaluation unit, the following field contains the
+    // date and time that the evaluation unit expires. A value of 0 indicates
+    // that there is no expiration. A non-zero value is the UTC absolute time
+    // that the system expires.
+    //
 
     LARGE_INTEGER SystemExpirationDate;
 
+    //
+    // Suite support.
+    //
+    // N.B. This field must be accessed via the RtlGetSuiteMask API for
+    //      an accurate result.
+    //
+
     ULONG SuiteMask;
 
+    //
+    // TRUE if a kernel debugger is connected/enabled.
+    //
+
     BOOLEAN KdDebuggerEnabled;
+
+    //
+    // Mitigation policies.
+    //
+
     union
     {
         UCHAR MitigationPolicies;
@@ -3763,124 +5166,479 @@ typedef struct _KUSER_SHARED_DATA
         };
     };
 
+    //
+    // Measured duration of a single processor yield, in cycles. This is used by
+    // lock packages to determine how many times to spin waiting for a state
+    // change before blocking.
+    //
+
     USHORT CyclesPerYield;
+
+    //
+    // Current console session Id. Always zero on non-TS systems.
+    //
+    // N.B. This field must be accessed via the RtlGetActiveConsoleId API for an
+    //      accurate result.
+    //
 
     volatile ULONG ActiveConsoleId;
 
+    //
+    // Force-dismounts cause handles to become invalid. Rather than always
+    // probe handles, a serial number of dismounts is maintained that clients
+    // can use to see if they need to probe handles.
+    //
+
     volatile ULONG DismountCount;
+
+    //
+    // This field indicates the status of the 64-bit COM+ package on the
+    // system. It indicates whether the Itermediate Language (IL) COM+
+    // images need to use the 64-bit COM+ runtime or the 32-bit COM+ runtime.
+    //
 
     ULONG ComPlusPackage;
 
+    //
+    // Time in tick count for system-wide last user input across all terminal
+    // sessions. For MP performance, it is not updated all the time (e.g. once
+    // a minute per session). It is used for idle detection.
+    //
+
     ULONG LastSystemRITEventTickCount;
+
+    //
+    // Number of physical pages in the system. This can dynamically change as
+    // physical memory can be added or removed from a running system.  This
+    // cell is too small to hold the non-truncated value on very large memory
+    // machines so code that needs the full value should access
+    // FullNumberOfPhysicalPages instead.
+    //
 
     ULONG NumberOfPhysicalPages;
 
+    //
+    // True if the system was booted in safe boot mode.
+    //
+
     BOOLEAN SafeBootMode;
-    UCHAR VirtualizationFlags;
+
+    //
+    // Virtualization flags.
+    //
+
+    union
+    {
+        UCHAR VirtualizationFlags;
+
+#if defined(_ARM64_)
+
+        //
+        // N.B. Keep this bitfield in sync with the one in arc.w.
+        //
+
+        struct
+        {
+            UCHAR ArchStartedInEl2 : 1;
+            UCHAR QcSlIsSupported : 1;
+            UCHAR : 6;
+        };
+
+#endif
+
+    };
+
+    //
+    // Reserved (available for reuse).
+    //
+
     UCHAR Reserved12[2];
+
+    //
+    // This is a packed bitfield that contains various flags concerning
+    // the system state. They must be manipulated using interlocked
+    // operations.
+    //
+    // N.B. DbgMultiSessionSku must be accessed via the RtlIsMultiSessionSku
+    //      API for an accurate result
+    //
 
     union
     {
         ULONG SharedDataFlags;
         struct
         {
-            ULONG DbgErrorPortPresent : 1;
-            ULONG DbgElevationEnabled : 1;
-            ULONG DbgVirtEnabled : 1;
+            //
+            // The following bit fields are for the debugger only. Do not use.
+            // Use the bit definitions instead.
+            //
+
+            ULONG DbgErrorPortPresent       : 1;
+            ULONG DbgElevationEnabled       : 1;
+            ULONG DbgVirtEnabled            : 1;
             ULONG DbgInstallerDetectEnabled : 1;
-            ULONG DbgLkgEnabled : 1;
-            ULONG DbgDynProcessorEnabled : 1;
-            ULONG DbgConsoleBrokerEnabled : 1;
-            ULONG DbgSecureBootEnabled : 1;
-            ULONG DbgMultiSessionSku : 1;
+            ULONG DbgLkgEnabled             : 1;
+            ULONG DbgDynProcessorEnabled    : 1;
+            ULONG DbgConsoleBrokerEnabled   : 1;
+            ULONG DbgSecureBootEnabled      : 1;
+            ULONG DbgMultiSessionSku        : 1;
             ULONG DbgMultiUsersInSessionSku : 1;
             ULONG DbgStateSeparationEnabled : 1;
-            ULONG SpareBits : 21;
-        };
-    };
+            ULONG DbgSplitTokenEnabled      : 1;
+            ULONG DbgShadowAdminEnabled     : 1;
+            ULONG SpareBits                 : 19;
+        } DUMMYSTRUCTNAME2;
+    } DUMMYUNIONNAME2;
+
     ULONG DataFlagsPad[1];
 
+    //
+    // Depending on the processor, the code for fast system call will differ,
+    // Stub code is provided pointers below to access the appropriate code.
+    //
+    // N.B. The following field is only used on 32-bit systems.
+    //
+
     ULONGLONG TestRetInstruction;
+
     LONGLONG QpcFrequency;
+
+    //
+    // On AMD64, this value is initialized to a nonzero value if the system
+    // operates with an altered view of the system service call mechanism.
+    //
+
     ULONG SystemCall;
-    ULONG SystemCallPad0;
-    ULONGLONG SystemCallPad[2];
+
+    //
+    // Reserved field - do not use. Used to be UserCetAvailableEnvironments.
+    //
+
+    ULONG Reserved2;
+
+    //
+    // Full 64 bit version of the number of physical pages in the system.
+    // This can dynamically change as physical memory can be added or removed
+    // from a running system.
+    //
+
+    ULONGLONG FullNumberOfPhysicalPages;
+
+    //
+    // Reserved, available for reuse.
+    //
+
+    ULONGLONG SystemCallPad[1];
+
+    //
+    // The 64-bit tick count.
+    //
 
     union
     {
         volatile KSYSTEM_TIME TickCount;
         volatile ULONG64 TickCountQuad;
-        ULONG ReservedTickCountOverlay[3];
-    };
-    ULONG TickCountPad[1];
+        struct
+        {
+            ULONG ReservedTickCountOverlay[3];
+            ULONG TickCountPad[1];
+        } DUMMYSTRUCTNAME;
+    } DUMMYUNIONNAME3;
+
+    //
+    // Cookie for encoding pointers system wide.
+    //
 
     ULONG Cookie;
     ULONG CookiePad[1];
 
+    //
+    // Client id of the process having the focus in the current
+    // active console session id.
+    //
+    // N.B. This field must be accessed via the
+    //      RtlGetConsoleSessionForegroundProcessId API for an accurate result.
+    //
+
     LONGLONG ConsoleSessionForegroundProcessId;
+
+    //
+    // N.B. The following data is used to implement the precise time
+    //      services. It is aligned on a 64-byte cache-line boundary and
+    //      arranged in the order of typical accesses.
+    //
+    // Placeholder for the (internal) time update lock.
+    //
+
     ULONGLONG TimeUpdateLock;
+
+    //
+    // The performance counter value used to establish the current system time.
+    //
+
     ULONGLONG BaselineSystemTimeQpc;
+
+    //
+    // The performance counter value used to compute the last interrupt time.
+    //
+
     ULONGLONG BaselineInterruptTimeQpc;
+
+    //
+    // The scaled number of system time seconds represented by a single
+    // performance count (this value may vary to achieve time synchronization).
+    //
+
     ULONGLONG QpcSystemTimeIncrement;
+
+    //
+    // The scaled number of interrupt time seconds represented by a single
+    // performance count (this value is constant after the system is booted).
+    //
+
     ULONGLONG QpcInterruptTimeIncrement;
+
+    //
+    // The scaling shift count applied to the performance counter system time
+    // increment.
+    //
+
     UCHAR QpcSystemTimeIncrementShift;
+
+    //
+    // The scaling shift count applied to the performance counter interrupt time
+    // increment.
+    //
+
     UCHAR QpcInterruptTimeIncrementShift;
 
+    //
+    // The count of unparked processors.
+    //
+
     USHORT UnparkedProcessorCount;
+
+    //
+    // A bitmask of enclave features supported on this system.
+    //
+    // N.B. This field must be accessed via the RtlIsEnclaveFeaturePresent API for an
+    //      accurate result.
+    //
+
     ULONG EnclaveFeatureMask[4];
-    
+
+    //
+    // Current coverage round for telemetry based coverage.
+    //
+
     ULONG TelemetryCoverageRound;
-    
+
+    //
+    // The following field is used for ETW user mode global logging
+    // (UMGL).
+    //
+
     USHORT UserModeGlobalLogger[16];
+
+    //
+    // Settings that can enable the use of Image File Execution Options
+    // from HKCU in addition to the original HKLM.
+    //
+
     ULONG ImageFileExecutionOptions;
 
+    //
+    // Generation of the kernel structure holding system language information
+    //
+
     ULONG LangGenerationCount;
+
+    //
+    // Reserved (available for reuse).
+    //
+
     ULONGLONG Reserved4;
-    volatile ULONG64 InterruptTimeBias;
-    volatile ULONG64 QpcBias;
+
+    //
+    // Current 64-bit interrupt time bias in 100ns units.
+    //
+
+    volatile ULONGLONG InterruptTimeBias;
+
+    //
+    // Current 64-bit performance counter bias, in performance counter units
+    // before the shift is applied.
+    //
+
+    volatile ULONGLONG QpcBias;
+
+    //
+    // Number of active processors and groups.
+    //
 
     ULONG ActiveProcessorCount;
     volatile UCHAR ActiveGroupCount;
+
+    //
+    // Reserved (available for re-use).
+    //
+
     UCHAR Reserved9;
+
     union
     {
         USHORT QpcData;
         struct
         {
-            UCHAR QpcBypassEnabled : 1;
-            UCHAR QpcShift : 1;
+            //
+            // A bitfield indicating whether performance counter queries can
+            // read the counter directly (bypassing the system call) and flags.
+            //
+
+            volatile UCHAR QpcBypassEnabled;
+
+            //
+            // Reserved, leave as zero for backward compatibility. Was shift
+            // applied to the raw counter value to derive QPC count.
+            //
+
+            UCHAR QpcReserved;
         };
     };
 
     LARGE_INTEGER TimeZoneBiasEffectiveStart;
     LARGE_INTEGER TimeZoneBiasEffectiveEnd;
-    XSTATE_CONFIGURATION XState;
-} KUSER_SHARED_DATA, *PKUSER_SHARED_DATA;
-#include <poppack.h>
 
+    //
+    // Extended processor state configuration (AMD64 and x86).
+    //
+
+    XSTATE_CONFIGURATION XState;
+
+    KSYSTEM_TIME FeatureConfigurationChangeStamp;
+    ULONG Spare;
+
+    ULONG64 UserPointerAuthMask;
+
+    //
+    // Extended processor state configuration (ARM64). The reserved space for
+    // other architectures is not available for reuse.
+    //
+
+#if defined(_ARM64_)
+    XSTATE_CONFIGURATION XStateArm64;
+#else
+    ULONG Reserved10[210];
+#endif
+} KUSER_SHARED_DATA, *PKUSER_SHARED_DATA;
+
+C_ASSERT(FIELD_OFFSET(KUSER_SHARED_DATA, TickCountLowDeprecated) == 0x0);
 C_ASSERT(FIELD_OFFSET(KUSER_SHARED_DATA, TickCountMultiplier) == 0x4);
-C_ASSERT(FIELD_OFFSET(KUSER_SHARED_DATA, InterruptTime) == 0x8);
-C_ASSERT(FIELD_OFFSET(KUSER_SHARED_DATA, SystemTime) == 0x14);
-C_ASSERT(FIELD_OFFSET(KUSER_SHARED_DATA, NtSystemRoot) == 0x30);
+C_ASSERT(__alignof(KSYSTEM_TIME) == 4);
+C_ASSERT(FIELD_OFFSET(KUSER_SHARED_DATA, InterruptTime) == 0x08);
+C_ASSERT(FIELD_OFFSET(KUSER_SHARED_DATA, SystemTime) == 0x014);
+C_ASSERT(FIELD_OFFSET(KUSER_SHARED_DATA, TimeZoneBias) == 0x020);
+C_ASSERT(FIELD_OFFSET(KUSER_SHARED_DATA, ImageNumberLow) == 0x02c);
+C_ASSERT(FIELD_OFFSET(KUSER_SHARED_DATA, ImageNumberHigh) == 0x02e);
+C_ASSERT(FIELD_OFFSET(KUSER_SHARED_DATA, NtSystemRoot) == 0x030);
+C_ASSERT(FIELD_OFFSET(KUSER_SHARED_DATA, MaxStackTraceDepth) == 0x238);
+C_ASSERT(FIELD_OFFSET(KUSER_SHARED_DATA, CryptoExponent) == 0x23c);
+C_ASSERT(FIELD_OFFSET(KUSER_SHARED_DATA, TimeZoneId) == 0x240);
 C_ASSERT(FIELD_OFFSET(KUSER_SHARED_DATA, LargePageMinimum) == 0x244);
+C_ASSERT(FIELD_OFFSET(KUSER_SHARED_DATA, AitSamplingValue) == 0x248);
+C_ASSERT(FIELD_OFFSET(KUSER_SHARED_DATA, AppCompatFlag) == 0x24c);
+C_ASSERT(FIELD_OFFSET(KUSER_SHARED_DATA, RNGSeedVersion) == 0x250);
+C_ASSERT(FIELD_OFFSET(KUSER_SHARED_DATA, GlobalValidationRunlevel) == 0x258);
+C_ASSERT(FIELD_OFFSET(KUSER_SHARED_DATA, TimeZoneBiasStamp) == 0x25c);
+C_ASSERT(FIELD_OFFSET(KUSER_SHARED_DATA, NtBuildNumber) == 0x260);
 C_ASSERT(FIELD_OFFSET(KUSER_SHARED_DATA, NtProductType) == 0x264);
+C_ASSERT(FIELD_OFFSET(KUSER_SHARED_DATA, ProductTypeIsValid) == 0x268);
+C_ASSERT(FIELD_OFFSET(KUSER_SHARED_DATA, NativeProcessorArchitecture) == 0x26a);
 C_ASSERT(FIELD_OFFSET(KUSER_SHARED_DATA, NtMajorVersion) == 0x26c);
 C_ASSERT(FIELD_OFFSET(KUSER_SHARED_DATA, NtMinorVersion) == 0x270);
 C_ASSERT(FIELD_OFFSET(KUSER_SHARED_DATA, ProcessorFeatures) == 0x274);
+C_ASSERT(FIELD_OFFSET(KUSER_SHARED_DATA, Reserved1) == 0x2b4);
+C_ASSERT(FIELD_OFFSET(KUSER_SHARED_DATA, Reserved3) == 0x2b8);
+C_ASSERT(FIELD_OFFSET(KUSER_SHARED_DATA, TimeSlip) == 0x2bc);
+C_ASSERT(FIELD_OFFSET(KUSER_SHARED_DATA, AlternativeArchitecture) == 0x2c0);
+C_ASSERT(FIELD_OFFSET(KUSER_SHARED_DATA, SystemExpirationDate) == 0x2c8);
+C_ASSERT(FIELD_OFFSET(KUSER_SHARED_DATA, SuiteMask) == 0x2d0);
 C_ASSERT(FIELD_OFFSET(KUSER_SHARED_DATA, KdDebuggerEnabled) == 0x2d4);
+C_ASSERT(FIELD_OFFSET(KUSER_SHARED_DATA, MitigationPolicies) == 0x2d5);
+C_ASSERT(FIELD_OFFSET(KUSER_SHARED_DATA, CyclesPerYield) == 0x2d6);
 C_ASSERT(FIELD_OFFSET(KUSER_SHARED_DATA, ActiveConsoleId) == 0x2d8);
+C_ASSERT(FIELD_OFFSET(KUSER_SHARED_DATA, DismountCount) == 0x2dc);
+C_ASSERT(FIELD_OFFSET(KUSER_SHARED_DATA, ComPlusPackage) == 0x2e0);
+C_ASSERT(FIELD_OFFSET(KUSER_SHARED_DATA, LastSystemRITEventTickCount) == 0x2e4);
 C_ASSERT(FIELD_OFFSET(KUSER_SHARED_DATA, NumberOfPhysicalPages) == 0x2e8);
 C_ASSERT(FIELD_OFFSET(KUSER_SHARED_DATA, SafeBootMode) == 0x2ec);
+C_ASSERT(FIELD_OFFSET(KUSER_SHARED_DATA, VirtualizationFlags) == 0x2ed);
+C_ASSERT(FIELD_OFFSET(KUSER_SHARED_DATA, Reserved12) == 0x2ee);
+#if defined(_MSC_EXTENSIONS)
+C_ASSERT(FIELD_OFFSET(KUSER_SHARED_DATA, SharedDataFlags) == 0x2f0);
+#endif
+C_ASSERT(FIELD_OFFSET(KUSER_SHARED_DATA, TestRetInstruction) == 0x2f8);
+C_ASSERT(FIELD_OFFSET(KUSER_SHARED_DATA, QpcFrequency) == 0x300);
+C_ASSERT(FIELD_OFFSET(KUSER_SHARED_DATA, SystemCall) == 0x308);
+C_ASSERT(FIELD_OFFSET(KUSER_SHARED_DATA, Reserved2) == 0x30c);
+C_ASSERT(FIELD_OFFSET(KUSER_SHARED_DATA, SystemCallPad) == 0x318); // previously 0x310
+#if defined(_MSC_EXTENSIONS)
 C_ASSERT(FIELD_OFFSET(KUSER_SHARED_DATA, TickCount) == 0x320);
 C_ASSERT(FIELD_OFFSET(KUSER_SHARED_DATA, TickCountQuad) == 0x320);
+#endif
+C_ASSERT(FIELD_OFFSET(KUSER_SHARED_DATA, Cookie) == 0x330);
+C_ASSERT(FIELD_OFFSET(KUSER_SHARED_DATA, ConsoleSessionForegroundProcessId) == 0x338);
+C_ASSERT(FIELD_OFFSET(KUSER_SHARED_DATA, TimeUpdateLock) == 0x340);
+C_ASSERT(FIELD_OFFSET(KUSER_SHARED_DATA, BaselineSystemTimeQpc) == 0x348);
+C_ASSERT(FIELD_OFFSET(KUSER_SHARED_DATA, BaselineInterruptTimeQpc) == 0x350);
+C_ASSERT(FIELD_OFFSET(KUSER_SHARED_DATA, QpcSystemTimeIncrement) == 0x358);
+C_ASSERT(FIELD_OFFSET(KUSER_SHARED_DATA, QpcInterruptTimeIncrement) == 0x360);
+C_ASSERT(FIELD_OFFSET(KUSER_SHARED_DATA, QpcSystemTimeIncrementShift) == 0x368);
+C_ASSERT(FIELD_OFFSET(KUSER_SHARED_DATA, QpcInterruptTimeIncrementShift) == 0x369);
+C_ASSERT(FIELD_OFFSET(KUSER_SHARED_DATA, UnparkedProcessorCount) == 0x36a);
+C_ASSERT(FIELD_OFFSET(KUSER_SHARED_DATA, EnclaveFeatureMask) == 0x36c);
+C_ASSERT(FIELD_OFFSET(KUSER_SHARED_DATA, TelemetryCoverageRound) == 0x37c);
+C_ASSERT(FIELD_OFFSET(KUSER_SHARED_DATA, UserModeGlobalLogger) == 0x380);
+C_ASSERT(FIELD_OFFSET(KUSER_SHARED_DATA, ImageFileExecutionOptions) == 0x3a0);
+C_ASSERT(FIELD_OFFSET(KUSER_SHARED_DATA, LangGenerationCount) == 0x3a4);
+C_ASSERT(FIELD_OFFSET(KUSER_SHARED_DATA, Reserved4) == 0x3a8);
+C_ASSERT(FIELD_OFFSET(KUSER_SHARED_DATA, InterruptTimeBias) == 0x3b0);
+C_ASSERT(FIELD_OFFSET(KUSER_SHARED_DATA, QpcBias) == 0x3b8);
+C_ASSERT(FIELD_OFFSET(KUSER_SHARED_DATA, ActiveProcessorCount) == 0x3c0);
+C_ASSERT(FIELD_OFFSET(KUSER_SHARED_DATA, ActiveGroupCount) == 0x3c4);
+C_ASSERT(FIELD_OFFSET(KUSER_SHARED_DATA, Reserved9) == 0x3c5);
+C_ASSERT(FIELD_OFFSET(KUSER_SHARED_DATA, QpcData) == 0x3c6);
+C_ASSERT(FIELD_OFFSET(KUSER_SHARED_DATA, QpcBypassEnabled) == 0x3c6);
+C_ASSERT(FIELD_OFFSET(KUSER_SHARED_DATA, QpcReserved) == 0x3c7);
+C_ASSERT(FIELD_OFFSET(KUSER_SHARED_DATA, TimeZoneBiasEffectiveStart) == 0x3c8);
+C_ASSERT(FIELD_OFFSET(KUSER_SHARED_DATA, TimeZoneBiasEffectiveEnd) == 0x3d0);
 C_ASSERT(FIELD_OFFSET(KUSER_SHARED_DATA, XState) == 0x3d8);
-//C_ASSERT(sizeof(KUSER_SHARED_DATA) == 0x70C); // VS2017 has some weird issue with this.
+#if !defined(NTDDI_WIN10_FE) || (NTDDI_VERSION < NTDDI_WIN10_FE)
+C_ASSERT(FIELD_OFFSET(KUSER_SHARED_DATA, FeatureConfigurationChangeStamp) == 0x710);
+C_ASSERT(FIELD_OFFSET(KUSER_SHARED_DATA, UserPointerAuthMask) == 0x720);
+#if !defined(WINDOWS_IGNORE_PACKING_MISMATCH)
+C_ASSERT(sizeof(KUSER_SHARED_DATA) == 0x728);
+#endif
+#else
+C_ASSERT(FIELD_OFFSET(KUSER_SHARED_DATA, FeatureConfigurationChangeStamp) == 0x720);
+C_ASSERT(FIELD_OFFSET(KUSER_SHARED_DATA, UserPointerAuthMask) == 0x730);
+#if defined(_ARM64_)
+C_ASSERT(FIELD_OFFSET(KUSER_SHARED_DATA, XStateArm64) == 0x738);
+#else
+C_ASSERT(FIELD_OFFSET(KUSER_SHARED_DATA, Reserved10) == 0x738);
+#endif
+#if !defined(WINDOWS_IGNORE_PACKING_MISMATCH)
+C_ASSERT(sizeof(KUSER_SHARED_DATA) == 0xa80);
+#endif
+#endif
 
 #define USER_SHARED_DATA ((KUSER_SHARED_DATA * const)0x7ffe0000)
 
-#if (PHNT_VERSION >= PHNT_WS03)
-
-FORCEINLINE ULONGLONG NtGetTickCount64()
+FORCEINLINE
+ULONGLONG
+NtGetTickCount64(
+    VOID
+    )
 {
     ULARGE_INTEGER tickCount;
 
@@ -3907,7 +5665,11 @@ FORCEINLINE ULONGLONG NtGetTickCount64()
         (UInt32x32To64(tickCount.HighPart, USER_SHARED_DATA->TickCountMultiplier) << 8);
 }
 
-FORCEINLINE ULONG NtGetTickCount()
+FORCEINLINE
+ULONG
+NtGetTickCount(
+    VOID
+    )
 {
 #ifdef _WIN64
 
@@ -3933,8 +5695,6 @@ FORCEINLINE ULONG NtGetTickCount()
 
 #endif
 }
-
-#endif
 
 // Locale
 
@@ -4002,16 +5762,6 @@ NtIsUILanguageComitted(
 
 #if (PHNT_VERSION >= PHNT_VISTA)
 
-#if (PHNT_VERSION >= PHNT_WIN7)
-NTSYSCALLAPI
-NTSTATUS
-NTAPI
-NtInitializeNlsFiles(
-    _Out_ PVOID *BaseAddress,
-    _Out_ PLCID DefaultLocaleId,
-    _Out_ PLARGE_INTEGER DefaultCasingTableSize
-    );
-#else
 NTSYSCALLAPI
 NTSTATUS
 NTAPI
@@ -4021,7 +5771,6 @@ NtInitializeNlsFiles(
     _Out_ PLARGE_INTEGER DefaultCasingTableSize,
     _Out_opt_ PULONG CurrentNLSVersion
     );
-#endif
 
 NTSYSCALLAPI
 NTSTATUS
@@ -4134,13 +5883,13 @@ typedef struct _ATOM_BASIC_INFORMATION
     USHORT UsageCount;
     USHORT Flags;
     USHORT NameLength;
-    WCHAR Name[1];
+    _Field_size_bytes_(NameLength) WCHAR Name[1];
 } ATOM_BASIC_INFORMATION, *PATOM_BASIC_INFORMATION;
 
 typedef struct _ATOM_TABLE_INFORMATION
 {
     ULONG NumberOfAtoms;
-    RTL_ATOM Atoms[1];
+    _Field_size_(NumberOfAtoms) RTL_ATOM Atoms[1];
 } ATOM_TABLE_INFORMATION, *PATOM_TABLE_INFORMATION;
 
 NTSYSCALLAPI
@@ -4167,6 +5916,7 @@ NtQueryInformationAtom(
 #define FLG_HEAP_VALIDATE_ALL 0x00000080 // u
 
 #define FLG_APPLICATION_VERIFIER 0x00000100 // u
+#define FLG_MONITOR_SILENT_PROCESS_EXIT 0x00000200 // uk
 #define FLG_POOL_ENABLE_TAGGING 0x00000400 // k
 #define FLG_HEAP_ENABLE_TAGGING 0x00000800 // u
 
@@ -4191,7 +5941,7 @@ NtQueryInformationAtom(
 #define FLG_DISABLE_DBGPRINT 0x08000000 // k
 
 #define FLG_CRITSEC_EVENT_CREATION 0x10000000 // u
-#define FLG_LDR_TOP_DOWN 0x20000000 // u,64
+#define FLG_STOP_ON_UNHANDLED_EXCEPTION 0x20000000 // u,64
 #define FLG_ENABLE_HANDLE_EXCEPTIONS 0x40000000 // k
 #define FLG_DISABLE_PROTDLLS 0x80000000 // u
 
@@ -4259,7 +6009,8 @@ typedef enum _SHUTDOWN_ACTION
 {
     ShutdownNoReboot,
     ShutdownReboot,
-    ShutdownPowerOff
+    ShutdownPowerOff,
+    ShutdownRebootForRecovery // since WIN11
 } SHUTDOWN_ACTION;
 
 NTSYSCALLAPI

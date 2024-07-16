@@ -1,32 +1,21 @@
 /*
- * Process Hacker User Notes -
- *   database functions
+ * Copyright (c) 2022 Winsider Seminars & Solutions, Inc.  All rights reserved.
  *
- * Copyright (C) 2011-2015 wj32
- * Copyright (C) 2016 dmex
+ * This file is part of System Informer.
  *
- * This file is part of Process Hacker.
+ * Authors:
  *
- * Process Hacker is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
+ *     wj32    2011-2015
+ *     dmex    2016-2023
  *
- * Process Hacker is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with Process Hacker.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #ifndef DB_H
 #define DB_H
 
 #define PLUGIN_NAME L"ProcessHacker.UserNotes"
-#define SETTING_NAME_DATABASE_PATH (PLUGIN_NAME L".DatabasePath")
 #define SETTING_NAME_CUSTOM_COLOR_LIST (PLUGIN_NAME L".ColorCustomList")
+#define SETTING_NAME_OPTIONS_DB_COLUMNS (PLUGIN_NAME L".DbListColumns")
 
 #define FILE_TAG 1
 #define SERVICE_TAG 2
@@ -43,7 +32,10 @@ typedef struct _DB_OBJECT
     ULONG IoPriorityPlusOne;
     COLORREF BackColor;
     BOOLEAN Collapse;
-    ULONG_PTR AffinityMask;
+    KAFFINITY AffinityMask;
+    ULONG PagePriorityPlusOne;
+    BOOLEAN Boost;
+    BOOLEAN Efficiency;
 } DB_OBJECT, *PDB_OBJECT;
 
 VOID InitializeDb(
@@ -54,10 +46,12 @@ ULONG GetNumberOfDbObjects(
     VOID
     );
 
+_Acquires_exclusive_lock_(ObjectDbLock)
 VOID LockDb(
     VOID
     );
 
+_Releases_exclusive_lock_(ObjectDbLock)
 VOID UnlockDb(
     VOID
     );
@@ -87,6 +81,38 @@ NTSTATUS LoadDb(
 
 NTSTATUS SaveDb(
     VOID
+    );
+
+typedef BOOLEAN (NTAPI* PDB_ENUM_CALLBACK)(
+    _In_ PDB_OBJECT Object,
+    _In_ PVOID Context
+    );
+
+VOID EnumDb(
+    _In_ PDB_ENUM_CALLBACK Callback,
+    _In_ PVOID Context
+    );
+
+_Success_(return)
+BOOLEAN FindIfeoObject(
+    _In_ PPH_STRINGREF Name,
+    _Out_opt_ PULONG CpuPriorityClass,
+    _Out_opt_ PULONG IoPriorityClass,
+    _Out_opt_ PULONG PagePriorityClass
+    );
+
+NTSTATUS CreateIfeoObject(
+    _In_ PPH_STRINGREF Name,
+    _In_ ULONG CpuPriority,
+    _In_ ULONG IoPriority,
+    _In_ ULONG PagePriority
+    );
+
+NTSTATUS DeleteIfeoObject(
+    _In_ PPH_STRINGREF Name,
+    _In_ ULONG CpuPriority,
+    _In_ ULONG IoPriority,
+    _In_ ULONG PagePriority
     );
 
 #endif

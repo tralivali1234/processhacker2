@@ -36,9 +36,6 @@
     <ClCompile Include="settings.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="pdb.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="colmgr.c">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -93,20 +90,95 @@
     <ClCompile Include="links.c">
       <Filter>Source Files\Pages\Windows</Filter>
     </ClCompile>
-    <ClCompile Include="processes.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="exlfdynamic.c">
       <Filter>Source Files\Pages\Linux</Filter>
     </ClCompile>
-    <ClCompile Include="tlsprp.c">
+    <ClCompile Include="options.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="previewprp.c">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="ehcontprp.c">
+      <Filter>Source Files\Pages\Windows</Filter>
+    </ClCompile>
+    <ClCompile Include="debugprp.c">
+      <Filter>Source Files\Pages\Windows</Filter>
     </ClCompile>
     <ClCompile Include="pedirprp.c">
+      <Filter>Source Files\Pages\Windows</Filter>
+    </ClCompile>
+    <ClCompile Include="pesectionprp.c">
+      <Filter>Source Files\Pages\Windows</Filter>
+    </ClCompile>
+    <ClCompile Include="pepogoprp.c">
+      <Filter>Source Files\Pages\Windows</Filter>
+    </ClCompile>
+    <ClCompile Include="richprp.c">
+      <Filter>Source Files\Pages\Windows</Filter>
+    </ClCompile>
+    <ClCompile Include="secprp.c">
+      <Filter>Source Files\Pages\Windows</Filter>
+    </ClCompile>
+    <ClCompile Include="tlsprp.c">
+      <Filter>Source Files\Pages\Windows</Filter>
+    </ClCompile>
+    <ClCompile Include="previewprp.c">
+      <Filter>Source Files\Pages\Windows</Filter>
+    </ClCompile>
+    <ClCompile Include="processes.c">
+      <Filter>Source Files\Pages\Windows</Filter>
+    </ClCompile>
+    <ClCompile Include="layout.c">
+      <Filter>Source Files\Pages</Filter>
+    </ClCompile>
+    <ClCompile Include="hashprp.c">
+      <Filter>Source Files\Pages\Windows</Filter>
+    </ClCompile>
+    <ClCompile Include="chcol.c">
       <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="peexceptprp.c">
+      <Filter>Source Files\Pages\Windows</Filter>
+    </ClCompile>
+    <ClCompile Include="peheaderprp.c">
+      <Filter>Source Files\Pages\Windows</Filter>
+    </ClCompile>
+    <ClCompile Include="perelocprp.c">
+      <Filter>Source Files\Pages\Windows</Filter>
+    </ClCompile>
+    <ClCompile Include="peprpwnd.c">
+      <Filter>Source Files\Pages\Windows</Filter>
+    </ClCompile>
+    <ClCompile Include="pdb.c">
+      <Filter>Source Files\Pages\Windows</Filter>
+    </ClCompile>
+    <ClCompile Include="volatileprp.c">
+      <Filter>Source Files\Pages\Windows</Filter>
+    </ClCompile>
+    <ClCompile Include="clrprptables.c">
+      <Filter>Source Files\Pages\Windows</Filter>
+    </ClCompile>
+    <ClCompile Include="clrtableimportprp.c">
+      <Filter>Source Files\Pages\Windows</Filter>
+    </ClCompile>
+    <ClCompile Include="clrtableimports.cpp">
+      <Filter>Source Files\Pages\Windows</Filter>
+    </ClCompile>
+    <ClCompile Include="versioninfoprp.c">
+      <Filter>Source Files\Pages\Windows</Filter>
+    </ClCompile>
+    <ClCompile Include="pechpeprp.c">
+      <Filter>Source Files\Pages\Windows</Filter>
+    </ClCompile>
+    <ClCompile Include="pedynrelocprp.c">
+      <Filter>Source Files\Pages\Windows</Filter>
+    </ClCompile>
+    <ClCompile Include="delayhook.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="mappings.c">
+      <Filter>Source Files\Pages</Filter>
+    </ClCompile>
+    <ClCompile Include="pemuiprp.c">
+      <Filter>Source Files\Pages\Windows</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -119,15 +191,15 @@
     <ClInclude Include="include\prpsh.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="include\pdb.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="colmgr.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="peview.rc">
+      <Filter>Resource Files</Filter>
+    </ResourceCompile>
+    <ResourceCompile Include="version.rc">
       <Filter>Resource Files</Filter>
     </ResourceCompile>
   </ItemGroup>
@@ -137,7 +209,7 @@
     </Manifest>
   </ItemGroup>
   <ItemGroup>
-    <Image Include="resources\ProcessHacker.ico">
+    <Image Include="resources\SystemInformer.ico">
       <Filter>Resource Files</Filter>
     </Image>
     <Image Include="resources\inactive_search.png">
@@ -155,5 +227,55 @@
     <Image Include="resources\application.ico">
       <Filter>Resource Files</Filter>
     </Image>
+    <Image Include="resources\case_sensitive_modern_dark.png">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="resources\case_sensitive_modern_light.png">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="resources\regex_modern_dark.png">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="resources\regex_modern_light.png">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="resources\search_modern_dark.png">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="resources\search_modern_light.png">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="resources\search_stop_modern_dark.png">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="resources\search_stop_modern_light.png">
+      <Filter>Resource Files</Filter>
+    </Image>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="resources\case_sensitive_modern_dark.svg">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="resources\case_sensitive_modern_light.svg">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="resources\regex_modern_dark.svg">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="resources\regex_modern_light.svg">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="resources\search_modern_dark.svg">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="resources\search_modern_light.svg">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="resources\search_stop_modern_dark.svg">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="resources\search_stop_modern_light.svg">
+      <Filter>Resource Files</Filter>
+    </None>
   </ItemGroup>
 </Project>

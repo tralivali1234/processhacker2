@@ -1,35 +1,38 @@
 /*
- * Process Hacker Window Explorer -
- *   utility functions
+ * Copyright (c) 2022 Winsider Seminars & Solutions, Inc.  All rights reserved.
  *
- * Copyright (C) 2011 wj32
- * Copyright (C) 2017-2018 dmex
+ * This file is part of System Informer.
  *
- * This file is part of Process Hacker.
+ * Authors:
  *
- * Process Hacker is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
+ *     wj32    2011
+ *     dmex    2017-2018
  *
- * Process Hacker is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with Process Hacker.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include "wndexp.h"
 
 // WARNING: No functions from ProcessHacker.exe should be used in this file!
 
-PVOID WeGetProcedureAddress(
-    _In_ PSTR Name
+HWND WeGetMainWindowHandle(
+    VOID
     )
 {
-    return PhGetProcedureAddress(NtCurrentPeb()->ImageBaseAddress, Name, 0);
+    static HWND (WINAPI* PhGetMainWindowHandle_I)(VOID) = NULL;
+
+    if (!PhGetMainWindowHandle_I)
+        PhGetMainWindowHandle_I = WeGetProcedureAddress("PhGetMainWindowHandle");
+    if (!PhGetMainWindowHandle_I)
+        return NULL;
+
+    return PhGetMainWindowHandle_I();
+}
+
+PVOID WeGetProcedureAddress(
+    _In_ PCSTR Name
+    )
+{
+    return GetProcAddress(NtCurrentPeb()->ImageBaseAddress, Name);
 }
 
 VOID WeFormatLocalObjectName(
@@ -46,8 +49,8 @@ VOID WeFormatLocalObjectName(
     {
         memcpy(Buffer, L"\\Sessions\\", 10 * sizeof(WCHAR));
         _ultow(NtCurrentPeb()->SessionId, Buffer + 10, 10);
-        length = wcslen(Buffer);
-        originalNameLength = wcslen(OriginalName);
+        length = PhCountStringZ(Buffer);
+        originalNameLength = PhCountStringZ(OriginalName);
         memcpy(Buffer + length, OriginalName, (originalNameLength + 1) * sizeof(WCHAR));
         length += originalNameLength;
 
@@ -66,12 +69,15 @@ VOID WeInvertWindowBorder(
 {
     RECT rect;
     HDC hdc;
+    LONG dpiValue;
 
     GetWindowRect(hWnd, &rect);
 
+    dpiValue = PhGetWindowDpi(hWnd);
+
     if (hdc = GetWindowDC(hWnd))
     {
-        ULONG penWidth = GetSystemMetrics(SM_CXBORDER) * 3;
+        ULONG penWidth = PhGetSystemMetrics(SM_CXBORDER, dpiValue) * 3;
         INT oldDc;
         HPEN pen;
         HBRUSH brush;
@@ -84,7 +90,7 @@ VOID WeInvertWindowBorder(
         pen = CreatePen(PS_INSIDEFRAME, penWidth, RGB(0x00, 0x00, 0x00));
         SelectPen(hdc, pen);
 
-        brush = GetStockObject(NULL_BRUSH);
+        brush = GetStockBrush(NULL_BRUSH);
         SelectBrush(hdc, brush);
 
         // Draw the rectangle.

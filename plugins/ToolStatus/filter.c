@@ -1,24 +1,13 @@
 /*
- * Process Hacker ToolStatus -
- *   search filter callbacks
+ * Copyright (c) 2022 Winsider Seminars & Solutions, Inc.  All rights reserved.
  *
- * Copyright (C) 2011-2016 dmex
- * Copyright (C) 2010-2013 wj32
+ * This file is part of System Informer.
  *
- * This file is part of Process Hacker.
+ * Authors:
  *
- * Process Hacker is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
+ *     wj32    2010-2013
+ *     dmex    2011-2023
  *
- * Process Hacker is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with Process Hacker.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include "toolstatus.h"
@@ -28,33 +17,7 @@ BOOLEAN WordMatchStringRef(
     _In_ PPH_STRINGREF Text
     )
 {
-    PH_STRINGREF part;
-    PH_STRINGREF remainingPart;
-
-    remainingPart = SearchboxText->sr;
-
-    while (remainingPart.Length)
-    {
-        PhSplitStringRefAtChar(&remainingPart, '|', &part, &remainingPart);
-
-        if (part.Length)
-        {
-            if (PhFindStringInStringRef(Text, &part, TRUE) != -1)
-                return TRUE;
-        }
-    }
-
-    return FALSE;
-}
-
-BOOLEAN WordMatchStringZ(
-    _In_ PWSTR Text
-    )
-{
-    PH_STRINGREF text;
-
-    PhInitializeStringRef(&text, Text);
-    return WordMatchStringRef(&text);
+    return PhSearchControlMatch(SearchMatchHandle, Text);
 }
 
 BOOLEAN ProcessTreeFilterCallback(
@@ -64,127 +27,112 @@ BOOLEAN ProcessTreeFilterCallback(
 {
     PPH_PROCESS_NODE processNode = (PPH_PROCESS_NODE)Node;
 
-    if (PhIsNullOrEmptyString(SearchboxText))
+    if (!SearchMatchHandle)
         return TRUE;
 
     if (!PhIsNullOrEmptyString(processNode->ProcessItem->ProcessName))
     {
-        if (WordMatchStringRef(&processNode->ProcessItem->ProcessName->sr))
+        if (PhSearchControlMatch(SearchMatchHandle, &processNode->ProcessItem->ProcessName->sr))
             return TRUE;
     }
 
     if (!PhIsNullOrEmptyString(processNode->ProcessItem->FileNameWin32))
     {
-        if (WordMatchStringRef(&processNode->ProcessItem->FileNameWin32->sr))
+        if (PhSearchControlMatch(SearchMatchHandle, &processNode->ProcessItem->FileNameWin32->sr))
             return TRUE;
     }
 
     if (!PhIsNullOrEmptyString(processNode->ProcessItem->FileName))
     {
-        if (WordMatchStringRef(&processNode->ProcessItem->FileName->sr))
+        if (PhSearchControlMatch(SearchMatchHandle, &processNode->ProcessItem->FileName->sr))
             return TRUE;
     }
 
     if (!PhIsNullOrEmptyString(processNode->ProcessItem->CommandLine))
     {
-        if (WordMatchStringRef(&processNode->ProcessItem->CommandLine->sr))
+        if (PhSearchControlMatch(SearchMatchHandle, &processNode->ProcessItem->CommandLine->sr))
             return TRUE;
     }
 
     if (!PhIsNullOrEmptyString(processNode->ProcessItem->VersionInfo.CompanyName))
     {
-        if (WordMatchStringRef(&processNode->ProcessItem->VersionInfo.CompanyName->sr))
+        if (PhSearchControlMatch(SearchMatchHandle, &processNode->ProcessItem->VersionInfo.CompanyName->sr))
             return TRUE;
     }
 
     if (!PhIsNullOrEmptyString(processNode->ProcessItem->VersionInfo.FileDescription))
     {
-        if (WordMatchStringRef(&processNode->ProcessItem->VersionInfo.FileDescription->sr))
+        if (PhSearchControlMatch(SearchMatchHandle, &processNode->ProcessItem->VersionInfo.FileDescription->sr))
             return TRUE;
     }
 
     if (!PhIsNullOrEmptyString(processNode->ProcessItem->VersionInfo.FileVersion))
     {
-        if (WordMatchStringRef(&processNode->ProcessItem->VersionInfo.FileVersion->sr))
+        if (PhSearchControlMatch(SearchMatchHandle, &processNode->ProcessItem->VersionInfo.FileVersion->sr))
             return TRUE;
     }
 
     if (!PhIsNullOrEmptyString(processNode->ProcessItem->VersionInfo.ProductName))
     {
-        if (WordMatchStringRef(&processNode->ProcessItem->VersionInfo.ProductName->sr))
+        if (PhSearchControlMatch(SearchMatchHandle, &processNode->ProcessItem->VersionInfo.ProductName->sr))
             return TRUE;
     }
 
-    //if (!PhIsNullOrEmptyString(processNode->ProcessItem->UserName))
-    //{
-    //    if (WordMatchStringRef(&processNode->ProcessItem->UserName->sr))
-    //        return TRUE;
-    //}
+    if (!PhIsNullOrEmptyString(processNode->ProcessItem->UserName))
+    {
+        if (PhSearchControlMatch(SearchMatchHandle, &processNode->ProcessItem->UserName->sr))
+            return TRUE;
+    }
 
     if (processNode->ProcessItem->IntegrityString)
     {
-        if (WordMatchStringZ(processNode->ProcessItem->IntegrityString))
+        if (PhSearchControlMatchLongHintZ(SearchMatchHandle, processNode->ProcessItem->IntegrityString))
             return TRUE;
     }
-
-    //if (!PhIsNullOrEmptyString(processNode->ProcessItem->JobName))
-    //{
-    //    if (WordMatchStringRef(&processNode->ProcessItem->JobName->sr))
-    //        return TRUE;
-    //}
 
     if (!PhIsNullOrEmptyString(processNode->ProcessItem->VerifySignerName))
     {
-        if (WordMatchStringRef(&processNode->ProcessItem->VerifySignerName->sr))
+        if (PhSearchControlMatch(SearchMatchHandle, &processNode->ProcessItem->VerifySignerName->sr))
             return TRUE;
     }
 
-    if (PH_IS_REAL_PROCESS_ID(processNode->ProcessItem->ProcessId) && processNode->ProcessItem->ProcessIdString[0])
+    if (PH_IS_REAL_PROCESS_ID(processNode->ProcessItem->ProcessId))
     {
-        if (WordMatchStringZ(processNode->ProcessItem->ProcessIdString))
-            return TRUE;
-
-         // HACK PidHexText from PH_PROCESS_NODE is not exported (dmex)
+        if (processNode->ProcessItem->ProcessIdString[0])
         {
-            PH_FORMAT format;
-            SIZE_T returnLength;
-            PH_STRINGREF processIdHex;
-            WCHAR pidHexText[PH_PTR_STR_LEN_1];
+            if (PhSearchControlMatchLongHintZ(SearchMatchHandle, processNode->ProcessItem->ProcessIdString))
+                return TRUE;
+        }
 
-            PhInitFormatIX(&format, HandleToUlong(processNode->ProcessItem->ProcessId));
-
-            if (PhFormatToBuffer(&format, 1, pidHexText, sizeof(pidHexText), &returnLength))
-            {
-                processIdHex.Buffer = pidHexText;
-                processIdHex.Length = returnLength - sizeof(UNICODE_NULL);
-
-                if (WordMatchStringRef(&processIdHex))
-                    return TRUE;
-            }
+        if (processNode->ProcessItem->ProcessIdHexString[0])
+        {
+            if (PhSearchControlMatchLongHintZ(SearchMatchHandle, processNode->ProcessItem->ProcessIdHexString))
+                return TRUE;
         }
     }
 
-    if (processNode->ProcessItem->ParentProcessIdString[0])
+    if (processNode->ProcessItem->LxssProcessIdString[0])
     {
-        if (WordMatchStringZ(processNode->ProcessItem->ParentProcessIdString))
-            return TRUE;
-    }
-
-    if (processNode->ProcessItem->SessionIdString[0])
-    {
-        if (WordMatchStringZ(processNode->ProcessItem->SessionIdString))
+        if (PhSearchControlMatchLongHintZ(SearchMatchHandle, processNode->ProcessItem->LxssProcessIdString))
             return TRUE;
     }
 
     if (!PhIsNullOrEmptyString(processNode->ProcessItem->PackageFullName))
     {
-        if (WordMatchStringRef(&processNode->ProcessItem->PackageFullName->sr))
+        if (PhSearchControlMatch(SearchMatchHandle, &processNode->ProcessItem->PackageFullName->sr))
             return TRUE;
     }
 
-    if (WordMatchStringZ(PhGetProcessPriorityClassString(processNode->ProcessItem->PriorityClass)))
     {
-        return TRUE;
+        PPH_STRINGREF value;
+
+        if (value = PhGetProcessPriorityClassString(processNode->ProcessItem->PriorityClass))
+        {
+            if (PhSearchControlMatch(SearchMatchHandle, value))
+            {
+                return TRUE;
+            }
+        }
     }
 
     if (processNode->ProcessItem->VerifyResult != VrUnknown)
@@ -192,35 +140,35 @@ BOOLEAN ProcessTreeFilterCallback(
         switch (processNode->ProcessItem->VerifyResult)
         {
         case VrNoSignature:
-            if (WordMatchStringZ(L"NoSignature"))
+            if (PhSearchControlMatchZ(SearchMatchHandle, L"NoSignature"))
                 return TRUE;
             break;
         case VrTrusted:
-            if (WordMatchStringZ(L"Trusted"))
+            if (PhSearchControlMatchZ(SearchMatchHandle, L"Trusted"))
                 return TRUE;
             break;
         case VrExpired:
-            if (WordMatchStringZ(L"Expired"))
+            if (PhSearchControlMatchZ(SearchMatchHandle, L"Expired"))
                 return TRUE;
             break;
         case VrRevoked:
-            if (WordMatchStringZ(L"Revoked"))
+            if (PhSearchControlMatchZ(SearchMatchHandle, L"Revoked"))
                 return TRUE;
             break;
         case VrDistrust:
-            if (WordMatchStringZ(L"Distrust"))
+            if (PhSearchControlMatchZ(SearchMatchHandle, L"Distrust"))
                 return TRUE;
             break;
         case VrSecuritySettings:
-            if (WordMatchStringZ(L"SecuritySettings"))
+            if (PhSearchControlMatchZ(SearchMatchHandle, L"SecuritySettings"))
                 return TRUE;
             break;
         case VrBadSignature:
-            if (WordMatchStringZ(L"BadSignature"))
+            if (PhSearchControlMatchZ(SearchMatchHandle, L"BadSignature"))
                 return TRUE;
             break;
         default:
-            if (WordMatchStringZ(L"Unknown"))
+            if (PhSearchControlMatchZ(SearchMatchHandle, L"Unknown"))
                 return TRUE;
             break;
         }
@@ -231,76 +179,81 @@ BOOLEAN ProcessTreeFilterCallback(
         switch (processNode->ProcessItem->ElevationType)
         {
         case TokenElevationTypeLimited:
-            if (WordMatchStringZ(L"Limited"))
+            if (PhSearchControlMatchZ(SearchMatchHandle, L"Limited"))
                 return TRUE;
             break;
         case TokenElevationTypeFull:
-            if (WordMatchStringZ(L"Full"))
+            if (PhSearchControlMatchZ(SearchMatchHandle, L"Full"))
                 return TRUE;
             break;
         default:
-            if (WordMatchStringZ(L"Unknown"))
+            if (PhSearchControlMatchZ(SearchMatchHandle, L"Unknown"))
                 return TRUE;
             break;
         }
     }
 
-    if (WordMatchStringZ(L"IsBeingDebugged") && processNode->ProcessItem->IsBeingDebugged)
+    if (processNode->ProcessItem->IsBeingDebugged && PhSearchControlMatchZ(SearchMatchHandle, L"IsBeingDebugged"))
     {
         return TRUE;
     }
 
-    if (WordMatchStringZ(L"IsDotNet") && processNode->ProcessItem->IsDotNet)
+    if (processNode->ProcessItem->IsDotNet && PhSearchControlMatchZ(SearchMatchHandle, L"IsDotNet"))
     {
         return TRUE;
     }
 
-    if (WordMatchStringZ(L"IsElevated") && processNode->ProcessItem->IsElevated)
+    if (processNode->ProcessItem->IsElevated && PhSearchControlMatchZ(SearchMatchHandle, L"IsElevated"))
     {
         return TRUE;
     }
 
-    if (WordMatchStringZ(L"IsInJob") && processNode->ProcessItem->IsInJob)
+    if (processNode->ProcessItem->IsInJob && PhSearchControlMatchZ(SearchMatchHandle, L"IsInJob"))
     {
         return TRUE;
     }
 
-    if (WordMatchStringZ(L"IsInSignificantJob") && processNode->ProcessItem->IsInSignificantJob)
+    if (processNode->ProcessItem->IsInSignificantJob && PhSearchControlMatchZ(SearchMatchHandle, L"IsInSignificantJob"))
     {
         return TRUE;
     }
 
-    if (WordMatchStringZ(L"IsPacked") && processNode->ProcessItem->IsPacked)
+    if (processNode->ProcessItem->IsPacked && PhSearchControlMatchZ(SearchMatchHandle, L"IsPacked"))
     {
         return TRUE;
     }
 
-    if (WordMatchStringZ(L"IsSuspended") && processNode->ProcessItem->IsSuspended)
+    if (processNode->ProcessItem->IsSuspended && PhSearchControlMatchZ(SearchMatchHandle, L"IsSuspended"))
     {
         return TRUE;
     }
 
-    if (WordMatchStringZ(L"IsWow64") && processNode->ProcessItem->IsWow64)
+    if (processNode->ProcessItem->IsWow64 && PhSearchControlMatchZ(SearchMatchHandle, L"IsWow64"))
     {
         return TRUE;
     }
 
-    if (WordMatchStringZ(L"IsImmersive") && processNode->ProcessItem->IsImmersive)
+    if (processNode->ProcessItem->IsImmersive && PhSearchControlMatchZ(SearchMatchHandle, L"IsImmersive"))
     {
         return TRUE;
     }
 
-    if (WordMatchStringZ(L"IsProtectedProcess") && processNode->ProcessItem->IsProtectedProcess)
+    if (processNode->ProcessItem->IsPackagedProcess && PhSearchControlMatchZ(SearchMatchHandle, L"IsPackagedProcess"))
     {
         return TRUE;
     }
 
-    if (WordMatchStringZ(L"IsSecureProcess") && processNode->ProcessItem->IsSecureProcess)
+    if (processNode->ProcessItem->IsProtectedProcess && PhSearchControlMatchZ(SearchMatchHandle, L"IsProtectedProcess"))
     {
         return TRUE;
     }
 
-    if (WordMatchStringZ(L"IsPicoProcess") && processNode->ProcessItem->IsSubsystemProcess)
+    if (processNode->ProcessItem->IsSecureProcess && PhSearchControlMatchZ(SearchMatchHandle, L"IsSecureProcess"))
+    {
+        return TRUE;
+    }
+
+    if (processNode->ProcessItem->IsSubsystemProcess && PhSearchControlMatchZ(SearchMatchHandle, L"IsPicoProcess"))
     {
         return TRUE;
     }
@@ -313,10 +266,10 @@ BOOLEAN ProcessTreeFilterCallback(
         ULONG i;
         BOOLEAN matched = FALSE;
 
+        PhAcquireQueuedLockShared(&processNode->ProcessItem->ServiceListLock);
+
         // Copy the service list so we can search it.
         serviceList = PhCreateList(processNode->ProcessItem->ServiceList->Count);
-
-        PhAcquireQueuedLockShared(&processNode->ProcessItem->ServiceListLock);
 
         while (PhEnumPointerList(
             processNode->ProcessItem->ServiceList,
@@ -332,14 +285,11 @@ BOOLEAN ProcessTreeFilterCallback(
 
         for (i = 0; i < serviceList->Count; i++)
         {
-            PPH_STRING serviceFileName = NULL;
-            PPH_STRING serviceBinaryPath = NULL;
-
             serviceItem = serviceList->Items[i];
 
             if (!PhIsNullOrEmptyString(serviceItem->Name))
             {
-                if (WordMatchStringRef(&serviceItem->Name->sr))
+                if (PhSearchControlMatch(SearchMatchHandle, &serviceItem->Name->sr))
                 {
                     matched = TRUE;
                     break;
@@ -348,7 +298,7 @@ BOOLEAN ProcessTreeFilterCallback(
 
             if (!PhIsNullOrEmptyString(serviceItem->DisplayName))
             {
-                if (WordMatchStringRef(&serviceItem->DisplayName->sr))
+                if (PhSearchControlMatch(SearchMatchHandle, &serviceItem->DisplayName->sr))
                 {
                     matched = TRUE;
                     break;
@@ -357,41 +307,31 @@ BOOLEAN ProcessTreeFilterCallback(
 
             if (serviceItem->ProcessId)
             {
-                if (WordMatchStringZ(serviceItem->ProcessIdString))
+                if (PhSearchControlMatchLongHintZ(SearchMatchHandle, serviceItem->ProcessIdString))
                 {
                     matched = TRUE;
                     break;
                 }
             }
 
-            if (NT_SUCCESS(QueryServiceFileName(
-                &serviceItem->Name->sr,
-                &serviceFileName,
-                &serviceBinaryPath
-                )))
+            if (!PhIsNullOrEmptyString(serviceItem->FileName))
             {
-                if (serviceFileName)
+                if (PhSearchControlMatch(SearchMatchHandle, &serviceItem->FileName->sr))
                 {
-                    if (WordMatchStringRef(&serviceFileName->sr))
-                    {
-                        matched = TRUE;
-                    }
-
-                    PhDereferenceObject(serviceFileName);
-                }
-
-                if (serviceBinaryPath)
-                {
-                    if (WordMatchStringRef(&serviceBinaryPath->sr))
-                    {
-                        matched = TRUE;
-                    }
-
-                    PhDereferenceObject(serviceBinaryPath);
-                }
-
-                if (matched)
+                    matched = TRUE;
                     break;
+                }
+            }
+
+            {
+                PPH_SERVICE_NODE serviceNode;
+
+                // Search the service node
+                if (!PtrToUlong(Context) && (serviceNode = PhFindServiceNode(serviceItem)))
+                {
+                    if (ServiceTreeFilterCallback(&serviceNode->Node, UlongToPtr(TRUE)))
+                        return TRUE;
+                }
             }
         }
 
@@ -411,33 +351,67 @@ BOOLEAN ServiceTreeFilterCallback(
     )
 {
     PPH_SERVICE_NODE serviceNode = (PPH_SERVICE_NODE)Node;
-    PPH_STRING serviceFileName = NULL;
-    PPH_STRING serviceBinaryPath = NULL;
 
-    if (PhIsNullOrEmptyString(SearchboxText))
+    if (!SearchMatchHandle)
         return TRUE;
 
-    if (WordMatchStringZ(PhGetServiceTypeString(serviceNode->ServiceItem->Type)))
+    if (PhSearchControlMatch(SearchMatchHandle, PhGetServiceTypeString(serviceNode->ServiceItem->Type)))
         return TRUE;
 
-    if (WordMatchStringZ(PhGetServiceStateString(serviceNode->ServiceItem->State)))
+    if (PhSearchControlMatch(SearchMatchHandle, PhGetServiceTypeString(serviceNode->ServiceItem->State)))
         return TRUE;
 
-    if (WordMatchStringZ(PhGetServiceStartTypeString(serviceNode->ServiceItem->StartType)))
+    if (PhSearchControlMatch(SearchMatchHandle, PhGetServiceTypeString(serviceNode->ServiceItem->StartType)))
         return TRUE;
 
-    if (WordMatchStringZ(PhGetServiceErrorControlString(serviceNode->ServiceItem->ErrorControl)))
+    if (PhSearchControlMatch(SearchMatchHandle, PhGetServiceTypeString(serviceNode->ServiceItem->ErrorControl)))
         return TRUE;
 
     if (!PhIsNullOrEmptyString(serviceNode->ServiceItem->Name))
     {
-        if (WordMatchStringRef(&serviceNode->ServiceItem->Name->sr))
+        if (PhSearchControlMatch(SearchMatchHandle, &serviceNode->ServiceItem->Name->sr))
             return TRUE;
     }
 
     if (!PhIsNullOrEmptyString(serviceNode->ServiceItem->DisplayName))
     {
-        if (WordMatchStringRef(&serviceNode->ServiceItem->DisplayName->sr))
+        if (PhSearchControlMatch(SearchMatchHandle, &serviceNode->ServiceItem->DisplayName->sr))
+            return TRUE;
+    }
+
+    if (!PhIsNullOrEmptyString(serviceNode->ServiceItem->VerifySignerName))
+    {
+        if (PhSearchControlMatch(SearchMatchHandle, &serviceNode->ServiceItem->VerifySignerName->sr))
+            return TRUE;
+    }
+
+    if (!PhIsNullOrEmptyString(serviceNode->ServiceItem->FileName))
+    {
+        if (PhSearchControlMatch(SearchMatchHandle, &serviceNode->ServiceItem->FileName->sr))
+            return TRUE;
+    }
+
+    if (!PhIsNullOrEmptyString(serviceNode->BinaryPath))
+    {
+        if (PhSearchControlMatch(SearchMatchHandle, &serviceNode->BinaryPath->sr))
+            return TRUE;
+    }
+
+    if (!PhIsNullOrEmptyString(serviceNode->LoadOrderGroup))
+    {
+        if (PhSearchControlMatch(SearchMatchHandle, &serviceNode->LoadOrderGroup->sr))
+            return TRUE;
+    }
+
+    if (!PhIsNullOrEmptyString(serviceNode->Description))
+    {
+        if (PhSearchControlMatch(SearchMatchHandle, &serviceNode->Description->sr))
+            return TRUE;
+    }
+
+    if (!PhIsNullOrEmptyString(serviceNode->KeyModifiedTimeText))
+    {
+        if (PhSearchControlMatch(SearchMatchHandle, &serviceNode->KeyModifiedTimeText->sr))
             return TRUE;
     }
 
@@ -445,21 +419,15 @@ BOOLEAN ServiceTreeFilterCallback(
     {
         PPH_PROCESS_NODE processNode;
 
-        if (WordMatchStringZ(serviceNode->ServiceItem->ProcessIdString))
+        if (PhSearchControlMatchLongHintZ(SearchMatchHandle, serviceNode->ServiceItem->ProcessIdString))
             return TRUE;
 
         // Search the process node
-        if (processNode = PhFindProcessNode(serviceNode->ServiceItem->ProcessId))
+        if (!PtrToUlong(Context) && (processNode = PhFindProcessNode(serviceNode->ServiceItem->ProcessId)))
         {
-            if (ProcessTreeFilterCallback(&processNode->Node, NULL))
+            if (ProcessTreeFilterCallback(&processNode->Node, UlongToPtr(TRUE)))
                 return TRUE;
         }
-    }
-
-    if (!PhIsNullOrEmptyString(serviceNode->ServiceItem->VerifySignerName))
-    {
-        if (WordMatchStringRef(&serviceNode->ServiceItem->VerifySignerName->sr))
-            return TRUE;
     }
 
     if (serviceNode->ServiceItem->VerifyResult != VrUnknown)
@@ -467,95 +435,41 @@ BOOLEAN ServiceTreeFilterCallback(
         switch (serviceNode->ServiceItem->VerifyResult)
         {
         case VrNoSignature:
-            if (WordMatchStringZ(L"NoSignature"))
+            if (PhSearchControlMatchZ(SearchMatchHandle, L"NoSignature"))
                 return TRUE;
             break;
         case VrTrusted:
-            if (WordMatchStringZ(L"Trusted"))
+            if (PhSearchControlMatchZ(SearchMatchHandle, L"Trusted"))
                 return TRUE;
             break;
         case VrExpired:
-            if (WordMatchStringZ(L"Expired"))
+            if (PhSearchControlMatchZ(SearchMatchHandle, L"Expired"))
                 return TRUE;
             break;
         case VrRevoked:
-            if (WordMatchStringZ(L"Revoked"))
+            if (PhSearchControlMatchZ(SearchMatchHandle, L"Revoked"))
                 return TRUE;
             break;
         case VrDistrust:
-            if (WordMatchStringZ(L"Distrust"))
+            if (PhSearchControlMatchZ(SearchMatchHandle, L"Distrust"))
                 return TRUE;
             break;
         case VrSecuritySettings:
-            if (WordMatchStringZ(L"SecuritySettings"))
+            if (PhSearchControlMatchZ(SearchMatchHandle, L"SecuritySettings"))
                 return TRUE;
             break;
         case VrBadSignature:
-            if (WordMatchStringZ(L"BadSignature"))
+            if (PhSearchControlMatchZ(SearchMatchHandle, L"BadSignature"))
                 return TRUE;
             break;
         default:
-            if (WordMatchStringZ(L"Unknown"))
+            if (PhSearchControlMatchZ(SearchMatchHandle, L"Unknown"))
                 return TRUE;
             break;
         }
     }
 
-    if (NT_SUCCESS(QueryServiceFileName(
-        &serviceNode->ServiceItem->Name->sr, 
-        &serviceFileName, 
-        &serviceBinaryPath
-        )))
-    {
-        BOOLEAN matched = FALSE;
-
-        if (serviceFileName)
-        {
-            if (WordMatchStringRef(&serviceFileName->sr))
-            {
-                matched = TRUE;
-            }
-
-            PhDereferenceObject(serviceFileName);
-        }
-
-        if (serviceBinaryPath)
-        {
-            if (WordMatchStringRef(&serviceBinaryPath->sr))
-            {
-                matched = TRUE;
-            }
-
-            PhDereferenceObject(serviceBinaryPath);
-        }
-
-        if (matched)
-            return TRUE;
-    }
-
     return FALSE;
-}
-
-// copied from ProcessHacker\netlist.c..
-static PPH_STRING PhpNetworkTreeGetNetworkItemProcessName(
-    _In_ PPH_NETWORK_ITEM NetworkItem
-    )
-{
-    PH_FORMAT format[4];
-
-    if (!NetworkItem->ProcessId)
-        return PhaCreateString(L"Waiting connections");
-
-    PhInitFormatS(&format[1], L" (");
-    PhInitFormatU(&format[2], HandleToUlong(NetworkItem->ProcessId));
-    PhInitFormatC(&format[3], ')');
-
-    if (NetworkItem->ProcessName)
-        PhInitFormatSR(&format[0], NetworkItem->ProcessName->sr);
-    else
-        PhInitFormatS(&format[0], L"Unknown process");
-
-    return PH_AUTO(PhFormat(format, 4, 96));
 }
 
 BOOLEAN NetworkTreeFilterCallback(
@@ -564,85 +478,95 @@ BOOLEAN NetworkTreeFilterCallback(
     )
 {
     PPH_NETWORK_NODE networkNode = (PPH_NETWORK_NODE)Node;
-    PPH_STRING processNameText;
 
-    if (PhIsNullOrEmptyString(SearchboxText))
+    if (!SearchMatchHandle)
         return TRUE;
 
-    // TODO: We need export the PPH_NETWORK_NODE->ProcessNameText field to search 
-    // waiting/unknown network connections... For now just replicate the data here.
-    processNameText = PhpNetworkTreeGetNetworkItemProcessName(networkNode->NetworkItem);
-
-    if (!PhIsNullOrEmptyString(processNameText))
+    if (!PhIsNullOrEmptyString(networkNode->ProcessNameText))
     {
-        if (WordMatchStringRef(&processNameText->sr))
+        if (PhSearchControlMatch(SearchMatchHandle, &networkNode->ProcessNameText->sr))
+            return TRUE;
+    }
+
+    if (!PhIsNullOrEmptyString(networkNode->TimeStampText))
+    {
+        if (PhSearchControlMatch(SearchMatchHandle, &networkNode->TimeStampText->sr))
             return TRUE;
     }
 
     if (!PhIsNullOrEmptyString(networkNode->NetworkItem->ProcessName))
     {
-        if (WordMatchStringRef(&networkNode->NetworkItem->ProcessName->sr))
+        if (PhSearchControlMatch(SearchMatchHandle, &networkNode->NetworkItem->ProcessName->sr))
             return TRUE;
     }
 
     if (!PhIsNullOrEmptyString(networkNode->NetworkItem->OwnerName))
     {
-        if (WordMatchStringRef(&networkNode->NetworkItem->OwnerName->sr))
+        if (PhSearchControlMatch(SearchMatchHandle, &networkNode->NetworkItem->OwnerName->sr))
             return TRUE;
     }
 
-    if (networkNode->NetworkItem->LocalAddressString[0])
+    if (!PhIsNullOrEmptyString(networkNode->NetworkItem->LocalAddressString))
     {
-        if (WordMatchStringZ(networkNode->NetworkItem->LocalAddressString))
+        if (PhSearchControlMatch(SearchMatchHandle, &networkNode->NetworkItem->LocalAddressString->sr))
             return TRUE;
     }
 
     if (networkNode->NetworkItem->LocalPortString[0])
     {
-        if (WordMatchStringZ(networkNode->NetworkItem->LocalPortString))
+        if (PhSearchControlMatchLongHintZ(SearchMatchHandle, networkNode->NetworkItem->LocalPortString))
             return TRUE;
     }
 
     if (!PhIsNullOrEmptyString(networkNode->NetworkItem->LocalHostString))
     {
-        if (WordMatchStringRef(&networkNode->NetworkItem->LocalHostString->sr))
+        if (PhSearchControlMatch(SearchMatchHandle, &networkNode->NetworkItem->LocalHostString->sr))
             return TRUE;
     }
 
-    if (networkNode->NetworkItem->RemoteAddressString[0])
+    if (!PhIsNullOrEmptyString(networkNode->NetworkItem->RemoteAddressString))
     {
-        if (WordMatchStringZ(networkNode->NetworkItem->RemoteAddressString))
+        if (PhSearchControlMatch(SearchMatchHandle, &networkNode->NetworkItem->RemoteAddressString->sr))
             return TRUE;
     }
 
     if (networkNode->NetworkItem->RemotePortString[0])
     {
-        if (WordMatchStringZ(networkNode->NetworkItem->RemotePortString))
+        if (PhSearchControlMatchLongHintZ(SearchMatchHandle, networkNode->NetworkItem->RemotePortString))
             return TRUE;
     }
 
     if (!PhIsNullOrEmptyString(networkNode->NetworkItem->RemoteHostString))
     {
-        if (WordMatchStringRef(&networkNode->NetworkItem->RemoteHostString->sr))
+        if (PhSearchControlMatch(SearchMatchHandle, &networkNode->NetworkItem->RemoteHostString->sr))
             return TRUE;
     }
 
-    if (WordMatchStringZ(PhGetProtocolTypeName(networkNode->NetworkItem->ProtocolType)))
-        return TRUE;
+    {
+        PPH_STRINGREF protocolType;
 
-    if ((networkNode->NetworkItem->ProtocolType & PH_TCP_PROTOCOL_TYPE) &&
-        WordMatchStringZ(PhGetTcpStateName(networkNode->NetworkItem->State)))
-        return TRUE;
+        if (protocolType = PhGetProtocolTypeName(networkNode->NetworkItem->ProtocolType))
+        {
+            if (PhSearchControlMatch(SearchMatchHandle, protocolType))
+                return TRUE;
+        }
+    }
 
-    if (networkNode->NetworkItem->ProcessId)
+    {
+        if (FlagOn(networkNode->NetworkItem->ProtocolType, PH_TCP_PROTOCOL_TYPE))
+        {
+            PPH_STRINGREF stateName;
+
+            if (stateName = PhGetTcpStateName(networkNode->NetworkItem->State))
+            {
+                if (PhSearchControlMatch(SearchMatchHandle, stateName))
+                    return TRUE;
+            }
+        }
+    }
+
     {
         PPH_PROCESS_NODE processNode;
-        WCHAR processIdString[PH_INT32_STR_LEN_1];
-
-        PhPrintUInt32(processIdString, HandleToUlong(networkNode->NetworkItem->ProcessId));
-
-        if (WordMatchStringZ(processIdString))
-            return TRUE;
 
         // Search the process node
         if (processNode = PhFindProcessNode(networkNode->NetworkItem->ProcessId))
@@ -653,114 +577,4 @@ BOOLEAN NetworkTreeFilterCallback(
     }
 
     return FALSE;
-}
-
-// NOTE: This function does not use the SCM due to major performance issues.
-// For now just query this information from the registry but it might be out-of-sync 
-// with any recent services changes until the SCM flushes its cache.
-NTSTATUS QueryServiceFileName(
-    _In_ PPH_STRINGREF ServiceName,
-    _Out_ PPH_STRING *ServiceFileName,
-    _Out_ PPH_STRING *ServiceBinaryPath
-    )
-{   
-    static PH_STRINGREF servicesKeyName = PH_STRINGREF_INIT(L"System\\CurrentControlSet\\Services\\");
-    static PH_STRINGREF typeKeyName = PH_STRINGREF_INIT(L"Type");
-
-    NTSTATUS status;
-    HANDLE keyHandle;
-    ULONG serviceType = 0;
-    PPH_STRING keyName;
-    PPH_STRING binaryPath;
-    PPH_STRING fileName;
-
-    keyName = PhConcatStringRef2(&servicesKeyName, ServiceName);
-    binaryPath = NULL;
-    fileName = NULL;
-
-    if (NT_SUCCESS(status = PhOpenKey(
-        &keyHandle,
-        KEY_READ,
-        PH_KEY_LOCAL_MACHINE,
-        &keyName->sr,
-        0
-        )))
-    {
-        PPH_STRING serviceImagePath;
-        PKEY_VALUE_PARTIAL_INFORMATION buffer;
-
-        if (NT_SUCCESS(status = PhQueryValueKey(
-            keyHandle,
-            &typeKeyName,
-            KeyValuePartialInformation,
-            &buffer
-            )))
-        {
-            if (
-                buffer->Type == REG_DWORD &&
-                buffer->DataLength == sizeof(ULONG)
-                )
-            {
-                serviceType = *(PULONG)buffer->Data;
-            }
-
-            PhFree(buffer);
-        }
-
-        if (serviceImagePath = PhQueryRegistryString(keyHandle, L"ImagePath"))
-        {
-            PPH_STRING expandedString;
-
-            if (expandedString = PhExpandEnvironmentStrings(&serviceImagePath->sr))
-            {
-                binaryPath = expandedString;
-                PhDereferenceObject(serviceImagePath);
-            }
-            else
-            {
-                binaryPath = serviceImagePath;
-            }
-        }
-        else
-        {
-            status = STATUS_NOT_FOUND;
-        }
-
-        NtClose(keyHandle);
-    }
-
-    if (NT_SUCCESS(status))
-    {
-        PhGetServiceDllParameter(serviceType, ServiceName, &fileName);
-
-        if (!fileName)
-        {
-            if (serviceType & SERVICE_WIN32)
-            {
-                PH_STRINGREF dummyFileName;
-                PH_STRINGREF dummyArguments;
-
-                PhParseCommandLineFuzzy(&binaryPath->sr, &dummyFileName, &dummyArguments, &fileName);
-
-                if (!fileName)
-                    PhSwapReference(&fileName, binaryPath);
-            }
-            else
-            {
-                fileName = PhGetFileName(binaryPath);
-            }
-        }
-
-        *ServiceFileName = fileName;
-        *ServiceBinaryPath = binaryPath;
-    }
-    else
-    {
-        if (binaryPath)
-            PhDereferenceObject(binaryPath);
-    }
-   
-    PhDereferenceObject(keyName);
-
-    return status;
 }

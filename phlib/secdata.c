@@ -1,36 +1,23 @@
 /*
- * Process Hacker -
- *   object security data
+ * Copyright (c) 2022 Winsider Seminars & Solutions, Inc.  All rights reserved.
  *
- * Copyright (C) 2010-2016 wj32
- * Copyright (C) 2017-2019 dmex
+ * This file is part of System Informer.
  *
- * This file is part of Process Hacker.
+ * Authors:
  *
- * Process Hacker is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
+ *     wj32    2010-2016
+ *     dmex    2017-2023
  *
- * Process Hacker is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with Process Hacker.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include <ph.h>
 #include <secedit.h>
+#include <wbemcli.h>
+#include <wtsapi32.h>
 
-#include <wmistr.h>
-
-#include <guisup.h>
-
-#define ACCESS_ENTRIES(Type) static PH_ACCESS_ENTRY Ph##Type##AccessEntries[] =
+#define ACCESS_ENTRIES(Type) static const PH_ACCESS_ENTRY Ph##Type##AccessEntries[] =
 #define ACCESS_ENTRY(Type, HasSynchronize) \
-    { L#Type, Ph##Type##AccessEntries, sizeof(Ph##Type##AccessEntries), HasSynchronize }
+   { TEXT(#Type), (PPH_ACCESS_ENTRY)Ph##Type##AccessEntries, sizeof(Ph##Type##AccessEntries), HasSynchronize }
 
 typedef struct _PH_SPECIFIC_TYPE
 {
@@ -90,6 +77,42 @@ ACCESS_ENTRIES(Directory)
     { L"Create subdirectories", DIRECTORY_CREATE_SUBDIRECTORY, TRUE, TRUE}
 };
 
+ACCESS_ENTRIES(EtwConsumer)
+{
+    { L"Full control", WMIGUID_ALL_ACCESS, TRUE, TRUE },
+    { L"Query", WMIGUID_QUERY, TRUE, TRUE },
+    { L"Read", WMIGUID_SET, TRUE, TRUE },
+    { L"Notification", WMIGUID_NOTIFICATION, TRUE, TRUE },
+    { L"Read description", WMIGUID_READ_DESCRIPTION, TRUE, TRUE },
+    { L"Execute", WMIGUID_EXECUTE, TRUE, TRUE },
+    { L"Create realtime", TRACELOG_CREATE_REALTIME, TRUE, TRUE },
+    { L"Create logfile", TRACELOG_CREATE_ONDISK, TRUE, TRUE },
+    { L"GUID enable", TRACELOG_GUID_ENABLE, TRUE, TRUE },
+    { L"Access kernel logger", TRACELOG_ACCESS_KERNEL_LOGGER, TRUE, TRUE },
+    { L"Log events", TRACELOG_LOG_EVENT, TRUE, TRUE },
+    { L"Access realtime", TRACELOG_ACCESS_REALTIME, TRUE, TRUE },
+    { L"Register guids", TRACELOG_REGISTER_GUIDS, TRUE, TRUE },
+    { L"Join group", TRACELOG_JOIN_GROUP, TRUE, TRUE }
+};
+
+ACCESS_ENTRIES(EtwRegistration)
+{
+    { L"Full control", WMIGUID_ALL_ACCESS, TRUE, TRUE },
+    { L"Query", WMIGUID_QUERY, TRUE, TRUE },
+    { L"Read", WMIGUID_SET, TRUE, TRUE },
+    { L"Notification", WMIGUID_NOTIFICATION, TRUE, TRUE },
+    { L"Read description", WMIGUID_READ_DESCRIPTION, TRUE, TRUE },
+    { L"Execute", WMIGUID_EXECUTE, TRUE, TRUE },
+    { L"Create realtime", TRACELOG_CREATE_REALTIME, TRUE, TRUE },
+    { L"Create logfile", TRACELOG_CREATE_ONDISK, TRUE, TRUE },
+    { L"GUID enable", TRACELOG_GUID_ENABLE, TRUE, TRUE },
+    { L"Access kernel logger", TRACELOG_ACCESS_KERNEL_LOGGER, TRUE, TRUE },
+    { L"Log events", TRACELOG_LOG_EVENT, TRUE, TRUE },
+    { L"Access realtime", TRACELOG_ACCESS_REALTIME, TRUE, TRUE },
+    { L"Register guids", TRACELOG_REGISTER_GUIDS, TRUE, TRUE },
+    { L"Join group", TRACELOG_JOIN_GROUP, TRUE, TRUE }
+};
+
 ACCESS_ENTRIES(Event)
 {
     { L"Full control", EVENT_ALL_ACCESS, TRUE, TRUE },
@@ -147,7 +170,7 @@ ACCESS_ENTRIES(Key)
     { L"Full control", KEY_ALL_ACCESS, TRUE, TRUE },
     { L"Read", KEY_READ, TRUE, FALSE },
     { L"Write", KEY_WRITE, TRUE, FALSE },
-    { L"Execute", KEY_EXECUTE, TRUE, FALSE },
+    //{ L"Execute", KEY_EXECUTE, TRUE, FALSE }, // KEY_EXECUTE has the same value as KEY_READ (dmex)
     { L"Enumerate subkeys", KEY_ENUMERATE_SUB_KEYS, FALSE, TRUE },
     { L"Query values", KEY_QUERY_VALUE, FALSE, TRUE },
     { L"Notify", KEY_NOTIFY, FALSE, TRUE },
@@ -547,6 +570,24 @@ ACCESS_ENTRIES(Type)
     { L"Create", OBJECT_TYPE_CREATE, TRUE, TRUE }
 };
 
+ACCESS_ENTRIES(WaitCompletionPacket)
+{
+    { L"Full control", OBJECT_TYPE_ALL_ACCESS, TRUE, TRUE },
+    { L"Modify state", OBJECT_TYPE_CREATE, TRUE, TRUE }
+};
+
+ACCESS_ENTRIES(Wbem)
+{
+    { L"Enable account", WBEM_ENABLE, TRUE, TRUE },
+    { L"Execute methods", WBEM_METHOD_EXECUTE, TRUE, TRUE },
+    { L"Full write", WBEM_FULL_WRITE_REP, TRUE, TRUE },
+    { L"Partial write", WBEM_PARTIAL_WRITE_REP, TRUE, TRUE },
+    { L"Provider write", WBEM_WRITE_PROVIDER, TRUE, TRUE },
+    { L"Remote enable", WBEM_REMOTE_ACCESS, TRUE, TRUE },
+    { L"Get notifications", WBEM_RIGHT_SUBSCRIBE, TRUE, TRUE },
+    { L"Read description", WBEM_RIGHT_PUBLISH, TRUE, TRUE }
+};
+
 ACCESS_ENTRIES(WindowStation)
 {
     { L"Full control", WINSTA_ALL_ACCESS | STANDARD_RIGHTS_REQUIRED, TRUE, TRUE },
@@ -584,12 +625,33 @@ ACCESS_ENTRIES(WmiGuid)
     { L"Register provider GUIDs", TRACELOG_REGISTER_GUIDS, FALSE, TRUE, L"Register GUIDs" }
 };
 
+ACCESS_ENTRIES(Rdp)
+{
+    { L"Full control", WTS_SECURITY_ALL_ACCESS, TRUE, TRUE },
+    { L"Query information", WTS_SECURITY_QUERY_INFORMATION, TRUE, TRUE },
+    { L"Set information", WTS_SECURITY_SET_INFORMATION, TRUE, TRUE },
+    { L"Reset", WTS_SECURITY_RESET, FALSE, TRUE },
+    { L"Virtual channels", WTS_SECURITY_VIRTUAL_CHANNELS, FALSE, TRUE },
+    { L"Remote control", WTS_SECURITY_REMOTE_CONTROL, FALSE, TRUE },
+    { L"Logon", WTS_SECURITY_LOGON, FALSE, TRUE },
+    { L"Logoff", WTS_SECURITY_LOGOFF, FALSE, TRUE },
+    { L"Message", WTS_SECURITY_MESSAGE, FALSE, TRUE },
+    { L"Connect", WTS_SECURITY_CONNECT, FALSE, TRUE },
+    { L"Disconnect", WTS_SECURITY_DISCONNECT, FALSE, TRUE },
+    { L"Guest access", WTS_SECURITY_GUEST_ACCESS, FALSE, TRUE },
+    { L"Guest access (current)", WTS_SECURITY_CURRENT_GUEST_ACCESS, FALSE, TRUE },
+    { L"User access", WTS_SECURITY_USER_ACCESS, FALSE, TRUE },
+    { L"User access (current)", WTS_SECURITY_SET_INFORMATION | WTS_SECURITY_RESET | WTS_SECURITY_VIRTUAL_CHANNELS | WTS_SECURITY_LOGOFF | WTS_SECURITY_DISCONNECT, FALSE, TRUE }, // WTS_SECURITY_CURRENT_USER_ACCESS
+};
+
 static PH_SPECIFIC_TYPE PhSpecificTypes[] =
 {
     ACCESS_ENTRY(AlpcPort, TRUE),
     ACCESS_ENTRY(DebugObject, TRUE),
     ACCESS_ENTRY(Desktop, FALSE),
     ACCESS_ENTRY(Directory, FALSE),
+    ACCESS_ENTRY(EtwConsumer, FALSE),
+    ACCESS_ENTRY(EtwRegistration, FALSE),
     ACCESS_ENTRY(Event, TRUE),
     ACCESS_ENTRY(EventPair, TRUE),
     ACCESS_ENTRY(File, TRUE),
@@ -629,8 +691,11 @@ static PH_SPECIFIC_TYPE PhSpecificTypes[] =
     ACCESS_ENTRY(TokenDefault, FALSE),
     ACCESS_ENTRY(TpWorkerFactory, FALSE),
     ACCESS_ENTRY(Type, FALSE),
+    ACCESS_ENTRY(WaitCompletionPacket, FALSE),
+    ACCESS_ENTRY(Wbem, FALSE),
     ACCESS_ENTRY(WindowStation, FALSE),
-    ACCESS_ENTRY(WmiGuid, TRUE)
+    ACCESS_ENTRY(WmiGuid, TRUE),
+    ACCESS_ENTRY(Rdp, FALSE),
 };
 
 /**
@@ -676,6 +741,36 @@ BOOLEAN PhGetAccessEntries(
     else if (PhEqualStringZ(Type, L"FileObject", TRUE))
     {
         Type = L"File";
+    }
+    else if (PhEqualStringZ(Type, L"PowerDefault", TRUE))
+    {
+        Type = L"Key";
+    }
+    else if (PhEqualStringZ(Type, L"RdpDefault", TRUE))
+    {
+        Type = L"Rdp";
+    }
+    else if (PhEqualStringZ(Type, L"WmiDefault", TRUE))
+    {
+        // WBEM doesn't allow StandardAccessEntries (dmex)
+        for (i = 0; i < RTL_NUMBER_OF(PhSpecificTypes); i++)
+        {
+            if (PhEqualStringZ(PhSpecificTypes[i].Type, L"Wbem", TRUE))
+            {
+                specificType = &PhSpecificTypes[i];
+                break;
+            }
+        }
+
+        if (specificType)
+        {
+            accessEntries = PhAllocate(specificType->SizeOfAccessEntries);
+            memcpy(accessEntries, specificType->AccessEntries, specificType->SizeOfAccessEntries);
+
+            *AccessEntries = accessEntries;
+            *NumberOfAccessEntries = specificType->SizeOfAccessEntries / sizeof(PH_ACCESS_ENTRY);
+            return TRUE;
+        }
     }
 
     // Find the specific type.
@@ -724,7 +819,7 @@ BOOLEAN PhGetAccessEntries(
     }
     else
     {
-        *AccessEntries = PhAllocateCopy(PhStandardAccessEntries, sizeof(PhStandardAccessEntries));
+        *AccessEntries = PhAllocateCopy((PVOID)PhStandardAccessEntries, sizeof(PhStandardAccessEntries));
         *NumberOfAccessEntries = sizeof(PhStandardAccessEntries) / sizeof(PH_ACCESS_ENTRY);
     }
 
@@ -739,7 +834,7 @@ static int __cdecl PhpAccessEntryCompare(
     PPH_ACCESS_ENTRY entry1 = (PPH_ACCESS_ENTRY)elem1;
     PPH_ACCESS_ENTRY entry2 = (PPH_ACCESS_ENTRY)elem2;
 
-    return intcmp(PhCountBits(entry2->Access), PhCountBits(entry1->Access));
+    return uintcmp(PhCountBits(entry2->Access), PhCountBits(entry1->Access));
 }
 
 /**

@@ -1,28 +1,16 @@
 /*
- * Process Hacker Online Checks -
- *   Main Program
+ * Copyright (c) 2022 Winsider Seminars & Solutions, Inc.  All rights reserved.
  *
- * Copyright (C) 2010-2013 wj32
- * Copyright (C) 2012-2019 dmex
+ * This file is part of System Informer.
  *
- * This file is part of Process Hacker.
+ * Authors:
  *
- * Process Hacker is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
+ *     wj32    2010-2013
+ *     dmex    2012-2024
  *
- * Process Hacker is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with Process Hacker.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include "onlnchk.h"
-#include "db.h"
 
 PPH_PLUGIN PluginInstance;
 PH_CALLBACK_REGISTRATION PluginLoadCallbackRegistration;
@@ -41,120 +29,33 @@ PH_CALLBACK_REGISTRATION ServiceTreeNewInitializingCallbackRegistration;
 
 BOOLEAN VirusTotalScanningEnabled = FALSE;
 ULONG ProcessesUpdatedCount = 0;
-LIST_ENTRY ProcessListHead = { &ProcessListHead, &ProcessListHead };
-PH_QUEUED_LOCK ProcessesListLock = PH_QUEUED_LOCK_INIT;
 
 VOID ProcessesUpdatedCallback(
     _In_opt_ PVOID Parameter,
     _In_opt_ PVOID Context
     )
 {
-    static ULONG ProcessesUpdatedCount = 0;
-    PLIST_ENTRY listEntry;
-
-    if (!VirusTotalScanningEnabled)
-        return;
-
-    if (ProcessesUpdatedCount < 2)
+    if (ProcessesUpdatedCount != 3)
     {
         ProcessesUpdatedCount++;
         return;
     }
-
-    listEntry = ProcessListHead.Flink;
-
-    while (listEntry != &ProcessListHead)
-    {
-        PPROCESS_EXTENSION extension;
-        PPH_STRING filePath = NULL;
-
-        extension = CONTAINING_RECORD(listEntry, PROCESS_EXTENSION, ListEntry);
-
-        if (extension->ProcessItem)
-        {
-            filePath = extension->ProcessItem->FileNameWin32;
-        }
-        else if (extension->ModuleItem)
-        {
-            filePath = extension->ModuleItem->FileName;
-        }
-        else if (extension->ServiceItem)
-        {
-            if (extension->FilePath)
-            {
-                filePath = extension->FilePath;
-            }
-            else
-            {
-                PPH_STRING serviceFileName = NULL;
-                PPH_STRING serviceBinaryPath = NULL;
-
-                if (NT_SUCCESS(QueryServiceFileName(
-                    &extension->ServiceItem->Name->sr,
-                    &serviceFileName,
-                    &serviceBinaryPath
-                    )))
-                {
-                    PhMoveReference(&extension->FilePath, serviceFileName);
-                    if (serviceBinaryPath) PhDereferenceObject(serviceBinaryPath);
-                }
-
-                filePath = extension->FilePath;
-            }
-        }
-
-        if (!PhIsNullOrEmptyString(filePath))
-        {
-            if (!extension->ResultValid)
-            {
-                PPROCESS_DB_OBJECT object;
-
-                if (filePath && (object = FindProcessDbObject(&filePath->sr)))
-                {
-                    extension->Stage1 = TRUE;
-                    extension->ResultValid = TRUE;
-
-                    extension->Positives = object->Positives;
-                    PhSwapReference(&extension->VirusTotalResult, object->Result);
-                }
-            }
-
-            if (!extension->Stage1)
-            {
-                if (filePath && !VirusTotalGetCachedResult(filePath))
-                {
-                    VirusTotalAddCacheResult(filePath, extension);
-                }
-
-                extension->Stage1 = TRUE;
-            }
-        }
-
-        listEntry = listEntry->Flink;
-    }
 }
 
 VOID NTAPI LoadCallback(
-    _In_opt_ PVOID Parameter,
-    _In_opt_ PVOID Context
+    _In_ PVOID Parameter,
+    _In_ PVOID Context
     )
 {
-    if (VirusTotalScanningEnabled = !!PhGetIntegerSetting(SETTING_NAME_VIRUSTOTAL_SCAN_ENABLED))
-    {
-        InitializeProcessDb();
-        InitializeVirusTotalProcessMonitor();
-    }
+    NOTHING;
 }
 
 VOID NTAPI ShowOptionsCallback(
-    _In_opt_ PVOID Parameter,
-    _In_opt_ PVOID Context
+    _In_ PVOID Parameter,
+    _In_ PVOID Context
     )
 {
     PPH_PLUGIN_OPTIONS_POINTERS optionsEntry = (PPH_PLUGIN_OPTIONS_POINTERS)Parameter;
-
-    if (!optionsEntry)
-        return;
 
     optionsEntry->CreateSection(
         L"OnlineChecks",
@@ -166,54 +67,17 @@ VOID NTAPI ShowOptionsCallback(
 }
 
 VOID NTAPI MenuItemCallback(
-    _In_opt_ PVOID Parameter,
-    _In_opt_ PVOID Context
+    _In_ PVOID Parameter,
+    _In_ PVOID Context
     )
 {
     PPH_PLUGIN_MENU_ITEM menuItem = Parameter;
-
-    if (!menuItem)
-        return;
 
     switch (menuItem->Id)
     {
     case ENABLE_SERVICE_VIRUSTOTAL:
         {
-            ULONG scanningEnabled = !VirusTotalScanningEnabled;
-
-            PhSetIntegerSetting(SETTING_NAME_VIRUSTOTAL_SCAN_ENABLED, scanningEnabled);
-
-            if (VirusTotalScanningEnabled != scanningEnabled)
-            {
-                INT result = IDOK;
-                TASKDIALOGCONFIG config;
-
-                memset(&config, 0, sizeof(TASKDIALOGCONFIG));
-                config.cbSize = sizeof(TASKDIALOGCONFIG);
-                config.dwFlags = TDF_USE_HICON_MAIN | TDF_ALLOW_DIALOG_CANCELLATION;
-                config.dwCommonButtons = TDCBF_YES_BUTTON | TDCBF_NO_BUTTON;
-                config.hwndParent = menuItem->OwnerWindow;
-                config.hMainIcon = PH_LOAD_SHARED_ICON_LARGE(PhInstanceHandle, MAKEINTRESOURCE(PHAPP_IDI_PROCESSHACKER));
-                config.cxWidth = 180;
-                config.pszWindowTitle = L"Process Hacker - VirusTotal";
-                config.pszMainInstruction = L"VirusTotal scanning requires a restart of Process Hacker.";
-                config.pszContent = L"Do you want to restart Process Hacker now?";
-
-                if (SUCCEEDED(TaskDialogIndirect(&config, &result, NULL, NULL)) && result == IDYES)
-                {
-                    ProcessHacker_PrepareForEarlyShutdown(PhMainWndHandle);
-                    PhShellProcessHacker(
-                        PhMainWndHandle,
-                        L"-v",
-                        SW_SHOW,
-                        0,
-                        PH_SHELL_APP_PROPAGATE_PARAMETERS | PH_SHELL_APP_PROPAGATE_PARAMETERS_IGNORE_VISIBILITY,
-                        0,
-                        NULL
-                        );
-                    ProcessHacker_Destroy(PhMainWndHandle);
-                }
-            }
+            NOTHING;
         }
         break;
     case MENUITEM_VIRUSTOTAL_UPLOAD:
@@ -269,16 +133,13 @@ VOID NTAPI MenuItemCallback(
 }
 
 VOID NTAPI MainMenuInitializingCallback(
-    _In_opt_ PVOID Parameter,
-    _In_opt_ PVOID Context
+    _In_ PVOID Parameter,
+    _In_ PVOID Context
     )
 {
     PPH_PLUGIN_MENU_INFORMATION menuInfo = Parameter;
     PPH_EMENU_ITEM onlineMenuItem;
     PPH_EMENU_ITEM enableMenuItem;
-
-    if (!menuInfo)
-        return;
 
     if (menuInfo->u.MainMenu.SubMenuIndex != PH_MENU_ITEM_LOCATION_TOOLS)
         return;
@@ -298,7 +159,7 @@ VOID NTAPI MainMenuInitializingCallback(
 PPH_EMENU_ITEM CreateSendToMenu(
     _In_ BOOLEAN ProcessesMenu,
     _In_ PPH_EMENU_ITEM Parent,
-    _In_ PPH_STRING FileName
+    _In_opt_ PPH_STRING FileName
     )
 {
     PPH_EMENU_ITEM sendToMenu;
@@ -306,9 +167,9 @@ PPH_EMENU_ITEM CreateSendToMenu(
     ULONG insertIndex;
 
     sendToMenu = PhPluginCreateEMenuItem(PluginInstance, 0, 0, L"Sen&d to", NULL);
-    PhInsertEMenuItem(sendToMenu, PhPluginCreateEMenuItem(PluginInstance, 0, MENUITEM_VIRUSTOTAL_UPLOAD, L"&virustotal.com", FileName), ULONG_MAX);
     PhInsertEMenuItem(sendToMenu, PhPluginCreateEMenuItem(PluginInstance, 0, MENUITEM_HYBRIDANALYSIS_UPLOAD, L"&hybrid-analysis.com", FileName), ULONG_MAX);
     PhInsertEMenuItem(sendToMenu, PhPluginCreateEMenuItem(PluginInstance, 0, MENUITEM_JOTTI_UPLOAD, L"virusscan.&jotti.org", FileName), ULONG_MAX);
+    PhInsertEMenuItem(sendToMenu, PhPluginCreateEMenuItem(PluginInstance, 0, MENUITEM_VIRUSTOTAL_UPLOAD, L"&virustotal.com", FileName), ULONG_MAX);
 
     if (ProcessesMenu && (menuItem = PhFindEMenuItem(Parent, 0, NULL, PHAPP_ID_PROCESS_SEARCHONLINE)))
     {
@@ -327,23 +188,20 @@ PPH_EMENU_ITEM CreateSendToMenu(
 }
 
 VOID NTAPI ProcessMenuInitializingCallback(
-    _In_opt_ PVOID Parameter,
-    _In_opt_ PVOID Context
+    _In_ PVOID Parameter,
+    _In_ PVOID Context
     )
 {
     PPH_PLUGIN_MENU_INFORMATION menuInfo = Parameter;
     PPH_PROCESS_ITEM processItem;
     PPH_EMENU_ITEM sendToMenu;
 
-    if (!menuInfo)
-        return;
-
     if (menuInfo->u.Process.NumberOfProcesses == 1)
         processItem = menuInfo->u.Process.Processes[0];
     else
         processItem = NULL;
 
-    sendToMenu = CreateSendToMenu(TRUE, menuInfo->Menu, processItem ? processItem->FileNameWin32 : NULL);
+    sendToMenu = CreateSendToMenu(TRUE, menuInfo->Menu, processItem ? processItem->FileName : NULL);
 
     // Only enable the Send To menu if there is exactly one process selected and it has a file name.
     if (!processItem || !processItem->FileName)
@@ -353,16 +211,13 @@ VOID NTAPI ProcessMenuInitializingCallback(
 }
 
 VOID NTAPI ModuleMenuInitializingCallback(
-    _In_opt_ PVOID Parameter,
-    _In_opt_ PVOID Context
+    _In_ PVOID Parameter,
+    _In_ PVOID Context
     )
 {
     PPH_PLUGIN_MENU_INFORMATION menuInfo = Parameter;
     PPH_MODULE_ITEM moduleItem;
     PPH_EMENU_ITEM sendToMenu;
-
-    if (!menuInfo)
-        return;
 
     if (menuInfo->u.Module.NumberOfModules == 1)
         moduleItem = menuInfo->u.Module.Modules[0];
@@ -378,16 +233,13 @@ VOID NTAPI ModuleMenuInitializingCallback(
 }
 
 VOID NTAPI ServiceMenuInitializingCallback(
-    _In_opt_ PVOID Parameter,
-    _In_opt_ PVOID Context
+    _In_ PVOID Parameter,
+    _In_ PVOID Context
     )
 {
     PPH_PLUGIN_MENU_INFORMATION menuInfo = Parameter;
     PPH_SERVICE_ITEM serviceItem;
     PPH_EMENU_ITEM sendToMenu;
-
-    if (!menuInfo)
-        return;
 
     if (menuInfo->u.Service.NumberOfServices == 1)
         serviceItem = menuInfo->u.Service.Services[0];
@@ -395,9 +247,9 @@ VOID NTAPI ServiceMenuInitializingCallback(
         serviceItem = NULL;
 
     sendToMenu = PhPluginCreateEMenuItem(PluginInstance, 0, 0, L"Sen&d to", NULL);
-    PhInsertEMenuItem(sendToMenu, PhPluginCreateEMenuItem(PluginInstance, 0, MENUITEM_VIRUSTOTAL_UPLOAD_SERVICE, L"&virustotal.com", serviceItem ? serviceItem : NULL), ULONG_MAX);
     PhInsertEMenuItem(sendToMenu, PhPluginCreateEMenuItem(PluginInstance, 0, MENUITEM_HYBRIDANALYSIS_UPLOAD_SERVICE, L"&hybrid-analysis.com", serviceItem ? serviceItem : NULL), ULONG_MAX);
     PhInsertEMenuItem(sendToMenu, PhPluginCreateEMenuItem(PluginInstance, 0, MENUITEM_JOTTI_UPLOAD_SERVICE, L"virusscan.&jotti.org", serviceItem ? serviceItem : NULL), ULONG_MAX);
+    PhInsertEMenuItem(sendToMenu, PhPluginCreateEMenuItem(PluginInstance, 0, MENUITEM_VIRUSTOTAL_UPLOAD_SERVICE, L"&virustotal.com", serviceItem ? serviceItem : NULL), ULONG_MAX);
     PhInsertEMenuItem(menuInfo->Menu, PhCreateEMenuSeparator(), ULONG_MAX);
     PhInsertEMenuItem(menuInfo->Menu, sendToMenu, ULONG_MAX);
 
@@ -486,15 +338,12 @@ LONG NTAPI VirusTotalServiceNodeSortFunction(
 }
 
 VOID NTAPI ProcessTreeNewInitializingCallback(
-    _In_opt_ PVOID Parameter,
-    _In_opt_ PVOID Context
+    _In_ PVOID Parameter,
+    _In_ PVOID Context
     )
 {
     PPH_PLUGIN_TREENEW_INFORMATION info = Parameter;
     PH_TREENEW_COLUMN column;
-
-    if (!info)
-        return;
 
     memset(&column, 0, sizeof(PH_TREENEW_COLUMN));
     column.Text = L"VirusTotal";
@@ -507,15 +356,12 @@ VOID NTAPI ProcessTreeNewInitializingCallback(
 }
 
 VOID NTAPI ModuleTreeNewInitializingCallback(
-    _In_opt_ PVOID Parameter,
-    _In_opt_ PVOID Context
+    _In_ PVOID Parameter,
+    _In_ PVOID Context
     )
 {
     PPH_PLUGIN_TREENEW_INFORMATION info = Parameter;
     PH_TREENEW_COLUMN column;
-
-    if (!info)
-        return;
 
     memset(&column, 0, sizeof(PH_TREENEW_COLUMN));
     column.Text = L"VirusTotal";
@@ -528,15 +374,12 @@ VOID NTAPI ModuleTreeNewInitializingCallback(
 }
 
 VOID NTAPI ServiceTreeNewInitializingCallback(
-    _In_opt_ PVOID Parameter,
-    _In_opt_ PVOID Context
+    _In_ PVOID Parameter,
+    _In_ PVOID Context
     )
 {
     PPH_PLUGIN_TREENEW_INFORMATION info = Parameter;
     PH_TREENEW_COLUMN column;
-
-    if (!info)
-        return;
 
     memset(&column, 0, sizeof(PH_TREENEW_COLUMN));
     column.Text = L"VirusTotal";
@@ -549,14 +392,11 @@ VOID NTAPI ServiceTreeNewInitializingCallback(
 }
 
 VOID NTAPI TreeNewMessageCallback(
-    _In_opt_ PVOID Parameter,
-    _In_opt_ PVOID Context
+    _In_ PVOID Parameter,
+    _In_ PVOID Context
     )
 {
     PPH_PLUGIN_TREENEW_MESSAGE message = Parameter;
-
-    if (!message)
-        return;
 
     switch (message->Message)
     {
@@ -668,12 +508,7 @@ VOID NTAPI ProcessItemCreateCallback(
     PPROCESS_EXTENSION extension = Extension;
 
     memset(extension, 0, sizeof(PROCESS_EXTENSION));
-
     extension->ProcessItem = processItem;
-
-    PhAcquireQueuedLockExclusive(&ProcessesListLock);
-    InsertTailList(&ProcessListHead, &extension->ListEntry);
-    PhReleaseQueuedLockExclusive(&ProcessesListLock);
 }
 
 VOID NTAPI ProcessItemDeleteCallback(
@@ -686,10 +521,6 @@ VOID NTAPI ProcessItemDeleteCallback(
     PPROCESS_EXTENSION extension = Extension;
 
     PhClearReference(&extension->VirusTotalResult);
-
-    PhAcquireQueuedLockExclusive(&ProcessesListLock);
-    RemoveEntryList(&extension->ListEntry);
-    PhReleaseQueuedLockExclusive(&ProcessesListLock);
 }
 
 VOID NTAPI ModuleItemCreateCallback(
@@ -702,12 +533,7 @@ VOID NTAPI ModuleItemCreateCallback(
     PPROCESS_EXTENSION extension = Extension;
 
     memset(extension, 0, sizeof(PROCESS_EXTENSION));
-
     extension->ModuleItem = moduleItem;
-
-    PhAcquireQueuedLockExclusive(&ProcessesListLock);
-    InsertTailList(&ProcessListHead, &extension->ListEntry);
-    PhReleaseQueuedLockExclusive(&ProcessesListLock);
 }
 
 VOID NTAPI ModuleItemDeleteCallback(
@@ -720,10 +546,6 @@ VOID NTAPI ModuleItemDeleteCallback(
     PPROCESS_EXTENSION extension = Extension;
 
     PhClearReference(&extension->VirusTotalResult);
-
-    PhAcquireQueuedLockExclusive(&ProcessesListLock);
-    RemoveEntryList(&extension->ListEntry);
-    PhReleaseQueuedLockExclusive(&ProcessesListLock);
 }
 
 VOID NTAPI ServiceItemCreateCallback(
@@ -736,12 +558,7 @@ VOID NTAPI ServiceItemCreateCallback(
     PPROCESS_EXTENSION extension = Extension;
 
     memset(extension, 0, sizeof(PROCESS_EXTENSION));
-
     extension->ServiceItem = serviceItem;
-
-    PhAcquireQueuedLockExclusive(&ProcessesListLock);
-    InsertTailList(&ProcessListHead, &extension->ListEntry);
-    PhReleaseQueuedLockExclusive(&ProcessesListLock);
 }
 
 VOID NTAPI ServiceItemDeleteCallback(
@@ -754,10 +571,6 @@ VOID NTAPI ServiceItemDeleteCallback(
     PPROCESS_EXTENSION extension = Extension;
 
     PhClearReference(&extension->VirusTotalResult);
-
-    PhAcquireQueuedLockExclusive(&ProcessesListLock);
-    RemoveEntryList(&extension->ListEntry);
-    PhReleaseQueuedLockExclusive(&ProcessesListLock);
 }
 
 LOGICAL DllMain(
@@ -775,7 +588,9 @@ LOGICAL DllMain(
             {
                 { IntegerSettingType, SETTING_NAME_VIRUSTOTAL_SCAN_ENABLED, L"0" },
                 { IntegerSettingType, SETTING_NAME_VIRUSTOTAL_HIGHLIGHT_DETECTIONS, L"0" },
-                { IntegerSettingType, SETTING_NAME_VIRUSTOTAL_DEFAULT_ACTION, L"0" }
+                { IntegerSettingType, SETTING_NAME_VIRUSTOTAL_DEFAULT_ACTION, L"0" },
+                { StringSettingType, SETTING_NAME_VIRUSTOTAL_DEFAULT_PAT, L"" },
+                { StringSettingType, SETTING_NAME_HYBRIDANAL_DEFAULT_PAT, L"" },
             };
 
             PluginInstance = PhRegisterPlugin(PLUGIN_NAME, Instance, &info);
@@ -786,7 +601,6 @@ LOGICAL DllMain(
             info->DisplayName = L"Online Checks";
             info->Author = L"dmex, wj32";
             info->Description = L"Allows files to be checked with online services.";
-            info->Url = L"https://wj32.org/processhacker/forums/viewtopic.php?t=1118";
 
             PhRegisterCallback(
                 PhGetPluginCallback(PluginInstance, PluginCallbackLoad),
@@ -895,7 +709,7 @@ LOGICAL DllMain(
                 ServiceItemDeleteCallback
                 );
 
-            PhAddSettings(settings, ARRAYSIZE(settings));
+            PhAddSettings(settings, RTL_NUMBER_OF(settings));
         }
         break;
     }

@@ -1,3 +1,9 @@
+/*
+ * Windows Session Manager support functions
+ *
+ * This file is part of System Informer.
+ */
+
 #ifndef _NTSMSS_H
 #define _NTSMSS_H
 

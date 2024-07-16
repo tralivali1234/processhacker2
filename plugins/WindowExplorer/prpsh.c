@@ -1,23 +1,12 @@
 /*
- * Process Hacker -
- *   property sheet 
+ * Copyright (c) 2022 Winsider Seminars & Solutions, Inc.  All rights reserved.
  *
- * Copyright (C) 2017 dmex
+ * This file is part of System Informer.
  *
- * This file is part of Process Hacker.
+ * Authors:
  *
- * Process Hacker is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
+ *     dmex    2017-2023
  *
- * Process Hacker is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with Process Hacker.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include "wndexp.h"
@@ -184,7 +173,7 @@ LRESULT CALLBACK PvpPropSheetWndProc(
 
     switch (uMsg)
     {
-    case WM_DESTROY:
+    case WM_NCDESTROY:
         {
             SetWindowLongPtr(hWnd, GWLP_WNDPROC, (LONG_PTR)oldWndProc);
             PhRemoveWindowContext(hWnd, ULONG_MAX);
@@ -209,7 +198,7 @@ LRESULT CALLBACK PvpPropSheetWndProc(
         break;
     case WM_SIZE:
         {
-            if (!IsIconic(hWnd))
+            if (!IsMinimized(hWnd))
             {
                 PhLayoutManagerLayout(&context->LayoutManager);
             }
@@ -223,6 +212,117 @@ LRESULT CALLBACK PvpPropSheetWndProc(
     }
 
     return CallWindowProc(oldWndProc, hWnd, uMsg, wParam, lParam);
+}
+
+BOOLEAN CALLBACK PvRefreshButtonWindowEnumCallback(
+    _In_ HWND WindowHandle,
+    _In_opt_ PVOID Context
+    )
+{
+    WCHAR className[256];
+
+    if (!GetClassName(WindowHandle, className, RTL_NUMBER_OF(className)))
+        className[0] = UNICODE_NULL;
+
+    if (PhEqualStringZ(className, L"#32770", TRUE))
+    {
+        SendMessage(WindowHandle, WM_PH_UPDATE_DIALOG, 0, 0);
+    }
+
+    return TRUE;
+}
+
+VOID PvRefreshChildWindows(
+    _In_ HWND WindowHandle
+    )
+{
+    HWND propSheetHandle;
+
+    if (propSheetHandle = GetAncestor(WindowHandle, GA_ROOT))
+    {
+        //HWND pageHandle;
+        //
+        //if (pageHandle = PropSheet_GetCurrentPageHwnd(propSheetHandle))
+        //{
+        //    SendMessage(pageHandle, WM_PH_UPDATE_DIALOG, 0, 0);
+        //}
+
+        PhEnumChildWindows(propSheetHandle, ULONG_MAX, PvRefreshButtonWindowEnumCallback, NULL);
+    }
+}
+
+LRESULT CALLBACK PvRefreshButtonWndProc(
+    _In_ HWND WindowHandle,
+    _In_ UINT uMsg,
+    _In_ WPARAM wParam,
+    _In_ LPARAM lParam
+    )
+{
+    PPV_PROPSHEETCONTEXT propSheetContext;
+    WNDPROC oldWndProc;
+
+    if (!(propSheetContext = PhGetWindowContext(WindowHandle, SCHAR_MAX)))
+        return DefWindowProc(WindowHandle, uMsg, wParam, lParam);
+
+    oldWndProc = propSheetContext->OldRefreshButtonWndProc;
+
+    switch (uMsg)
+    {
+    case WM_COMMAND:
+        {
+            if (GET_WM_COMMAND_HWND(wParam, lParam) == propSheetContext->RefreshButtonWindowHandle)
+            {
+                PvRefreshChildWindows(WindowHandle);
+            }
+        }
+        break;
+    case WM_DESTROY:
+        {
+            PhRemoveWindowContext(WindowHandle, SCHAR_MAX);
+            SetWindowLongPtr(WindowHandle, GWLP_WNDPROC, (LONG_PTR)oldWndProc);
+        }
+        break;
+    }
+
+    return CallWindowProc(oldWndProc, WindowHandle, uMsg, wParam, lParam);
+}
+
+HWND PvpCreateOptionsButton(
+    _In_ PPV_PROPSHEETCONTEXT PropSheetContext,
+    _In_ HWND PropSheetWindow
+    )
+{
+    if (!PropSheetContext->RefreshButtonWindowHandle)
+    {
+        RECT clientRect;
+        RECT rect;
+
+        PropSheetContext->OldRefreshButtonWndProc = PhGetWindowProcedure(PropSheetWindow);
+        PhSetWindowContext(PropSheetWindow, SCHAR_MAX, PropSheetContext);
+        PhSetWindowProcedure(PropSheetWindow, PvRefreshButtonWndProc);
+
+        // Create the refresh button.
+        GetClientRect(PropSheetWindow, &clientRect);
+        GetWindowRect(GetDlgItem(PropSheetWindow, IDCANCEL), &rect);
+        MapWindowPoints(NULL, PropSheetWindow, (POINT*)& rect, 2);
+        PropSheetContext->RefreshButtonWindowHandle = CreateWindowEx(
+            WS_EX_NOPARENTNOTIFY,
+            WC_BUTTON,
+            L"Refresh",
+            WS_CHILD | WS_VISIBLE | WS_TABSTOP,
+            clientRect.right - rect.right,
+            rect.top,
+            rect.right - rect.left,
+            rect.bottom - rect.top,
+            PropSheetWindow,
+            NULL,
+            PluginInstance->DllBase,
+            NULL
+            );
+        SetWindowFont(PropSheetContext->RefreshButtonWindowHandle, GetWindowFont(GetDlgItem(PropSheetWindow, IDCANCEL)), TRUE);
+    }
+
+    return PropSheetContext->RefreshButtonWindowHandle;
 }
 
 BOOLEAN PhpInitializePropSheetLayoutStage1(
@@ -244,8 +344,8 @@ BOOLEAN PhpInitializePropSheetLayoutStage1(
 
         PropSheetContext->TabPageItem = tabPageItem;
 
-        PhAddLayoutItem(&PropSheetContext->LayoutManager, GetDlgItem(hwnd, IDCANCEL),
-            NULL, PH_ANCHOR_RIGHT | PH_ANCHOR_BOTTOM);
+        PhAddLayoutItem(&PropSheetContext->LayoutManager, GetDlgItem(hwnd, IDCANCEL), NULL, PH_ANCHOR_RIGHT | PH_ANCHOR_BOTTOM);
+        PhAddLayoutItem(&PropSheetContext->LayoutManager, PvpCreateOptionsButton(PropSheetContext, hwnd), NULL, PH_ANCHOR_LEFT | PH_ANCHOR_BOTTOM);
 
         // Hide the OK button.
         ShowWindow(GetDlgItem(hwnd, IDOK), SW_HIDE);

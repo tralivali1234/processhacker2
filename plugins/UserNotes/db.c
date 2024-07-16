@@ -1,28 +1,17 @@
 /*
- * Process Hacker User Notes -
- *   database functions
+ * Copyright (c) 2022 Winsider Seminars & Solutions, Inc.  All rights reserved.
  *
- * Copyright (C) 2011-2015 wj32
- * Copyright (C) 2016 dmex
+ * This file is part of System Informer.
  *
- * This file is part of Process Hacker.
+ * Authors:
  *
- * Process Hacker is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
+ *     wj32    2011-2015
+ *     dmex    2016-2023
  *
- * Process Hacker is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with Process Hacker.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include "usernotes.h"
-#include <commonutil.h>
+#include <json.h>
 
 BOOLEAN NTAPI ObjectDbEqualFunction(
     _In_ PVOID Entry1,
@@ -33,9 +22,15 @@ ULONG NTAPI ObjectDbHashFunction(
     _In_ PVOID Entry
     );
 
-PPH_HASHTABLE ObjectDb;
+PPH_STRING ObjectDbPath = NULL;
+PPH_HASHTABLE ObjectDb = NULL;
 PH_QUEUED_LOCK ObjectDbLock = PH_QUEUED_LOCK_INIT;
-PPH_STRING ObjectDbPath;
+PH_STRINGREF IfeoKeyPath = PH_STRINGREF_INIT(L"Software\\Microsoft\\Windows NT\\CurrentVersion\\Image File Execution Options\\");
+PH_STRINGREF IfeoPerfOptionsKeyPath = PH_STRINGREF_INIT(L"\\PerfOptions");
+PH_STRINGREF IfeoPerfOptionsKeyName = PH_STRINGREF_INIT(L"PerfOptions");
+PH_STRINGREF IfeoCpuPriorityClassKeyName = PH_STRINGREF_INIT(L"CpuPriorityClass");
+PH_STRINGREF IfeoIoPriorityClassKeyName = PH_STRINGREF_INIT(L"IoPriority");
+PH_STRINGREF IfeoPagePriorityClassKeyName = PH_STRINGREF_INIT(L"PagePriority");
 
 VOID InitializeDb(
     VOID
@@ -57,7 +52,7 @@ BOOLEAN NTAPI ObjectDbEqualFunction(
     PDB_OBJECT object1 = *(PDB_OBJECT *)Entry1;
     PDB_OBJECT object2 = *(PDB_OBJECT *)Entry2;
 
-    return object1->Tag == object2->Tag && PhEqualStringRef(&object1->Key, &object2->Key, TRUE);
+    return object1->Tag == object2->Tag && PhEqualStringRef(&object1->Key, &object2->Key, FALSE);
 }
 
 ULONG NTAPI ObjectDbHashFunction(
@@ -66,7 +61,7 @@ ULONG NTAPI ObjectDbHashFunction(
 {
     PDB_OBJECT object = *(PDB_OBJECT *)Entry;
 
-    return object->Tag + PhHashStringRef(&object->Key, TRUE);
+    return object->Tag + PhHashStringRefEx(&object->Key, FALSE, PH_STRING_HASH_X65599);
 }
 
 ULONG GetNumberOfDbObjects(
@@ -76,6 +71,7 @@ ULONG GetNumberOfDbObjects(
     return ObjectDb->Count;
 }
 
+_Acquires_exclusive_lock_(ObjectDbLock)
 VOID LockDb(
     VOID
     )
@@ -83,6 +79,7 @@ VOID LockDb(
     PhAcquireQueuedLockExclusive(&ObjectDbLock);
 }
 
+_Releases_exclusive_lock_(ObjectDbLock)
 VOID UnlockDb(
     VOID
     )
@@ -98,6 +95,9 @@ PDB_OBJECT FindDbObject(
     DB_OBJECT lookupObject;
     PDB_OBJECT lookupObjectPtr;
     PDB_OBJECT *objectPtr;
+
+    if (GetNumberOfDbObjects() == 0)
+        return NULL;
 
     lookupObject.Tag = Tag;
     lookupObject.Key = *Name;
@@ -121,8 +121,7 @@ PDB_OBJECT CreateDbObject(
     BOOLEAN added;
     PDB_OBJECT *realObject;
 
-    object = PhAllocate(sizeof(DB_OBJECT));
-    memset(object, 0, sizeof(DB_OBJECT));
+    object = PhAllocateZero(sizeof(DB_OBJECT));
     object->Tag = Tag;
     object->Key = *Name;
     object->BackColor = ULONG_MAX;
@@ -131,7 +130,7 @@ PDB_OBJECT CreateDbObject(
 
     if (added)
     {
-        object->Name = PhCreateStringEx(Name->Buffer, Name->Length);
+        object->Name = PhCreateString2(Name);
         object->Key = object->Name->sr;
 
         if (Comment)
@@ -166,23 +165,7 @@ VOID SetDbPath(
     _In_ PPH_STRING Path
     )
 {
-    PhSwapReference(&ObjectDbPath, Path);
-}
-
-PPH_STRING GetOpaqueXmlNodeText(
-    _In_ mxml_node_t *node
-    )
-{
-    PCSTR string;
-
-    if (string = mxmlGetOpaque(node))
-    {
-        return PhConvertUtf8ToUtf16((PSTR)string);
-    }
-    else
-    {
-        return PhReferenceEmptyString();
-    }
+    PhSetReference(&ObjectDbPath, Path);
 }
 
 NTSTATUS LoadDb(
@@ -190,46 +173,27 @@ NTSTATUS LoadDb(
     )
 {
     NTSTATUS status;
-    HANDLE fileHandle;
-    LARGE_INTEGER fileSize;
-    mxml_node_t *topNode;
-    mxml_node_t *currentNode;
+    PVOID topNode;
+    PVOID currentNode;
 
-    status = PhCreateFileWin32(
-        &fileHandle,
-        ObjectDbPath->Buffer,
-        FILE_GENERIC_READ,
-        FILE_ATTRIBUTE_NORMAL,
-        FILE_SHARE_READ | FILE_SHARE_DELETE,
-        FILE_OPEN,
-        FILE_NON_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT
-        );
+    if (PhIsNullOrEmptyString(ObjectDbPath))
+        return STATUS_UNSUCCESSFUL;
+
+    status = PhLoadXmlObjectFromFile(&ObjectDbPath->sr, &topNode);
 
     if (!NT_SUCCESS(status))
         return status;
 
-    if (NT_SUCCESS(PhGetFileSize(fileHandle, &fileSize)) && fileSize.QuadPart == 0)
-    {
-        // A blank file is OK. There are no objects to load.
-        NtClose(fileHandle);
-        return status;
-    }
-
-    topNode = mxmlLoadFd(NULL, fileHandle, MXML_OPAQUE_CALLBACK);
-    NtClose(fileHandle);
-
     if (!topNode)
-        return STATUS_FILE_CORRUPT_ERROR;
-
-    if (mxmlGetType(topNode) != MXML_ELEMENT)
     {
-        mxmlDelete(topNode);
+        // Delete the corrupted file. (dmex)
+        PhDeleteFile(&ObjectDbPath->sr);
         return STATUS_FILE_CORRUPT_ERROR;
     }
 
-    LockDb();
+    //LockDb();
 
-    for (currentNode = mxmlGetFirstChild(topNode); currentNode; currentNode = mxmlGetNextSibling(currentNode))
+    for (currentNode = PhGetXmlNodeFirstChild(topNode); currentNode; currentNode = PhGetXmlNodeNextChild(currentNode))
     {
         PDB_OBJECT object = NULL;
         PPH_STRING tag = NULL;
@@ -240,41 +204,50 @@ NTSTATUS LoadDb(
         PPH_STRING backColor = NULL;
         PPH_STRING collapse = NULL;
         PPH_STRING affinityMask = NULL;
+        PPH_STRING pagePriorityPlusOne = NULL;
+        PPH_STRING boost = NULL;
+        PPH_STRING efficiency = NULL;
 
-        if (mxmlElementGetAttrCount(currentNode) >= 2)
+        if (PhGetXmlNodeAttributeCount(currentNode) >= 2)
         {
-            for (INT i = 0; i < mxmlElementGetAttrCount(currentNode); i++)
+            for (INT i = 0; i < PhGetXmlNodeAttributeCount(currentNode); i++)
             {
                 PSTR elementName;
                 PSTR elementValue;
 
-                elementValue = (PSTR)mxmlElementGetAttrByIndex(currentNode, i, &elementName);
+                elementValue = PhGetXmlNodeAttributeByIndex(currentNode, i, &elementName);
 
                 if (!(elementName && elementValue))
                     continue;
 
-                if (_stricmp(elementName, "tag") == 0)
+                if (PhEqualBytesZ(elementName, "tag", TRUE))
                     PhMoveReference(&tag, PhConvertUtf8ToUtf16(elementValue));
-                else if (_stricmp(elementName, "name") == 0)
+                else if (PhEqualBytesZ(elementName, "name", TRUE))
                     PhMoveReference(&name, PhConvertUtf8ToUtf16(elementValue));
-                else if (_stricmp(elementName, "priorityclass") == 0)
+                else if (PhEqualBytesZ(elementName, "priorityclass", TRUE))
                     PhMoveReference(&priorityClass, PhConvertUtf8ToUtf16(elementValue));
-                else if (_stricmp(elementName, "iopriorityplusone") == 0)
+                else if (PhEqualBytesZ(elementName, "iopriorityplusone", TRUE))
                     PhMoveReference(&ioPriorityPlusOne, PhConvertUtf8ToUtf16(elementValue));
-                else if (_stricmp(elementName, "backcolor") == 0)
+                else if (PhEqualBytesZ(elementName, "backcolor", TRUE))
                     PhMoveReference(&backColor, PhConvertUtf8ToUtf16(elementValue));
-                else if (_stricmp(elementName, "collapse") == 0)
+                else if (PhEqualBytesZ(elementName, "collapse", TRUE))
                     PhMoveReference(&collapse, PhConvertUtf8ToUtf16(elementValue));
-                else if (_stricmp(elementName, "affinity") == 0)
+                else if (PhEqualBytesZ(elementName, "affinity", TRUE))
                     PhMoveReference(&affinityMask, PhConvertUtf8ToUtf16(elementValue));
+                else if (PhEqualBytesZ(elementName, "pagepriorityplusone", TRUE))
+                    PhMoveReference(&pagePriorityPlusOne, PhConvertUtf8ToUtf16(elementValue));
+                else if (PhEqualBytesZ(elementName, "boost", TRUE))
+                    PhMoveReference(&boost, PhConvertUtf8ToUtf16(elementValue));
+                else if (PhEqualBytesZ(elementName, "efficiency", TRUE))
+                    PhMoveReference(&efficiency, PhConvertUtf8ToUtf16(elementValue));
             }
         }
 
-        comment = GetOpaqueXmlNodeText(currentNode);
+        comment = PhGetXmlNodeOpaqueText(currentNode);
 
         if (tag && name)
         {
-            ULONG64 tagInteger;
+            ULONG64 tagInteger = 0;
             ULONG64 priorityClassInteger = 0;
             ULONG64 ioPriorityPlusOneInteger = 0;
 
@@ -290,7 +263,7 @@ NTSTATUS LoadDb(
             object->IoPriorityPlusOne = (ULONG)ioPriorityPlusOneInteger;
         }
 
-        // NOTE: These items are handled separately to maintain compatibility with previous versions of the database.
+        // NOTE: These items are handled separately to maintain compatibility with previous versions of the database. (dmex)
 
         if (object && backColor)
         {
@@ -316,7 +289,34 @@ NTSTATUS LoadDb(
 
             PhStringToInteger64(&affinityMask->sr, 10, &affinityInteger);
 
-            object->AffinityMask = (ULONG_PTR)affinityInteger;
+            object->AffinityMask = (KAFFINITY)affinityInteger;
+        }
+
+        if (object && pagePriorityPlusOne)
+        {
+            ULONG64 pagePriorityInteger = 0;
+
+            PhStringToInteger64(&pagePriorityPlusOne->sr, 10, &pagePriorityInteger);
+
+            object->PagePriorityPlusOne = (ULONG)pagePriorityInteger;
+        }
+
+        if (object && boost)
+        {
+            ULONG64 boostInteger = 0;
+
+            PhStringToInteger64(&boost->sr, 10, &boostInteger);
+
+            object->Boost = !!boostInteger;
+        }
+
+        if (object && efficiency)
+        {
+            ULONG64 efficiencyInteger = 0;
+
+            PhStringToInteger64(&efficiency->sr, 10, &efficiencyInteger);
+
+            object->Efficiency = !!efficiencyInteger;
         }
 
         PhClearReference(&tag);
@@ -327,130 +327,431 @@ NTSTATUS LoadDb(
         PhClearReference(&backColor);
         PhClearReference(&collapse);
         PhClearReference(&affinityMask);
+        PhClearReference(&pagePriorityPlusOne);
+        PhClearReference(&boost);
+        PhClearReference(&efficiency);
     }
 
-    UnlockDb();
+    //UnlockDb();
 
-    mxmlDelete(topNode);
+    PhFreeXmlObject(topNode);
+
+    // Check if we loaded any objects (dmex)
+    if (GetNumberOfDbObjects() == 0)
+    {
+        // Delete the empty DB to improve performance (dmex)
+        PhDeleteFile(&ObjectDbPath->sr);
+    }
 
     return STATUS_SUCCESS;
 }
 
+PPH_BYTES FormatValueToUtf8(
+    _In_ ULONG64 Value
+    )
+{
+    PPH_BYTES valueUtf8;
+    SIZE_T returnLength;
+    PH_FORMAT format[1];
+    WCHAR formatBuffer[PH_INT64_STR_LEN_1];
+
+    PhInitFormatI64U(&format[0], Value);
+
+    if (PhFormatToBuffer(format, 1, formatBuffer, sizeof(formatBuffer), &returnLength))
+    {
+        valueUtf8 = PhConvertUtf16ToUtf8Ex(formatBuffer, returnLength - sizeof(UNICODE_NULL));
+    }
+    else
+    {
+        PPH_STRING string;
+
+        string = PhIntegerToString64(Value, 10, FALSE);
+        valueUtf8 = PhConvertUtf16ToUtf8Ex(string->Buffer, string->Length);
+
+        PhDereferenceObject(string);
+    }
+
+    return valueUtf8;
+}
+
 PPH_BYTES StringRefToUtf8(
-    _In_ PPH_STRINGREF String
+    _In_ PPH_STRINGREF Value
     )
 {
-    return PH_AUTO(PhConvertUtf16ToUtf8Ex(String->Buffer, String->Length));
-}
-
-mxml_node_t *CreateObjectElement(
-    _Inout_ mxml_node_t *ParentNode,
-    _In_ PPH_STRINGREF Tag,
-    _In_ PPH_STRINGREF Name,
-    _In_ PPH_STRINGREF PriorityClass,
-    _In_ PPH_STRINGREF IoPriorityPlusOne,
-    _In_ PPH_STRINGREF Comment,
-    _In_ PPH_STRINGREF BackColor,
-    _In_ PPH_STRINGREF Collapse,
-    _In_ PPH_STRINGREF AffinityMask
-    )
-{
-    mxml_node_t *objectNode;
-    mxml_node_t *textNode;
-
-    // Create the setting element.
-    objectNode = mxmlNewElement(ParentNode, "object");
-
-    // Set the attributes.
-    mxmlElementSetAttr(objectNode, "tag", StringRefToUtf8(Tag)->Buffer);
-    mxmlElementSetAttr(objectNode, "name", StringRefToUtf8(Name)->Buffer);
-    mxmlElementSetAttr(objectNode, "priorityclass", StringRefToUtf8(PriorityClass)->Buffer);
-    mxmlElementSetAttr(objectNode, "iopriorityplusone", StringRefToUtf8(IoPriorityPlusOne)->Buffer);
-    mxmlElementSetAttr(objectNode, "backcolor", StringRefToUtf8(BackColor)->Buffer);
-    mxmlElementSetAttr(objectNode, "collapse", StringRefToUtf8(Collapse)->Buffer);
-    mxmlElementSetAttr(objectNode, "affinity", StringRefToUtf8(AffinityMask)->Buffer);
-
-    // Set the value.
-    textNode = mxmlNewOpaque(objectNode, StringRefToUtf8(Comment)->Buffer);
-
-    return objectNode;
-}
-
-PPH_STRING UInt64ToBase10String(
-    _In_ ULONG64 Integer
-    )
-{
-    return PH_AUTO(PhIntegerToString64(Integer, 10, FALSE));
+    return PhConvertUtf16ToUtf8Ex(Value->Buffer, Value->Length);
 }
 
 NTSTATUS SaveDb(
     VOID
     )
 {
-    PH_AUTO_POOL autoPool;
     NTSTATUS status;
-    HANDLE fileHandle;
-    mxml_node_t *topNode;
+    PVOID topNode;
     ULONG enumerationKey = 0;
     PDB_OBJECT *object;
 
-    PhInitializeAutoPool(&autoPool);
+    if (PhIsNullOrEmptyString(ObjectDbPath))
+        return STATUS_UNSUCCESSFUL;
 
-    topNode = mxmlNewElement(MXML_NO_PARENT, "objects");
+    // Skip saving the DB when there's no objects (dmex)
+    if (GetNumberOfDbObjects() == 0)
+    {
+        // Delete the empty DB to improve performance (dmex)
+        if (PhDoesFileExist(&ObjectDbPath->sr))
+        {
+            PhDeleteFile(&ObjectDbPath->sr);
+        }
+        return STATUS_SUCCESS;
+    }
+
+    topNode = PhCreateXmlNode(NULL, "objects");
 
     LockDb();
 
     while (PhEnumHashtable(ObjectDb, (PVOID*)&object, &enumerationKey))
     {
-        CreateObjectElement(
-            topNode,
-            &UInt64ToBase10String((*object)->Tag)->sr,
-            &(*object)->Name->sr,
-            &UInt64ToBase10String((*object)->PriorityClass)->sr,
-            &UInt64ToBase10String((*object)->IoPriorityPlusOne)->sr,
-            &(*object)->Comment->sr,
-            &UInt64ToBase10String((*object)->BackColor)->sr,
-            &UInt64ToBase10String((*object)->Collapse)->sr,
-            &UInt64ToBase10String((*object)->AffinityMask)->sr
-            );
-        PhDrainAutoPool(&autoPool);
+        PVOID objectNode;
+        PPH_BYTES objectTagUtf8;
+        PPH_BYTES objectNameUtf8;
+        PPH_BYTES objectPriorityClassUtf8;
+        PPH_BYTES objectIoPriorityPlusOneUtf8;
+        PPH_BYTES objectBackColorUtf8;
+        PPH_BYTES objectCollapseUtf8;
+        PPH_BYTES objectAffinityMaskUtf8;
+        PPH_BYTES objectCommentUtf8;
+        PPH_BYTES objectPagePriorityPlusOneUtf8;
+        PPH_BYTES objectBoostUtf8;
+        PPH_BYTES objectEfficiencyUtf8;
+
+        objectTagUtf8 = FormatValueToUtf8((*object)->Tag);
+        objectPriorityClassUtf8 = FormatValueToUtf8((*object)->PriorityClass);
+        objectIoPriorityPlusOneUtf8 = FormatValueToUtf8((*object)->IoPriorityPlusOne);
+        objectBackColorUtf8 = FormatValueToUtf8((*object)->BackColor);
+        objectCollapseUtf8 = FormatValueToUtf8((*object)->Collapse);
+        objectAffinityMaskUtf8 = FormatValueToUtf8((*object)->AffinityMask);
+        objectNameUtf8 = StringRefToUtf8(&(*object)->Name->sr);
+        objectCommentUtf8 = StringRefToUtf8(&(*object)->Comment->sr);
+        objectPagePriorityPlusOneUtf8 = FormatValueToUtf8((*object)->PagePriorityPlusOne);
+        objectBoostUtf8 = FormatValueToUtf8((*object)->Boost);
+        objectEfficiencyUtf8 = FormatValueToUtf8((*object)->Efficiency);
+
+        // Create the setting element.
+        objectNode = PhCreateXmlNode(topNode, "object");
+        PhSetXmlNodeAttributeText(objectNode, "tag", objectTagUtf8->Buffer);
+        PhSetXmlNodeAttributeText(objectNode, "name", objectNameUtf8->Buffer);
+        PhSetXmlNodeAttributeText(objectNode, "priorityclass", objectPriorityClassUtf8->Buffer);
+        PhSetXmlNodeAttributeText(objectNode, "iopriorityplusone", objectIoPriorityPlusOneUtf8->Buffer);
+        PhSetXmlNodeAttributeText(objectNode, "backcolor", objectBackColorUtf8->Buffer);
+        PhSetXmlNodeAttributeText(objectNode, "collapse", objectCollapseUtf8->Buffer);
+        PhSetXmlNodeAttributeText(objectNode, "affinity", objectAffinityMaskUtf8->Buffer);
+        PhSetXmlNodeAttributeText(objectNode, "pagepriorityplusone", objectPagePriorityPlusOneUtf8->Buffer);
+        PhSetXmlNodeAttributeText(objectNode, "boost", objectBoostUtf8->Buffer);
+        PhSetXmlNodeAttributeText(objectNode, "efficiency", objectEfficiencyUtf8->Buffer);
+
+        // Set the value.
+        PhCreateXmlOpaqueNode(objectNode, objectCommentUtf8->Buffer);
+
+        // Cleanup.
+        PhDereferenceObject(objectCommentUtf8);
+        PhDereferenceObject(objectAffinityMaskUtf8);
+        PhDereferenceObject(objectCollapseUtf8);
+        PhDereferenceObject(objectBackColorUtf8);
+        PhDereferenceObject(objectIoPriorityPlusOneUtf8);
+        PhDereferenceObject(objectPriorityClassUtf8);
+        PhDereferenceObject(objectNameUtf8);
+        PhDereferenceObject(objectTagUtf8);
+        PhDereferenceObject(objectPagePriorityPlusOneUtf8);
+        PhDereferenceObject(objectBoostUtf8);
+        PhDereferenceObject(objectEfficiencyUtf8);
     }
 
     UnlockDb();
 
-    // Create the directory if it does not exist.
-    {
-        PPH_STRING fullPath;
-        ULONG indexOfFileName;
+    status = PhSaveXmlObjectToFile(
+        &ObjectDbPath->sr,
+        topNode,
+        NULL
+        );
+    PhFreeXmlObject(topNode);
 
-        if (fullPath = PH_AUTO(PhGetFullPath(ObjectDbPath->Buffer, &indexOfFileName)))
-        {
-            if (indexOfFileName != -1)
-                PhCreateDirectory(PhaSubstring(fullPath, 0, indexOfFileName));
-        }
+    return status;
+}
+
+VOID EnumDb(
+    _In_ PDB_ENUM_CALLBACK Callback,
+    _In_ PVOID Context
+    )
+{
+    PH_HASHTABLE_ENUM_CONTEXT enumContext;
+    PDB_OBJECT* object;
+
+    LockDb();
+
+    PhBeginEnumHashtable(ObjectDb, &enumContext);
+
+    while (object = PhNextEnumHashtable(&enumContext))
+    {
+        if (!Callback(*object, Context))
+            break;
     }
 
-    PhDeleteAutoPool(&autoPool);
+    UnlockDb();
+}
 
-    status = PhCreateFileWin32(
-        &fileHandle,
-        ObjectDbPath->Buffer,
-        FILE_GENERIC_WRITE,
-        FILE_ATTRIBUTE_NORMAL,
-        FILE_SHARE_READ,
-        FILE_OVERWRITE_IF,
-        FILE_NON_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT
+_Success_(return)
+BOOLEAN FindIfeoObject(
+    _In_ PPH_STRINGREF Name,
+    _Out_opt_ PULONG CpuPriorityClass,
+    _Out_opt_ PULONG IoPriorityClass,
+    _Out_opt_ PULONG PagePriorityClass
+    )
+{
+    BOOLEAN status = FALSE;
+    ULONG value;
+    HANDLE keyHandle;
+    PPH_STRING keyPath;
+
+    keyPath = PhConcatStringRef3(
+        &IfeoKeyPath,
+        Name,
+        &IfeoPerfOptionsKeyPath
+        );
+
+    if (NT_SUCCESS(PhOpenKey(
+        &keyHandle,
+        KEY_READ,
+        PH_KEY_LOCAL_MACHINE,
+        &keyPath->sr,
+        0
+        )))
+    {
+        if (CpuPriorityClass)
+        {
+            if (status = ((value = PhQueryRegistryUlong(keyHandle, &IfeoCpuPriorityClassKeyName)) != ULONG_MAX))
+            {
+                *CpuPriorityClass = value;
+            }
+            else
+            {
+                *CpuPriorityClass = ULONG_MAX;
+            }
+        }
+
+        if (IoPriorityClass)
+        {
+            if (status = ((value = PhQueryRegistryUlong(keyHandle, &IfeoIoPriorityClassKeyName)) != ULONG_MAX))
+            {
+                *IoPriorityClass = value;
+            }
+            else
+            {
+                *IoPriorityClass = ULONG_MAX;
+            }
+        }
+
+        if (PagePriorityClass)
+        {
+            if (status = ((value = PhQueryRegistryUlong(keyHandle, &IfeoPagePriorityClassKeyName)) != ULONG_MAX))
+            {
+                *PagePriorityClass = value;
+            }
+            else
+            {
+                *PagePriorityClass = ULONG_MAX;
+            }
+        }
+
+        NtClose(keyHandle);
+    }
+
+    PhDereferenceObject(keyPath);
+
+    return status;
+}
+
+NTSTATUS CreateIfeoObject(
+    _In_ PPH_STRINGREF Name,
+    _In_ ULONG CpuPriorityClass,
+    _In_ ULONG IoPriorityClass,
+    _In_ ULONG PagePriorityClass
+    )
+{
+    NTSTATUS status;
+    HANDLE keyRootHandle;
+    HANDLE keyHandle;
+    PPH_STRING keyPath;
+
+    keyPath = PhConcatStringRef2(
+        &IfeoKeyPath,
+        Name
+        );
+
+    status = PhCreateKey(
+        &keyRootHandle,
+        KEY_WRITE,
+        PH_KEY_LOCAL_MACHINE,
+        &keyPath->sr,
+        OBJ_OPENIF,
+        0,
+        NULL
         );
 
     if (!NT_SUCCESS(status))
     {
-        mxmlDelete(topNode);
+        if (status == STATUS_ACCESS_DENIED && !PhGetOwnTokenAttributes().Elevated)
+            status = STATUS_ELEVATION_REQUIRED;
+
+        PhDereferenceObject(keyPath);
         return status;
     }
 
-    mxmlSaveFd(topNode, fileHandle, MXML_NO_CALLBACK);
-    mxmlDelete(topNode);
-    NtClose(fileHandle);
+    status = PhCreateKey(
+        &keyHandle,
+        KEY_WRITE,
+        keyRootHandle,
+        &IfeoPerfOptionsKeyName,
+        OBJ_OPENIF,
+        0,
+        NULL
+        );
 
-    return STATUS_SUCCESS;
+    if (NT_SUCCESS(status))
+    {
+        if (CpuPriorityClass != ULONG_MAX)
+        {
+            status = PhSetValueKey(
+                keyHandle,
+                &IfeoCpuPriorityClassKeyName,
+                REG_DWORD,
+                &CpuPriorityClass,
+                sizeof(ULONG)
+                );
+        }
+
+        if (IoPriorityClass != ULONG_MAX)
+        {
+            status = PhSetValueKey(
+                keyHandle,
+                &IfeoIoPriorityClassKeyName,
+                REG_DWORD,
+                &IoPriorityClass,
+                sizeof(ULONG)
+                );
+        }
+
+        if (PagePriorityClass != ULONG_MAX)
+        {
+            status = PhSetValueKey(
+                keyHandle,
+                &IfeoPagePriorityClassKeyName,
+                REG_DWORD,
+                &PagePriorityClass,
+                sizeof(ULONG)
+                );
+        }
+
+        NtClose(keyHandle);
+    }
+
+    NtClose(keyRootHandle);
+    PhDereferenceObject(keyPath);
+
+    if (status == STATUS_ACCESS_DENIED && !PhGetOwnTokenAttributes().Elevated)
+        status = STATUS_ELEVATION_REQUIRED;
+
+    return status;
+}
+
+NTSTATUS DeleteIfeoObject(
+    _In_ PPH_STRINGREF Name,
+    _In_ ULONG CpuPriorityClass,
+    _In_ ULONG IoPriorityClass,
+    _In_ ULONG PagePriorityClass
+    )
+{
+    NTSTATUS status;
+    HANDLE keyRootHandle;
+    HANDLE keyHandle;
+    PPH_STRING keyPath;
+    ULONG priorityClass = 0;
+    ULONG ioPriorityClass = 0;
+    ULONG pagePriorityClass = 0;
+
+    keyPath = PhConcatStringRef2(
+        &IfeoKeyPath,
+        Name
+        );
+
+    status = PhCreateKey(
+        &keyRootHandle,
+        KEY_READ | KEY_WRITE | DELETE,
+        PH_KEY_LOCAL_MACHINE,
+        &keyPath->sr,
+        OBJ_OPENIF,
+        0,
+        NULL
+        );
+
+    if (!NT_SUCCESS(status))
+    {
+        if (status == STATUS_ACCESS_DENIED && !PhGetOwnTokenAttributes().Elevated)
+            status = STATUS_ELEVATION_REQUIRED;
+
+        PhDereferenceObject(keyPath);
+        return status;
+    }
+
+    status = PhOpenKey(
+        &keyHandle,
+        KEY_READ | KEY_WRITE | DELETE,
+        keyRootHandle,
+        &IfeoPerfOptionsKeyName,
+        0
+        );
+
+    if (NT_SUCCESS(status))
+    {
+        if (CpuPriorityClass != ULONG_MAX)
+        {
+            status = PhDeleteValueKey(keyHandle, &IfeoCpuPriorityClassKeyName);
+        }
+
+        if (IoPriorityClass != ULONG_MAX)
+        {
+            status = PhDeleteValueKey(keyHandle, &IfeoIoPriorityClassKeyName);
+        }
+
+        if (PagePriorityClass != ULONG_MAX)
+        {
+            status = PhDeleteValueKey(keyHandle, &IfeoPagePriorityClassKeyName);
+        }
+
+        priorityClass = PhQueryRegistryUlong(keyHandle, &IfeoCpuPriorityClassKeyName);
+        ioPriorityClass = PhQueryRegistryUlong(keyHandle, &IfeoIoPriorityClassKeyName);
+        pagePriorityClass = PhQueryRegistryUlong(keyHandle, &IfeoPagePriorityClassKeyName);
+
+        if (priorityClass == ULONG_MAX &&
+            ioPriorityClass == ULONG_MAX &&
+            pagePriorityClass == ULONG_MAX)
+        {
+            NtDeleteKey(keyHandle);
+        }
+
+        NtClose(keyHandle);
+    }
+
+    if (priorityClass == ULONG_MAX &&
+        ioPriorityClass == ULONG_MAX &&
+        pagePriorityClass == ULONG_MAX)
+    {
+        NtDeleteKey(keyRootHandle);
+    }
+
+    NtClose(keyRootHandle);
+    PhDereferenceObject(keyPath);
+
+    if (status == STATUS_ACCESS_DENIED && !PhGetOwnTokenAttributes().Elevated)
+        status = STATUS_ELEVATION_REQUIRED;
+
+    return status;
 }

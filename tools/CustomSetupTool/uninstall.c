@@ -1,39 +1,33 @@
 /*
- * Process Hacker Toolchain -
- *   project setup
+ * Copyright (c) 2022 Winsider Seminars & Solutions, Inc.  All rights reserved.
  *
- * This file is part of Process Hacker.
+ * This file is part of System Informer.
  *
- * Process Hacker is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
+ * Authors:
  *
- * Process Hacker is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
+ *     dmex
  *
- * You should have received a copy of the GNU General Public License
- * along with Process Hacker.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include <setup.h>
+#include "setup.h"
 
 NTSTATUS SetupUninstallBuild(
     _In_ PPH_SETUP_CONTEXT Context
     )
 {
-    // Stop Process Hacker.
-    if (!ShutdownProcessHacker())
+    // Stop the application.
+    if (!SetupShutdownApplication(Context))
         goto CleanupExit;
 
-    // Stop the kernel driver(s).
-    if (!SetupUninstallKph(Context))
+    // Stop the kernel driver.
+    if (!SetupUninstallDriver(Context))
         goto CleanupExit;
 
-    // Remove autorun and shortcuts.
+    // Remove autorun.
     SetupDeleteWindowsOptions(Context);
+
+    // Remove shortcuts.
+    SetupDeleteShortcuts(Context);
 
     // Remove the uninstaller.
     SetupDeleteUninstallFile(Context);
@@ -42,7 +36,35 @@ NTSTATUS SetupUninstallBuild(
     SetupDeleteUninstallKey();
 
     // Remove the previous installation.
-    PhDeleteDirectory(Context->SetupInstallPath);
+    if (!NT_SUCCESS(PhDeleteDirectoryWin32(&Context->SetupInstallPath->sr)))
+    {
+        static PH_STRINGREF ksiFileName = PH_STRINGREF_INIT(L"ksi.dll");
+        static PH_STRINGREF ksiOldFileName = PH_STRINGREF_INIT(L"ksi.dll-old");
+        PPH_STRING ksiFile;
+        PPH_STRING ksiOldFile;
+
+        ksiFile = PhConcatStringRef3(
+            &Context->SetupInstallPath->sr,
+            &PhNtPathSeperatorString,
+            &ksiFileName
+            );
+
+        ksiOldFile = PhConcatStringRef3(
+            &Context->SetupInstallPath->sr,
+            &PhNtPathSeperatorString,
+            &ksiOldFileName
+            );
+
+        PhMoveFileWin32(PhGetString(ksiFile), PhGetString(ksiOldFile), FALSE);
+
+        MoveFileExW(PhGetString(ksiOldFile), NULL, MOVEFILE_DELAY_UNTIL_REBOOT);
+        MoveFileExW(PhGetString(Context->SetupInstallPath), NULL, MOVEFILE_DELAY_UNTIL_REBOOT);
+
+        PhDereferenceObject(ksiOldFile);
+        PhDereferenceObject(ksiFile);
+
+        Context->NeedsReboot = TRUE;
+    }
 
     // Remove the application data.
     if (Context->SetupRemoveAppData)
@@ -130,7 +152,7 @@ HRESULT CALLBACK TaskDialogUninstallCallbackProc(
             SendMessage(hwndDlg, TDM_SET_MARQUEE_PROGRESS_BAR, TRUE, 0);
             SendMessage(hwndDlg, TDM_SET_PROGRESS_BAR_MARQUEE, TRUE, 1);
 
-            PhQueueItemWorkQueue(PhGetGlobalWorkQueue(), SetupUninstallBuild, context);
+            PhCreateThread2(SetupUninstallBuild, context);
         }
         break;
     }
@@ -174,8 +196,11 @@ VOID ShowUninstallCompletedPageDialog(
 
     config.cxWidth = 200;
     config.pszWindowTitle = PhApplicationName;
-    config.pszMainInstruction = L"Process Hacker has been uninstalled.";
-    config.pszContent = L"Click close to exit setup.";
+    config.pszMainInstruction = L"System Informer has been uninstalled.";
+    if (Context->NeedsReboot)
+        config.pszContent = L"A reboot is required to complete the uninstall.";
+    else
+        config.pszContent = L"Click close to exit setup.";
 
     TaskDialogNavigatePage(Context->DialogHandle, &config);
 }
@@ -196,8 +221,8 @@ VOID ShowUninstallingPageDialog(
 
     config.cxWidth = 200;
     config.pszWindowTitle = PhApplicationName;
-    config.pszMainInstruction = L"Uninstalling Process Hacker...";
-    
+    config.pszMainInstruction = L"Uninstalling System Informer...";
+
     TaskDialogNavigatePage(Context->DialogHandle, &config);
 }
 
@@ -217,9 +242,9 @@ VOID ShowUninstallErrorPageDialog(
 
     config.cxWidth = 200;
     config.pszWindowTitle = PhApplicationName;
-    config.pszMainInstruction = L"Process Hacker could not be uninstalled.";
+    config.pszMainInstruction = L"System Informer could not be uninstalled.";
     config.pszContent = L"Click retry to try again or close to exit setup.";
-    
+
     TaskDialogNavigatePage(Context->DialogHandle, &config);
 }
 
@@ -238,14 +263,14 @@ VOID ShowUninstallPageDialog(
     config.dwFlags = TDF_USE_HICON_MAIN | TDF_ALLOW_DIALOG_CANCELLATION | TDF_CAN_BE_MINIMIZED;
     config.hMainIcon = Context->IconLargeHandle;
     config.pButtons = buttonArray;
-    config.cButtons = RTL_NUMBER_OF(buttonArray);
+    config.cButtons = ARRAYSIZE(buttonArray);
     config.pfCallback = TaskDialogUninstallConfirmCallbackProc;
     config.lpCallbackData = (LONG_PTR)Context;
 
     config.cxWidth = 200;
     config.pszWindowTitle = PhApplicationName;
     config.pszMainInstruction = PhApplicationName;
-    config.pszContent = L"Are you sure you want to uninstall Process Hacker?";
+    config.pszContent = L"Are you sure you want to uninstall System Informer?";
     config.pszVerificationText = L"Remove application settings";
     config.dwCommonButtons = TDCBF_CANCEL_BUTTON;
     config.nDefaultButton = IDCANCEL;

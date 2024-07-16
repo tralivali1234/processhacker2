@@ -1,30 +1,19 @@
 /*
- * Process Hacker .NET Tools -
- *   .NET Performance property page
+ * Copyright (c) 2022 Winsider Seminars & Solutions, Inc.  All rights reserved.
  *
- * Copyright (C) 2011-2015 wj32
- * Copyright (C) 2015-2019 dmex
+ * This file is part of System Informer.
  *
- * This file is part of Process Hacker.
+ * Authors:
  *
- * Process Hacker is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
+ *     wj32    2011-2015
+ *     dmex    2015-2022
  *
- * Process Hacker is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with Process Hacker.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include "dn.h"
 #include "clr\perfcounterdefs.h"
 
-PWSTR DotNetCategoryStrings[] =
+const PWSTR DotNetCategoryStrings[] =
 {
     L".NET CLR Exceptions",
     L".NET CLR Interop",
@@ -172,7 +161,7 @@ VOID NTAPI DotNetPerfProcessesUpdatedCallback(
 
     if (context && context->WindowHandle)
     {
-        PostMessage(context->WindowHandle, MSG_UPDATE, 0, 0);
+        PostMessage(context->WindowHandle, WM_PH_UPDATE_DIALOG, 0, 0);
     }
 }
 
@@ -740,339 +729,8 @@ VOID DotNetPerfUpdateCounterData(
     }
 
     // The ListView doesn't send LVN_GETDISPINFO (or redraw properly) when not focused so we'll force a redraw. (dmex)
-    ListView_RedrawItems(Context->CountersListViewHandle, 0, DOTNET_INDEX_MAXIMUM);
+    ListView_RedrawItems(Context->CountersListViewHandle, 0, INT_MAX);
     UpdateWindow(Context->CountersListViewHandle);
-}
-
-#include <pshpack1.h>
-typedef enum DiagnosticsServerCommandSet
-{
-    DiagnosticsServerCommand_Dump = 0x01,
-    DiagnosticsServerCommand_EventPipe = 0x02,
-    DiagnosticsServerCommand_Profiler = 0x03,
-    DiagnosticsServerCommand_Server = 0xFF,
-} DiagnosticsServerCommandSet;
-
-typedef enum DiagnosticsServerCommandId
-{
-    DiagnosticsServerCommandIdOK = 0x00,
-    DiagnosticsServerCommandIdError = 0xFF,
-} DiagnosticsServerCommandId;
-
-typedef enum EventPipeCommandId
-{
-    StopTracing = 0x01,
-    CollectTracing = 0x02,
-    CollectTracing2 = 0x03,
-} EventPipeCommandId;
-
-typedef enum DumpCommandId
-{
-    GenerateCoreDump = 0x01,
-} DumpCommandId;
-//
-//typedef enum DiagnosticsMessageType
-//{
-//    /// <summary>
-//    /// Initiates core dump generation 
-//    /// </summary>
-//    GenerateCoreDump = 1,
-//    /// <summary>
-//    /// Starts an EventPipe session that writes events to a file when the session is stopped or the application exits.
-//    /// </summary>
-//    StartEventPipeTracing = 1024,
-//    /// <summary>
-//    /// Stops an EventPipe session.
-//    /// </summary>
-//    StopEventPipeTracing,
-//    /// <summary>
-//    /// Starts an EventPipe session that sends events out-of-proc through IPC.
-//    /// </summary>
-//    CollectEventPipeTracing,
-//    /// <summary>
-//    /// Attaches a profiler to an existing process
-//    /// </summary>
-//    AttachProfiler = 2048,
-//} DiagnosticsMessageType;
-
-typedef enum ProfilerCommandId
-{
-    AttachProfiler = 0x01,
-} ProfilerCommandId;
-
-#define DOTNET_IPC_V1_MAGIC "DOTNET_IPC_V1"
-
-typedef struct _HDR
-{
-    UCHAR Magic[14]; // "DOTNET_IPC_V1"
-    USHORT Length; // sizeof(IpcHeader) == 20 // IpcHeader.size == sizeof(IpcHeader) + PayloadStruct.GetSize()
-    UCHAR CommandSet; // DiagnosticsServerCommand_EventPipe
-    UCHAR CommandId; // EventPipeCommandId
-    USHORT Reserved;
-} HDR, *PHDR;
-
-typedef struct _provider_config
-{
-    ULONG64 keywords;
-    UINT EventLevel;
-    INT ProviderNameLength;
-    WCHAR ProviderName[15];
-    INT FilterDataLength;
-    WCHAR FilterData[26];
-} provider_config;
-
-typedef struct _nettrace
-{
-    UINT circularBufferMB;
-    UINT Format;
-    UCHAR RequestRundown;
-    INT ProviderCount;
-    provider_config providers[1];
-} nettrace, *Pnettrace;
-
-typedef struct message
-{
-    HDR Header;
-    nettrace Payload;
-} message, * Pmessage;
-
-//// size = 14 + 2 + 1 + 1 + 2 = 20 bytes
-//struct IpcHeader
-//{
-//    uint8_t[14] magic = "DOTNET_IPC_V1";
-//    uint16_t size;        // size of packet = size of header + payload
-//    uint8_t command_set; // combined with command_id is the Command to invoke
-//    uint8_t command_id;  // combined with command_set is the Command to invoke
-//    uint16_t reserved;    // for potential future use
-//};
-
-typedef enum DiagnosticMessageType
-{
-    // EventPipe
-    StartEventPipeTracing = 1024, // To file
-    StopEventPipeTracing,
-    CollectEventPipeTracing, // To IPC
-} DiagnosticMessageType;
-
-typedef struct MessageHeader
-{
-    DiagnosticMessageType RequestType;
-    ULONG Pid;
-} MessageHeader, *PMessageHeader;
-
-typedef enum EventBlockFlags
-{
-    Uncompressed = 0,
-    HeaderCompression = 1
-} EventBlockFlags;
-
-typedef struct TraceEventHeader
-{
-    USHORT HeaderSize;
-    USHORT Flags; // EventBlockFlags
-} TraceEventHeader, *PTraceEventHeader;
-
-typedef struct TraceEventHeaderV4
-{
-    int EventSize;          // Size bytes of this header and the payload and stacks if any.  does NOT encode the size of the EventSize field itself. 
-    int MetaDataId;          // a number identifying the description of this event.  
-    int SequenceNumber;
-    long ThreadId;
-    long CaptureThreadId;
-    int CaptureProcNumber;
-    int StackId;
-    long TimeStamp;
-    GUID ActivityID;
-    GUID RelatedActivityID;
-    int PayloadSize;         // size in bytes of the user defined payload data. 
-    BYTE Payload[4];   // Actually of variable size.  4 is used to avoid potential alignment issues.   This 4 also appears in HeaderSize below. 
-} TraceEventHeaderV4, * PTraceEventHeaderV4;
-#include <poppack.h>
-
-NTSTATUS dotnet(HANDLE ProcessId)
-{
-    NTSTATUS status;
-    HANDLE sectionHandle;
-    SIZE_T returnLength;
-    IO_STATUS_BLOCK isb;
-    OBJECT_ATTRIBUTES objectAttributes;
-    UNICODE_STRING objectNameUs;
-    PH_STRINGREF objectNameSr;
-    PH_FORMAT format[2];
-    WCHAR formatBuffer[0x80];
-
-    ULONG sessionId;
-    ULONG bytesRead;
-    IO_STATUS_BLOCK iosb;
-    BYTE buffer[PAGE_SIZE];
-
-    PhInitFormatS(&format[0], DEVICE_NAMED_PIPE L"dotnet-diagnostic-");
-    PhInitFormatU(&format[1], HandleToUlong(ProcessId));
-
-    if (PhFormatToBuffer(format, RTL_NUMBER_OF(format), formatBuffer, sizeof(formatBuffer), &returnLength))
-    {
-        objectNameSr.Length = returnLength - sizeof(UNICODE_NULL);
-        objectNameSr.Buffer = formatBuffer;
-
-        PhStringRefToUnicodeString(&objectNameSr, &objectNameUs);
-    }
-    else
-    {
-        RtlInitEmptyUnicodeString(&objectNameUs, NULL, 0);
-    }
-
-    InitializeObjectAttributes(
-        &objectAttributes,
-        &objectNameUs,
-        OBJ_CASE_INSENSITIVE,
-        NULL,
-        NULL
-        );
-
-    status = NtCreateFile(
-        &sectionHandle,
-        FILE_GENERIC_READ | FILE_GENERIC_WRITE,
-        &objectAttributes,
-        &isb,
-        NULL,
-        FILE_ATTRIBUTE_NORMAL,
-        FILE_SHARE_READ | FILE_SHARE_WRITE,
-        FILE_OPEN,
-        FILE_NON_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT,
-        NULL,
-        0
-        );
-
-    message trace;
-
-    memset(&trace, 0, sizeof(message));// +sizeof(nettrace));
-
-    memcpy(&trace.Header.Magic, "DOTNET_IPC_V1", sizeof("DOTNET_IPC_V1"));
-    trace.Header.CommandSet = DiagnosticsServerCommand_EventPipe;
-    trace.Header.CommandId = CollectTracing2;
-    trace.Header.Length = sizeof(message);
-    trace.Header.Reserved = 0;
-
-    trace.Payload.circularBufferMB = 1000;
-    trace.Payload.Format = 1;
-    trace.Payload.ProviderCount = 1;
-
-    trace.Payload.providers->keywords = ULONG_MAX;
-    trace.Payload.providers->EventLevel = 5;
-
-    trace.Payload.providers->ProviderNameLength = (ULONG)wcslen(L"System.Runtime") + 1;
-    trace.Payload.providers->FilterDataLength = (ULONG)wcslen(L"EventCounterIntervalSec=1") + 1;
-
-    wmemcpy(trace.Payload.providers->ProviderName, L"System.Runtime", wcslen(L"System.Runtime"));
-    wmemcpy(trace.Payload.providers->FilterData, L"EventCounterIntervalSec=1", wcslen(L"EventCounterIntervalSec=1"));
-
-    if (!WriteFile(sectionHandle, &trace, sizeof(trace), NULL, NULL))
-    {
-        dprintf("WriteFile\n", "");
-    }
-
-    //IpcMessage message = new IpcMessage();
-    //using (var reader = new BinaryReader(stream, Encoding.UTF8, true))
-    //{
-    //    message.Header = IpcHeader.TryParse(reader);
-    //    message.Payload = reader.ReadBytes(message.Header.Size - IpcHeader.HeaderSizeInBytes);
-    //    return message;
-    //}
-
-    //HDR buffer;
-    while (TRUE)
-    {
-        memset(buffer, 0, sizeof(buffer));
-
-        status = NtReadFile(
-            sectionHandle,
-            NULL,
-            NULL,
-            NULL,
-            &iosb,
-            buffer,
-            sizeof(buffer),
-            NULL,
-            NULL
-            );
-
-        if (!NT_SUCCESS(status))
-            break;
-
-        PHDR hdr = (PHDR)buffer;
-        sessionId = *(ULONG*)PTR_ADD_OFFSET(hdr, sizeof(HDR));
-        PTraceEventHeader head = PTR_ADD_OFFSET(hdr, sizeof(HDR));
-        PTraceEventHeaderV4 head2 = PTR_ADD_OFFSET(head, sizeof(PTraceEventHeader));
-
-        switch ((DiagnosticsServerCommandId)hdr->CommandId)
-        {
-        case DiagnosticsServerCommandIdOK:
-            {
-                dprintf("DiagnosticsServerCommandIdOK\n");
-            }
-            break;
-        case DiagnosticsServerCommandIdError:
-            {
-                //var hr = BitConverter.ToInt32(response.Payload, 0);
-                dprintf("DiagnosticsServerCommandIdError\n");
-            }
-            break;
-        }
-
-        bytesRead = (ULONG)iosb.Information;
-        dprintf("bytesRead: %lu  [%lu %lu]\n", bytesRead, hdr->CommandId, hdr->Length);
-    }
-
-    //PMessageHeader message = 0;
-
-    //switch ((DiagnosticsServerCommandId)buffer.CommandId)
-    //{
-    //case DiagnosticsServerCommandIdOK:
-    //    message = PTR_ADD_OFFSET(&buffer, sizeof(HDR));
-    //    break;
-    //case DiagnosticsServerCommandIdError:
-    //    // bad...
-    //    //var hr = BitConverter.ToInt32(response.Payload, 0);
-    //    //throw new Exception($"Session start FAILED 0x{hr:X8}");
-    //    break;
-    //}
-
-    dprintf("\n");
-
-    // the number of bytes for the DiagnosticsIpc::IpcHeader type in native code
-    //ULONG HeaderSizeInBytes = 20;
-    //public byte[] Magic = ASCIIEncoding.ASCII.GetBytes("DOTNET_IPC_V1" + '\0'); // byte[14] in native code
-    //public UInt16 Size = HeaderSizeInBytes;
-    //public byte CommandSet;
-    //public byte CommandId;
-    //public UInt16 Reserved = 0x0000;
-
-    // Helper expression to quickly get V1 magic string for comparison
-    // should be 14 bytes long
-    //public static byte[] DOTNET_IPC_V1 = > ASCIIEncoding.ASCII.GetBytes("DOTNET_IPC_V1" + '\0');
-
-   /*public byte[] Serialize()
-    {
-        using (var stream = new MemoryStream())
-        using (var writer = new BinaryWriter(stream))
-        {
-            writer.Write(Magic);
-            Debug.Assert(Magic.Length == 14);
-            writer.Write(Size);
-            writer.Write(CommandSet);
-            writer.Write(CommandId);
-            writer.Write((UInt16)0x0000);
-            writer.Flush();
-            return stream.ToArray();
-        }
-    }*/
-
-    if (NT_SUCCESS(status))
-    {
-        return STATUS_SUCCESS;
-    }
-
-    return STATUS_SUCCESS;
 }
 
 INT_PTR CALLBACK DotNetPerfPageDlgProc(
@@ -1146,8 +804,6 @@ INT_PTR CALLBACK DotNetPerfPageDlgProc(
                     }
                 }
             }
-
-            dotnet(context->ProcessItem->ProcessId);
 
             if (context->ClrV4)
             {
@@ -1417,9 +1073,10 @@ INT_PTR CALLBACK DotNetPerfPageDlgProc(
                                         PH_FORMAT format[1];
                                         WCHAR formatBuffer[10];
 
-                                        // TODO: perlib never shows the TimeInJit value and it can sometimes show values above 100% ???
-                                        // SeeAlso: https://github.com/dotnet/coreclr/blob/master/src/gc/gcee.cpp#L324
-                                        PhInitFormatF(&format[0], (context->DotNetPerfJit.timeInJit << 8) * 100 / (FLOAT)(context->DotNetPerfJit.timeInJitBase << 8), 2);
+                                        // .NET 2/3/4 can sometimes show the TimeInJit value above 100% (dmex)
+                                        // https://github.com/dotnet/coreclr/blob/ef1e2ab328087c61a6878c1e84f4fc5d710aebce/src/gc/gcee.cpp#L324
+
+                                        PhInitFormatF(&format[0], (context->DotNetPerfJit.timeInJit << 8) * 100 / (DOUBLE)(context->DotNetPerfJit.timeInJitBase << 8), 2);
 
                                         if (PhFormatToBuffer(format, RTL_NUMBER_OF(format), formatBuffer, sizeof(formatBuffer), NULL))
                                         {
@@ -1845,7 +1502,7 @@ INT_PTR CALLBACK DotNetPerfPageDlgProc(
                                         PH_FORMAT format[1];
                                         WCHAR formatBuffer[10];
 
-                                        PhInitFormatF(&format[0], (FLOAT)context->DotNetPerfGC.timeInGC * 100 / (FLOAT)context->DotNetPerfGC.timeInGCBase, 2);
+                                        PhInitFormatF(&format[0], (DOUBLE)context->DotNetPerfGC.timeInGC * 100 / (DOUBLE)context->DotNetPerfGC.timeInGCBase, 2);
 
                                         if (PhFormatToBuffer(format, RTL_NUMBER_OF(format), formatBuffer, sizeof(formatBuffer), NULL))
                                         {
@@ -2070,7 +1727,7 @@ INT_PTR CALLBACK DotNetPerfPageDlgProc(
                                         PH_FORMAT format[1];
                                         WCHAR formatBuffer[10];
 
-                                        PhInitFormatF(&format[0], (FLOAT)context->DotNetPerfSecurity.timeRTchecks * 100 / (FLOAT)context->DotNetPerfSecurity.timeRTchecksBase, 2);
+                                        PhInitFormatF(&format[0], (DOUBLE)context->DotNetPerfSecurity.timeRTchecks * 100 / (DOUBLE)context->DotNetPerfSecurity.timeRTchecksBase, 2);
 
                                         if (PhFormatToBuffer(format, RTL_NUMBER_OF(format), formatBuffer, sizeof(formatBuffer), NULL))
                                         {
@@ -2080,7 +1737,7 @@ INT_PTR CALLBACK DotNetPerfPageDlgProc(
                                     else
                                     {
                                         wcsncpy_s(dispInfo->item.pszText, dispInfo->item.cchTextMax, L"0.00", _TRUNCATE);
-                                    }   
+                                    }
                                 }
                                 break;
                             case DOTNET_INDEX_SECURITY_STACKWALKDEPTH:
@@ -2104,7 +1761,7 @@ INT_PTR CALLBACK DotNetPerfPageDlgProc(
             }
         }
         break;
-    case MSG_UPDATE:
+    case WM_PH_UPDATE_DIALOG:
         {
             if (context->Enabled && context->ControlBlockValid)
             {
@@ -2131,7 +1788,7 @@ INT_PTR CALLBACK DotNetPerfPageDlgProc(
                 point.y = GET_Y_LPARAM(lParam);
 
                 if (point.x == -1 && point.y == -1)
-                    PhGetListViewContextMenuPoint((HWND)wParam, &point);
+                    PhGetListViewContextMenuPoint(context->CountersListViewHandle, &point);
 
                 PhGetSelectedListViewItemParams(context->CountersListViewHandle, &listviewItems, &numberOfItems);
 
@@ -2179,6 +1836,12 @@ INT_PTR CALLBACK DotNetPerfPageDlgProc(
             }
         }
         break;
+    case WM_CTLCOLORBTN:
+        return HANDLE_WM_CTLCOLORBTN(hwndDlg, wParam, lParam, PhWindowThemeControlColor);
+    case WM_CTLCOLORDLG:
+        return HANDLE_WM_CTLCOLORDLG(hwndDlg, wParam, lParam, PhWindowThemeControlColor);
+    case WM_CTLCOLORSTATIC:
+        return HANDLE_WM_CTLCOLORSTATIC(hwndDlg, wParam, lParam, PhWindowThemeControlColor);
     }
 
     return FALSE;

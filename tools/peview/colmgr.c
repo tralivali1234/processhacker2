@@ -1,23 +1,12 @@
 /*
- * Process Hacker -
- *   tree new column manager
+ * Copyright (c) 2022 Winsider Seminars & Solutions, Inc.  All rights reserved.
  *
- * Copyright (C) 2011-2016 wj32
+ * This file is part of System Informer.
  *
- * This file is part of Process Hacker.
+ * Authors:
  *
- * Process Hacker is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
+ *     wj32    2011-2016
  *
- * Process Hacker is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with Process Hacker.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include <peview.h>
@@ -41,6 +30,7 @@ typedef struct _PH_CM_SORT_CONTEXT
  * \param AppName A variable which receives the application name.
  * \param SubId A variable which receives the sub-ID.
  */
+_Success_(return)
 BOOLEAN PhEmParseCompoundId(
     _In_ PPH_STRINGREF CompoundId,
     _Out_ PPH_STRINGREF AppName,
@@ -55,11 +45,11 @@ BOOLEAN PhEmParseCompoundId(
 
     if (firstPart.Length == 0)
         return FALSE;
-    if (firstPart.Buffer[0] != '+')
+    if (firstPart.Buffer[0] != L'+')
         return FALSE;
 
     PhSkipStringRef(&firstPart, sizeof(WCHAR));
-    PhSplitStringRefAtChar(&firstPart, '+', &firstPart, &secondPart);
+    PhSplitStringRefAtChar(&firstPart, L'+', &firstPart, &secondPart);
 
     if (firstPart.Length == 0 || secondPart.Length == 0)
         return FALSE;
@@ -213,6 +203,9 @@ BOOLEAN PhCmLoadSettingsEx(
     PPH_KEY_VALUE_PAIR pair;
     LONG orderArray[PH_CM_ORDER_LIMIT];
     LONG maxOrder;
+    LONG dpiValue;
+
+    dpiValue = PhGetWindowDpi(TreeNewHandle);
 
     if (Settings->Length != 0)
     {
@@ -220,10 +213,10 @@ BOOLEAN PhCmLoadSettingsEx(
 
         remainingColumnPart = *Settings;
 
-        if (remainingColumnPart.Length != 0 && remainingColumnPart.Buffer[0] == '@')
+        if (remainingColumnPart.Length != 0 && remainingColumnPart.Buffer[0] == L'@')
         {
             PhSkipStringRef(&remainingColumnPart, sizeof(WCHAR));
-            PhSplitStringRefAtChar(&remainingColumnPart, '|', &scalePart, &remainingColumnPart);
+            PhSplitStringRefAtChar(&remainingColumnPart, L'|', &scalePart, &remainingColumnPart);
 
             if (scalePart.Length == 0 || !PhStringToInteger64(&scalePart, 10, &integer))
                 goto CleanupExit;
@@ -232,7 +225,7 @@ BOOLEAN PhCmLoadSettingsEx(
         }
         else
         {
-            scale = PhGlobalDpi;
+            scale = dpiValue;
         }
 
         while (remainingColumnPart.Length != 0)
@@ -242,18 +235,18 @@ BOOLEAN PhCmLoadSettingsEx(
             ULONG displayIndex;
             ULONG width;
 
-            PhSplitStringRefAtChar(&remainingColumnPart, '|', &columnPart, &remainingColumnPart);
+            PhSplitStringRefAtChar(&remainingColumnPart, L'|', &columnPart, &remainingColumnPart);
 
             if (columnPart.Length != 0)
             {
                 // Id
 
-                PhSplitStringRefAtChar(&columnPart, ',', &valuePart, &columnPart);
+                PhSplitStringRefAtChar(&columnPart, L',', &valuePart, &columnPart);
 
                 if (valuePart.Length == 0)
                     goto CleanupExit;
 
-                if (valuePart.Buffer[0] == '+')
+                if (valuePart.Buffer[0] == L'+')
                 {
                     PH_STRINGREF pluginName;
                     ULONG subId;
@@ -283,7 +276,7 @@ BOOLEAN PhCmLoadSettingsEx(
 
                 // Display Index
 
-                PhSplitStringRefAtChar(&columnPart, ',', &valuePart, &columnPart);
+                PhSplitStringRefAtChar(&columnPart, L',', &valuePart, &columnPart);
 
                 if (!(Flags & PH_CM_COLUMN_WIDTHS_ONLY))
                 {
@@ -307,8 +300,8 @@ BOOLEAN PhCmLoadSettingsEx(
 
                 width = (ULONG)integer;
 
-                if (scale != PhGlobalDpi && scale != 0)
-                    width = PhMultiplyDivide(width, PhGlobalDpi, scale);
+                if (scale != dpiValue && scale != 0)
+                    width = PhMultiplyDivide(width, dpiValue, scale);
 
                 column = PhAllocate(sizeof(PH_TREENEW_COLUMN));
                 column->Id = id;
@@ -348,7 +341,7 @@ BOOLEAN PhCmLoadSettingsEx(
 
                         if (!setColumn.Fixed)
                         {
-                            // For compatibility reasons, normal columns have their display indicies stored
+                            // For compatibility reasons, normal columns have their display indices stored
                             // one higher than usual (so they start from 1, not 0). Fix that here.
                             if (hasFixedColumn && (*columnPtr)->DisplayIndex != 0)
                                 (*columnPtr)->DisplayIndex--;
@@ -406,7 +399,7 @@ CleanupExit:
 
     if (SortSettings && SortSettings->Length != 0)
     {
-        PhSplitStringRefAtChar(SortSettings, ',', &valuePart, &subPart);
+        PhSplitStringRefAtChar(SortSettings, L',', &valuePart, &subPart);
 
         if (valuePart.Length != 0 && subPart.Length != 0)
         {
@@ -415,7 +408,7 @@ CleanupExit:
 
             sortColumn = ULONG_MAX;
 
-            if (valuePart.Buffer[0] == '+')
+            if (valuePart.Buffer[0] == L'+')
             {
                 PH_STRINGREF pluginName;
                 ULONG subId;
@@ -470,6 +463,7 @@ PPH_STRING PhCmSaveSettingsEx(
     ULONG total;
     ULONG increment;
     PH_TREENEW_COLUMN column;
+    LONG dpiValue;
 
     total = TreeNew_GetColumnCount(TreeNewHandle);
 
@@ -480,7 +474,27 @@ PPH_STRING PhCmSaveSettingsEx(
 
     PhInitializeStringBuilder(&stringBuilder, 100);
 
-    PhAppendFormatStringBuilder(&stringBuilder, L"@%u|", PhGlobalDpi);
+    dpiValue = PhGetWindowDpi(TreeNewHandle);
+
+    {
+        PH_FORMAT format[3];
+        SIZE_T returnLength;
+        WCHAR buffer[PH_INT64_STR_LEN_1];
+
+        // @%u|
+        PhInitFormatC(&format[0], L'@');
+        PhInitFormatU(&format[1], dpiValue);
+        PhInitFormatC(&format[2], L'|');
+
+        if (PhFormatToBuffer(format, RTL_NUMBER_OF(format), buffer, sizeof(buffer), &returnLength))
+        {
+            PhAppendStringBuilderEx(&stringBuilder, buffer, returnLength - sizeof(UNICODE_NULL));
+        }
+        else
+        {
+            PhAppendFormatStringBuilder(&stringBuilder, L"@%u|", dpiValue);
+        }
+    }
 
     while (count < total)
     {
@@ -564,7 +578,6 @@ PPH_STRING PhCmSaveSettingsEx(
                 }
                 else
                 {
-                    PH_TREENEW_COLUMN column;
                     PPH_CM_COLUMN cmColumn;
 
                     if (TreeNew_GetColumn(TreeNewHandle, sortColumn, &column))

@@ -1,33 +1,20 @@
 /*
- * Process Hacker -
- *   DS object picker wrapper
+ * Copyright (c) 2022 Winsider Seminars & Solutions, Inc.  All rights reserved.
  *
- * Copyright (C) 2010 wj32
+ * This file is part of System Informer.
  *
- * This file is part of Process Hacker.
+ * Authors:
  *
- * Process Hacker is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
+ *     wj32    2010
  *
- * Process Hacker is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with Process Hacker.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include <ph.h>
 #include <dspick.h>
+#include <lsasup.h>
 
 #include <ole2.h>
 #include <objsel.h>
-
-#include <guisup.h>
-#include <lsasup.h>
 
 //#define IDataObject_AddRef(This) ((This)->lpVtbl->AddRef(This))
 //#define IDataObject_Release(This) ((This)->lpVtbl->Release(This))
@@ -43,16 +30,12 @@ IDsObjectPicker *PhpCreateDsObjectPicker(
     VOID
     )
 {
-    static CLSID CLSID_DsObjectPicker_I = { 0x17d6ccd8, 0x3b7b, 0x11d2, { 0xb9, 0xe0, 0x00, 0xc0, 0x4f, 0xd8, 0xdb, 0xf7 } };
-    static IID IID_IDsObjectPicker_I = { 0x0c87e64e, 0x3b7a, 0x11d2, { 0xb9, 0xe0, 0x00, 0xc0, 0x4f, 0xd8, 0xdb, 0xf7 } };
-
     IDsObjectPicker *picker;
 
-    if (SUCCEEDED(CoCreateInstance(
-        &CLSID_DsObjectPicker_I,
-        NULL,
-        CLSCTX_INPROC_SERVER,
-        &IID_IDsObjectPicker_I,
+    if (SUCCEEDED(PhGetClassObject(
+        L"objsel.dll",
+        &CLSID_DsObjectPicker,
+        &IID_IDsObjectPicker,
         &picker
         )))
     {
@@ -132,7 +115,7 @@ PDS_SELECTION_LIST PhpGetDsSelectionList(
 
     format.cfFormat = (CLIPFORMAT)RegisterClipboardFormat(L"CFSTR_DSOP_DS_SELECTION_LIST");
     format.ptd = NULL;
-    format.dwAspect = -1;
+    format.dwAspect = ULONG_MAX;
     format.lindex = -1;
     format.tymed = TYMED_HGLOBAL;
 
@@ -149,6 +132,7 @@ PDS_SELECTION_LIST PhpGetDsSelectionList(
     }
 }
 
+_Success_(return)
 BOOLEAN PhShowDsObjectPickerDialog(
     _In_ HWND hWnd,
     _In_ PVOID PickerDialog,
@@ -208,7 +192,7 @@ BOOLEAN PhShowDsObjectPickerDialog(
 
                 if (PhHexStringToBuffer(&path, (PUCHAR)sid))
                 {
-                    if (RtlValidSid(sid))
+                    if (PhValidSid(sid))
                         objects->Objects[i].Sid = sid;
                     else
                         PhFree(sid);

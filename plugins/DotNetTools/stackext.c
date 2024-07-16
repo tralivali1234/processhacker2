@@ -1,23 +1,13 @@
 /*
- * Process Hacker .NET Tools -
- *   thread stack extensions
+ * Copyright (c) 2022 Winsider Seminars & Solutions, Inc.  All rights reserved.
  *
- * Copyright (C) 2011-2015 wj32
+ * This file is part of System Informer.
  *
- * This file is part of Process Hacker.
+ * Authors:
  *
- * Process Hacker is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
+ *     wj32    2010-2015
+ *     dmex    2017-2023
  *
- * Process Hacker is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with Process Hacker.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include "dn.h"
@@ -82,24 +72,14 @@ VOID ProcessThreadStackControl(
     case PluginThreadStackInitializing:
         {
             PTHREAD_STACK_CONTEXT context;
-#if _WIN64
-            HANDLE processHandle;
-#endif
 
-            context = PhAllocate(sizeof(THREAD_STACK_CONTEXT));
-            memset(context, 0, sizeof(THREAD_STACK_CONTEXT));
+            context = PhAllocateZero(sizeof(THREAD_STACK_CONTEXT));
             context->ProcessId = Control->u.Initializing.ProcessId;
             context->ThreadId = Control->u.Initializing.ThreadId;
             context->ThreadHandle = Control->u.Initializing.ThreadHandle;
-
 #if _WIN64
-            if (NT_SUCCESS(PhOpenProcess(&processHandle, PROCESS_QUERY_LIMITED_INFORMATION, Control->u.Initializing.ProcessId)))
-            {
-                PhGetProcessIsWow64(processHandle, &context->IsWow64);
-                NtClose(processHandle);
-            }
+            PhGetProcessIsWow64(Control->u.Initializing.ProcessHandle, &context->IsWow64);
 #endif
-
             PhAcquireQueuedLockExclusive(&ContextHashtableLock);
             PhAddItemSimpleHashtable(ContextHashtable, Control->UniqueKey, context);
             PhReleaseQueuedLockExclusive(&ContextHashtableLock);
@@ -123,6 +103,7 @@ VOID ProcessThreadStackControl(
         {
             PTHREAD_STACK_CONTEXT context = FindThreadStackContext(Control->UniqueKey);
             PPH_STRING managedSymbol = NULL;
+            PPH_STRING managedFileName = NULL;
             ULONG64 displacement;
 
             if (!context)
@@ -156,12 +137,23 @@ VOID ProcessThreadStackControl(
                     Control->u.ResolveSymbol.StackFrame->FrameAddress = predictedEbp;
                     Control->u.ResolveSymbol.StackFrame->StackAddress = predictedEsp;
                 }
+                else if (Control->u.ResolveSymbol.StackFrame->ReturnAddress == 0 && predictedEip)
+                {
+                    Control->u.ResolveSymbol.StackFrame->PcAddress = predictedEip;
+                    Control->u.ResolveSymbol.StackFrame->FrameAddress = predictedEbp;
+                    Control->u.ResolveSymbol.StackFrame->StackAddress = predictedEsp;
+                }
 #endif
 
                 managedSymbol = GetRuntimeNameByAddressClrProcess(
                     context->Support,
                     (ULONG64)Control->u.ResolveSymbol.StackFrame->PcAddress,
                     &displacement
+                    );
+
+                managedFileName = DnGetFileNameByAddressClrProcess(
+                    context->Support,
+                    (ULONG64)Control->u.ResolveSymbol.StackFrame->PcAddress
                     );
             }
 #ifdef _WIN64
@@ -198,18 +190,44 @@ VOID ProcessThreadStackControl(
                     (ULONG64)Control->u.ResolveSymbol.StackFrame->PcAddress,
                     &displacement
                     );
+
+                managedFileName = CallGetFileNameByAddress(
+                    context->ProcessId,
+                    (ULONG64)Control->u.ResolveSymbol.StackFrame->PcAddress
+                    );
             }
 #endif
 
             if (managedSymbol)
             {
                 if (displacement != 0)
-                    PhMoveReference(&managedSymbol, PhFormatString(L"%s + 0x%I64x", managedSymbol->Buffer, displacement));
+                {
+                    PH_FORMAT format[3];
+
+                    PhInitFormatSR(&format[0], managedSymbol->sr);
+                    PhInitFormatS(&format[1], L" + 0x");
+                    PhInitFormatI64X(&format[2], displacement);
+
+                    PhMoveReference(&managedSymbol, PhFormat(format, RTL_NUMBER_OF(format), 0));
+                }
 
                 if (Control->u.ResolveSymbol.Symbol)
-                    PhMoveReference(&managedSymbol, PhFormatString(L"%s <-- %s", managedSymbol->Buffer, Control->u.ResolveSymbol.Symbol->Buffer));
+                {
+                    PH_FORMAT format[3];
+
+                    PhInitFormatSR(&format[0], managedSymbol->sr);
+                    PhInitFormatS(&format[1], L" <-- ");
+                    PhInitFormatSR(&format[2], Control->u.ResolveSymbol.Symbol->sr);
+
+                    PhMoveReference(&managedSymbol, PhFormat(format, RTL_NUMBER_OF(format), 0));
+                }
 
                 PhMoveReference(&Control->u.ResolveSymbol.Symbol, managedSymbol);
+            }
+
+            if (managedFileName)
+            {
+                PhMoveReference(&Control->u.ResolveSymbol.FileName, managedFileName);
             }
         }
         break;

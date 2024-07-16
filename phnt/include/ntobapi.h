@@ -1,9 +1,15 @@
+/*
+ * Object Manager support functions
+ *
+ * This file is part of System Informer.
+ */
+
 #ifndef _NTOBAPI_H
 #define _NTOBAPI_H
 
 #if (PHNT_MODE != PHNT_MODE_KERNEL)
 #define OBJECT_TYPE_CREATE 0x0001
-#define OBJECT_TYPE_ALL_ACCESS (STANDARD_RIGHTS_REQUIRED | 0x1)
+#define OBJECT_TYPE_ALL_ACCESS (STANDARD_RIGHTS_REQUIRED | OBJECT_TYPE_CREATE)
 #endif
 
 #if (PHNT_MODE != PHNT_MODE_KERNEL)
@@ -11,35 +17,42 @@
 #define DIRECTORY_TRAVERSE 0x0002
 #define DIRECTORY_CREATE_OBJECT 0x0004
 #define DIRECTORY_CREATE_SUBDIRECTORY 0x0008
-#define DIRECTORY_ALL_ACCESS (STANDARD_RIGHTS_REQUIRED | 0xf)
+#define DIRECTORY_ALL_ACCESS (STANDARD_RIGHTS_REQUIRED | DIRECTORY_QUERY | DIRECTORY_TRAVERSE | DIRECTORY_CREATE_OBJECT | DIRECTORY_CREATE_SUBDIRECTORY)
 #endif
 
 #if (PHNT_MODE != PHNT_MODE_KERNEL)
 #define SYMBOLIC_LINK_QUERY 0x0001
-#define SYMBOLIC_LINK_ALL_ACCESS (STANDARD_RIGHTS_REQUIRED | 0x1)
+#define SYMBOLIC_LINK_SET 0x0002
+#define SYMBOLIC_LINK_ALL_ACCESS (STANDARD_RIGHTS_REQUIRED | SYMBOLIC_LINK_QUERY)
+#define SYMBOLIC_LINK_ALL_ACCESS_EX (STANDARD_RIGHTS_REQUIRED | 0xFFFF)
 #endif
 
+#ifndef OBJ_PROTECT_CLOSE
 #define OBJ_PROTECT_CLOSE 0x00000001
+#endif
 #ifndef OBJ_INHERIT
 #define OBJ_INHERIT 0x00000002
 #endif
+#ifndef OBJ_AUDIT_OBJECT_CLOSE
 #define OBJ_AUDIT_OBJECT_CLOSE 0x00000004
+#endif
 
 #if (PHNT_MODE != PHNT_MODE_KERNEL)
 typedef enum _OBJECT_INFORMATION_CLASS
 {
-    ObjectBasicInformation, // OBJECT_BASIC_INFORMATION
-    ObjectNameInformation, // OBJECT_NAME_INFORMATION
-    ObjectTypeInformation, // OBJECT_TYPE_INFORMATION
-    ObjectTypesInformation, // OBJECT_TYPES_INFORMATION
-    ObjectHandleFlagInformation, // OBJECT_HANDLE_FLAG_INFORMATION
-    ObjectSessionInformation,
-    ObjectSessionObjectInformation,
+    ObjectBasicInformation, // q: OBJECT_BASIC_INFORMATION
+    ObjectNameInformation, // q: OBJECT_NAME_INFORMATION
+    ObjectTypeInformation, // q: OBJECT_TYPE_INFORMATION
+    ObjectTypesInformation, // q: OBJECT_TYPES_INFORMATION
+    ObjectHandleFlagInformation, // qs: OBJECT_HANDLE_FLAG_INFORMATION
+    ObjectSessionInformation, // s: void // change object session // (requires SeTcbPrivilege)
+    ObjectSessionObjectInformation, // s: void // change object session // (requires SeTcbPrivilege)
     MaxObjectInfoClass
 } OBJECT_INFORMATION_CLASS;
 #else
 #define ObjectBasicInformation 0
 #define ObjectNameInformation 1
+#define ObjectTypeInformation 2
 #define ObjectTypesInformation 3
 #define ObjectHandleFlagInformation 4
 #define ObjectSessionInformation 5
@@ -220,7 +233,7 @@ NTAPI
 NtQuerySecurityObject(
     _In_ HANDLE Handle,
     _In_ SECURITY_INFORMATION SecurityInformation,
-    _Out_writes_bytes_opt_(Length) PSECURITY_DESCRIPTOR SecurityDescriptor,
+    _Out_writes_bytes_to_opt_(Length, *LengthNeeded) PSECURITY_DESCRIPTOR SecurityDescriptor,
     _In_ ULONG Length,
     _Out_ PULONG LengthNeeded
     );
@@ -229,7 +242,7 @@ NTSYSCALLAPI
 NTSTATUS
 NTAPI
 NtClose(
-    _In_ HANDLE Handle
+    _In_ _Post_ptr_invalid_ HANDLE Handle
     );
 
 #if (PHNT_VERSION >= PHNT_THRESHOLD)
@@ -306,14 +319,50 @@ NtQueryDirectoryObject(
 
 #if (PHNT_VERSION >= PHNT_VISTA)
 
+// private
+typedef enum _BOUNDARY_ENTRY_TYPE
+{
+    OBNS_Invalid,
+    OBNS_Name,
+    OBNS_SID,
+    OBNS_IL
+} BOUNDARY_ENTRY_TYPE;
+
+// private
+typedef struct _OBJECT_BOUNDARY_ENTRY
+{
+    BOUNDARY_ENTRY_TYPE EntryType;
+    ULONG EntrySize;
+} OBJECT_BOUNDARY_ENTRY, *POBJECT_BOUNDARY_ENTRY;
+
+// rev
+#define OBJECT_BOUNDARY_DESCRIPTOR_VERSION 1
+
+// private
+typedef struct _OBJECT_BOUNDARY_DESCRIPTOR
+{
+    ULONG Version;
+    ULONG Items;
+    ULONG TotalSize;
+    union
+    {
+        ULONG Flags;
+        struct
+        {
+            ULONG AddAppContainerSid : 1;
+            ULONG Reserved : 31;
+        };
+    };
+} OBJECT_BOUNDARY_DESCRIPTOR, *POBJECT_BOUNDARY_DESCRIPTOR;
+
 NTSYSCALLAPI
 NTSTATUS
 NTAPI
 NtCreatePrivateNamespace(
     _Out_ PHANDLE NamespaceHandle,
     _In_ ACCESS_MASK DesiredAccess,
-    _In_ POBJECT_ATTRIBUTES ObjectAttributes,
-    _In_ PVOID BoundaryDescriptor
+    _In_opt_ POBJECT_ATTRIBUTES ObjectAttributes,
+    _In_ POBJECT_BOUNDARY_DESCRIPTOR BoundaryDescriptor
     );
 
 NTSYSCALLAPI
@@ -323,7 +372,7 @@ NtOpenPrivateNamespace(
     _Out_ PHANDLE NamespaceHandle,
     _In_ ACCESS_MASK DesiredAccess,
     _In_opt_ POBJECT_ATTRIBUTES ObjectAttributes,
-    _In_ PVOID BoundaryDescriptor
+    _In_ POBJECT_BOUNDARY_DESCRIPTOR BoundaryDescriptor
     );
 
 NTSYSCALLAPI
@@ -368,6 +417,25 @@ NtQuerySymbolicLinkObject(
     _Inout_ PUNICODE_STRING LinkTarget,
     _Out_opt_ PULONG ReturnedLength
     );
+
+typedef enum _SYMBOLIC_LINK_INFO_CLASS
+{
+    SymbolicLinkGlobalInformation = 1, // s: ULONG
+    SymbolicLinkAccessMask, // s: ACCESS_MASK
+    MaxnSymbolicLinkInfoClass
+} SYMBOLIC_LINK_INFO_CLASS;
+
+#if (PHNT_VERSION >= PHNT_THRESHOLD)
+NTSYSCALLAPI
+NTSTATUS
+NTAPI
+NtSetInformationSymbolicLink(
+    _In_ HANDLE LinkHandle,
+    _In_ SYMBOLIC_LINK_INFO_CLASS SymbolicLinkInformationClass,
+    _In_reads_bytes_(SymbolicLinkInformationLength) PVOID SymbolicLinkInformation,
+    _In_ ULONG SymbolicLinkInformationLength
+    );
+#endif
 
 #endif
 

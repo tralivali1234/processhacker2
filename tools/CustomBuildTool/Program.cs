@@ -1,272 +1,271 @@
-﻿/*
- * Process Hacker Toolchain - 
- *   Build script
- * 
- * Copyright (C) dmex
- * 
- * This file is part of Process Hacker.
- * 
- * Process Hacker is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
+/*
+ * Copyright (c) 2022 Winsider Seminars & Solutions, Inc.  All rights reserved.
  *
- * Process Hacker is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
+ * This file is part of System Informer.
  *
- * You should have received a copy of the GNU General Public License
- * along with Process Hacker.  If not, see <http://www.gnu.org/licenses/>.
+ * Authors:
+ *
+ *     dmex
+ *
  */
-
-using System;
-using System.Collections.Generic;
 
 namespace CustomBuildTool
 {
     public static class Program
     {
-        public static Dictionary<string, string> ProgramArgs;
+        private static Dictionary<string, string> ProgramArgs;
 
         public static void Main(string[] args)
         {
-            ProgramArgs = ParseArgs(args);
-
             if (!Build.InitializeBuildEnvironment())
                 return;
+
+            ProgramArgs = Utils.ParseArgs(args);
 
             if (ProgramArgs.ContainsKey("-cleanup"))
             {
                 Build.CleanupBuildEnvironment();
                 Build.ShowBuildStats();
             }
+            else if (ProgramArgs.ContainsKey("-encrypt"))
+            {
+                if (!Verify.EncryptFile(ProgramArgs["-input"], ProgramArgs["-output"], ProgramArgs["-secret"]))
+                {
+                    Environment.Exit(1);
+                }
+            }
+            else if (ProgramArgs.ContainsKey("-decrypt"))
+            {
+                if (!Verify.DecryptFile(ProgramArgs["-input"], ProgramArgs["-output"], ProgramArgs["-secret"]))
+                {
+                    Environment.Exit(1);
+                }
+            }
+            else if (ProgramArgs.TryGetValue("-dyndata", out string ArgDynData))
+            {
+                if (!Build.BuildDynamicData(ArgDynData))
+                {
+                    Environment.Exit(1);
+                }
+            }
             else if (ProgramArgs.ContainsKey("-phapppub_gen"))
             {
-                Build.BuildPublicHeaderFiles();
+                if (!Build.BuildPublicHeaderFiles())
+                {
+                    Environment.Exit(1);
+                }
             }
             else if (ProgramArgs.ContainsKey("-sdk"))
             {
-                Build.CopyKProcessHacker(
-                    BuildFlags.Build32bit | BuildFlags.Build64bit |
-                    BuildFlags.BuildDebug
-                    );
+                var flags = BuildFlags.BuildVerbose;
 
-                Build.BuildSdk(
-                    BuildFlags.Build32bit | BuildFlags.Build64bit |
-                    BuildFlags.BuildDebug | BuildFlags.BuildVerbose
-                    );
+                Build.SetupBuildEnvironment(false);
+
+                if (ProgramArgs.ContainsKey("-Debug"))
+                {
+                    if (ProgramArgs.ContainsKey("-Win32"))
+                        flags |= BuildFlags.BuildDebug | BuildFlags.Build32bit;
+                    else if (ProgramArgs.ContainsKey("-x64"))
+                        flags |= BuildFlags.BuildDebug | BuildFlags.Build64bit;
+                    else if (ProgramArgs.ContainsKey("-arm64"))
+                        flags |= BuildFlags.BuildDebug | BuildFlags.BuildArm64bit;
+                    else
+                    {
+                        Environment.Exit(1);
+                    }
+                }
+                else if (ProgramArgs.ContainsKey("-release"))
+                {
+                    if (ProgramArgs.ContainsKey("-Win32"))
+                        flags |= BuildFlags.BuildRelease | BuildFlags.Build32bit;
+                    else if (ProgramArgs.ContainsKey("-x64"))
+                        flags |= BuildFlags.BuildRelease | BuildFlags.Build64bit;
+                    else if (ProgramArgs.ContainsKey("-arm64"))
+                        flags |= BuildFlags.BuildRelease | BuildFlags.BuildArm64bit;
+                    else
+                    {
+                        Environment.Exit(1);
+                    }
+                }
+                else
+                {
+                    Environment.Exit(1);
+                }
+
+                if (!Build.CopyResourceFiles(flags))
+                    Environment.Exit(1);
+
+                if (!Build.BuildSdk(flags))
+                    Environment.Exit(1);
+
+                if (!Build.CopyKernelDriver(flags))
+                    Environment.Exit(1);
+
+                if (!Build.CopyWow64Files(flags))
+                    Environment.Exit(1);
+            }
+            else if (ProgramArgs.TryGetValue("-kph-sign", out string SignArg))
+            {
+                if (!Verify.CreateSigFile("kph", SignArg, Build.BuildCanary))
+                    Environment.Exit(1);
             }
             else if (ProgramArgs.ContainsKey("-cleansdk"))
             {
-                if (!Build.BuildSolution("ProcessHacker.sln",
-                    BuildFlags.Build32bit | BuildFlags.Build64bit |
-                    BuildFlags.BuildVerbose | BuildFlags.BuildApi
-                    ))
-                {
-                    return;
-                }
+                BuildFlags flags =
+                    BuildFlags.Build32bit | BuildFlags.Build64bit | BuildFlags.BuildArm64bit |
+                    BuildFlags.BuildVerbose | BuildFlags.BuildApi;
 
-                Build.BuildSdk(
-                    BuildFlags.Build32bit |
-                    BuildFlags.Build64bit |
-                    BuildFlags.BuildVerbose
-                    );
+                if (!Build.BuildSolution("SystemInformer.sln", flags))
+                    return;
 
                 Build.ShowBuildStats();
             }
             else if (ProgramArgs.ContainsKey("-bin"))
             {
-                Build.ShowBuildEnvironment(false);
+                Build.SetupBuildEnvironment(false);
 
-                if (!Build.BuildSolution("ProcessHacker.sln",
-                    BuildFlags.Build32bit | BuildFlags.Build64bit |
-                    BuildFlags.BuildVerbose | BuildFlags.BuildApi
-                    ))
-                    return;
+                if (!Build.BuildSolution("SystemInformer.sln", BuildFlags.Release))
+                    Environment.Exit(1);
+                if (!Build.BuildSolution("plugins\\Plugins.sln", BuildFlags.Release))
+                    Environment.Exit(1);
 
-                if (!Build.CopyKProcessHacker(
-                    BuildFlags.Build32bit | BuildFlags.Build64bit | BuildFlags.BuildVerbose))
-                    return;
+                if (!Build.CopyDebugEngineFiles(BuildFlags.Release))
+                    Environment.Exit(1);
+                if (!Build.CopyTextFiles(true))
+                    Environment.Exit(1);
 
-                if (!Build.BuildSdk(
-                    BuildFlags.Build32bit | BuildFlags.Build64bit | BuildFlags.BuildVerbose))
-                    return;
-
-                if (!Build.BuildSolution("plugins\\Plugins.sln",
-                    BuildFlags.Build32bit | BuildFlags.Build64bit |
-                    BuildFlags.BuildVerbose | BuildFlags.BuildApi
-                    ))
-                    return;
-
-                if (!Build.CopyWow64Files(BuildFlags.None))
-                    return;
-                if (!Build.CopySidCapsFile(BuildFlags.Build32bit | BuildFlags.Build64bit | BuildFlags.BuildVerbose))
-                    return;
-
-                if (!Build.BuildBinZip())
-                    return;
+                foreach (var (channel, _) in BuildConfig.Build_Channels)
+                {
+                    if (!Build.BuildBinZip(channel))
+                        Environment.Exit(1);
+                }
 
                 Build.ShowBuildStats();
+                Build.CopyTextFiles(false);
             }
             else if (ProgramArgs.ContainsKey("-debug"))
             {
-                Build.ShowBuildEnvironment(true);
+                Build.SetupBuildEnvironment(true);
 
-                if (!Build.BuildSolution("ProcessHacker.sln",
-                    BuildFlags.Build32bit | BuildFlags.Build64bit |
-                    BuildFlags.BuildDebug | BuildFlags.BuildVerbose |
-                    BuildFlags.BuildApi
-                    ))
+                if (!Build.BuildSolution("SystemInformer.sln", BuildFlags.Debug))
+                    return;
+                if (!Build.BuildSolution("plugins\\Plugins.sln", BuildFlags.Debug))
                     return;
 
-                if (!Build.CopyKProcessHacker(
-                    BuildFlags.Build32bit | BuildFlags.Build64bit |
-                    BuildFlags.BuildDebug | BuildFlags.BuildVerbose))
-                    return;
-
-                if (!Build.BuildSdk(
-                    BuildFlags.Build32bit | BuildFlags.Build64bit |
-                    BuildFlags.BuildDebug | BuildFlags.BuildVerbose
-                    ))
-                {
-                    return;
-                }
-
-                if (!Build.BuildSolution("plugins\\Plugins.sln",
-                    BuildFlags.Build32bit | BuildFlags.Build64bit |
-                    BuildFlags.BuildDebug | BuildFlags.BuildVerbose |
-                    BuildFlags.BuildApi
-                    ))
-                {
-                    return;
-                }
-
-                if (!Build.CopyWow64Files(BuildFlags.BuildDebug))
-                    return;
-                if (!Build.CopySidCapsFile(
-                    BuildFlags.Build32bit | BuildFlags.Build64bit |
-                    BuildFlags.BuildDebug | BuildFlags.BuildVerbose))
-                    return;
+                if (!Build.CopyDebugEngineFiles(BuildFlags.Debug))
+                    Environment.Exit(1);
 
                 Build.ShowBuildStats();
             }
-            else if (ProgramArgs.ContainsKey("-appveyor"))
+            else if (ProgramArgs.ContainsKey("-pipeline-build"))
             {
-                Build.ShowBuildEnvironment(true);
+                BuildFlags flags = BuildFlags.Release;
 
-                if (!Build.BuildSolution("ProcessHacker.sln",
-                    BuildFlags.Build32bit | BuildFlags.Build64bit |
-                    BuildFlags.BuildVerbose | BuildFlags.BuildApi
-                    ))
+                if (ProgramArgs.ContainsKey("-msix-build"))
+                    flags |= BuildFlags.BuildMsix;
+
+                Build.SetupBuildEnvironment(true);
+
+                Build.CopySourceLink(true);
+
+                if (!Build.BuildSolution("SystemInformer.sln", flags))
                     Environment.Exit(1);
-
-                if (!Build.CopyKProcessHacker(BuildFlags.Build32bit | BuildFlags.Build64bit | BuildFlags.BuildVerbose))
-                    Environment.Exit(1);
-
-                if (!Build.BuildSdk(BuildFlags.Build32bit | BuildFlags.Build64bit | BuildFlags.BuildVerbose))
-                    Environment.Exit(1);
-
-                if (!Build.BuildSolution("plugins\\Plugins.sln",
-                    BuildFlags.Build32bit | BuildFlags.Build64bit |
-                    BuildFlags.BuildVerbose | BuildFlags.BuildApi
-                    ))
+                if (!Build.BuildSolution("plugins\\Plugins.sln", flags))
                     Environment.Exit(1);
 
-                if (!Build.CopyWow64Files(BuildFlags.None))
+                Build.CopyWow64Files(flags); // required after plugin build (dmex)
+            }
+            else if (ProgramArgs.ContainsKey("-pipeline-package"))
+            {
+                Build.SetupBuildEnvironment(true);
+
+                if (!Build.ResignFiles())
                     Environment.Exit(1);
-                if (!Build.CopySidCapsFile(BuildFlags.Build32bit | BuildFlags.Build64bit | BuildFlags.BuildVerbose))
+                if (!Build.CopyDebugEngineFiles(BuildFlags.Release))
+                    Environment.Exit(1);
+                if (!Build.CopyTextFiles(true))
                     Environment.Exit(1);
 
-                if (!Build.BuildBinZip())
-                    Environment.Exit(1);
-                if (!Build.BuildSetupExe())
-                    Environment.Exit(1);
-                if (!Build.BuildPdbZip())
+                foreach (var (channel, _) in BuildConfig.Build_Channels)
+                {
+                    if (!Build.BuildBinZip(channel))
+                        Environment.Exit(1);
+                    if (!Build.BuildSetupExe(channel))
+                        Environment.Exit(1);
+                }
+            }
+            else if (ProgramArgs.ContainsKey("-pipeline-deploy"))
+            {
+                Build.SetupBuildEnvironment(true);
+
+                if (!Build.BuildPdbZip(false))
                     Environment.Exit(1);
                 //if (!Build.BuildSdkZip())
                 //    Environment.Exit(1);
                 //if (!Build.BuildSrcZip())
                 //    Environment.Exit(1);
-                if (!Build.BuildChecksumsFile())
-                    Environment.Exit(1);
-                if (!Build.BuildUpdateSignature())
-                    Environment.Exit(1);
-
-                if (!Build.BuildDeployUploadArtifacts())
-                    Environment.Exit(1);
+                //if (!Build.BuildChecksumsFile())
+                //    Environment.Exit(1);
+                //if (!Build.BuildDeployUploadArtifacts())
+                //    Environment.Exit(1);
                 if (!Build.BuildDeployUpdateConfig())
                     Environment.Exit(1);
             }
+            else if (ProgramArgs.ContainsKey("-msix-build"))
+            {
+                BuildFlags flags = BuildFlags.Release | BuildFlags.BuildMsix;
+
+                Build.SetupBuildEnvironment(true);
+
+                if (!Build.BuildSolution("SystemInformer.sln", flags))
+                    Environment.Exit(1);
+                if (!Build.BuildSolution("plugins\\Plugins.sln", flags))
+                    Environment.Exit(1);
+
+                if (!Build.CopyDebugEngineFiles(flags))
+                    Environment.Exit(1);
+                if (!Build.CopyWow64Files(flags)) // required after plugin build (dmex)
+                    Environment.Exit(1);
+                if (!Build.CopyTextFiles(true))
+                    Environment.Exit(1);
+
+                Build.BuildStorePackage(flags);
+
+                Build.BuildPdbZip(true);
+
+                Build.CopyTextFiles(false);
+            }
             else
             {
-                Build.ShowBuildEnvironment(true);
+                Build.SetupBuildEnvironment(true);
 
-                if (!Build.BuildSolution("ProcessHacker.sln",
-                    BuildFlags.Build32bit | BuildFlags.Build64bit |
-                    BuildFlags.BuildVerbose | BuildFlags.BuildApi
-                    ))
-                    return;
+                if (!Build.BuildSolution("SystemInformer.sln", BuildFlags.Release))
+                    Environment.Exit(1);
+                if (!Build.BuildSolution("plugins\\Plugins.sln", BuildFlags.Release))
+                    Environment.Exit(1);
 
-                if (!Build.CopyKProcessHacker(BuildFlags.Build32bit | BuildFlags.Build64bit | BuildFlags.BuildVerbose))
-                    return;
-                if (!Build.BuildSdk(BuildFlags.Build32bit | BuildFlags.Build64bit | BuildFlags.BuildVerbose))
-                    return;
+                if (!Build.CopyDebugEngineFiles(BuildFlags.Release))
+                    Environment.Exit(1);
+                if (!Build.CopyWow64Files(BuildFlags.Release))
+                    Environment.Exit(1);
+                if (!Build.CopyTextFiles(true))
+                    Environment.Exit(1);
 
-                if (!Build.BuildSolution("plugins\\Plugins.sln",
-                    BuildFlags.Build32bit | BuildFlags.Build64bit |
-                    BuildFlags.BuildVerbose | BuildFlags.BuildApi
-                    ))
-                    return;
+                foreach (var (channel, _) in BuildConfig.Build_Channels)
+                {
+                    if (!Build.BuildBinZip(channel))
+                        Environment.Exit(1);
+                    if (!Build.BuildSetupExe(channel))
+                        Environment.Exit(1);
+                }
 
-                if (!Build.CopyWow64Files(BuildFlags.None))
-                    return;
-                if (!Build.CopySidCapsFile(BuildFlags.Build32bit | BuildFlags.Build64bit | BuildFlags.BuildVerbose))
-                    return;
-
-                if (!Build.BuildBinZip())
-                    return;
-                if (!Build.BuildSetupExe())
-                    return;
-                Build.BuildPdbZip();
-                Build.BuildSdkZip();
-                Build.BuildSrcZip();
+                Build.BuildPdbZip(false);
+                //Build.BuildSdkZip();
+                //Build.BuildSrcZip();
                 Build.BuildChecksumsFile();
-
                 Build.ShowBuildStats();
+                Build.CopyTextFiles(false);
             }
-        }
-
-        private static Dictionary<string, string> ParseArgs(string[] args)
-        {
-            var dict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            string argPending = null;
-
-            foreach (string s in args)
-            {
-                if (s.StartsWith("-", StringComparison.OrdinalIgnoreCase))
-                {
-                    if (!dict.ContainsKey(s))
-                        dict.Add(s, string.Empty);
-
-                    argPending = s;
-                }
-                else
-                {
-                    if (argPending != null)
-                    {
-                        dict[argPending] = s;
-                        argPending = null;
-                    }
-                    else
-                    {
-                        if (!dict.ContainsKey(string.Empty))
-                            dict.Add(string.Empty, s);
-                    }
-                }
-            }
-
-            return dict;
         }
 
         public static void PrintColorMessage(string Message, ConsoleColor Color, bool Newline = true, BuildFlags Flags = BuildFlags.BuildVerbose)
@@ -281,16 +280,18 @@ namespace CustomBuildTool
                 Console.Write(Message);
             Console.ResetColor();
         }
-    }
 
-    [Flags]
-    public enum BuildFlags
-    {
-        None,
-        Build32bit = 1,
-        Build64bit = 2,
-        BuildDebug = 4,
-        BuildVerbose = 8,
-        BuildApi = 16,
+        public static void PrintColorMessage(LogInterpolatedStringHandler builder, ConsoleColor Color, bool Newline = true, BuildFlags Flags = BuildFlags.BuildVerbose)
+        {
+            if ((Flags & BuildFlags.BuildVerbose) != BuildFlags.BuildVerbose)
+                return;
+
+            Console.ForegroundColor = Color;
+            if (Newline)
+                Console.WriteLine(builder.GetFormattedText());
+            else
+                Console.Write(builder.GetFormattedText());
+            Console.ResetColor();
+        }
     }
 }

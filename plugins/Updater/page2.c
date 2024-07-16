@@ -1,23 +1,12 @@
 /*
- * Process Hacker Plugins -
- *   Update Checker Plugin
+ * Copyright (c) 2022 Winsider Seminars & Solutions, Inc.  All rights reserved.
  *
- * Copyright (C) 2016-2019 dmex
+ * This file is part of System Informer.
  *
- * This file is part of Process Hacker.
+ * Authors:
  *
- * Process Hacker is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
+ *     dmex    2016-2020
  *
- * Process Hacker is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with Process Hacker.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include "updater.h"
@@ -36,11 +25,21 @@ HRESULT CALLBACK CheckingForUpdatesCallbackProc(
     {
     case TDN_NAVIGATED:
         {
+            PhSetEvent(&InitializedEvent);
+
             SendMessage(hwndDlg, TDM_SET_MARQUEE_PROGRESS_BAR, TRUE, 0);
             SendMessage(hwndDlg, TDM_SET_PROGRESS_BAR_MARQUEE, TRUE, 1);
+            context->ProgressMarquee = TRUE;
 
+#ifndef FORCE_NO_STATUS_TIMER
+            if (!context->ProgressTimer)
+            {
+                PhSetTimer(hwndDlg, 9000, SETTING_NAME_STATUS_TIMER_INTERVAL, NULL);
+                context->ProgressTimer = TRUE;
+            }
+#endif
             PhReferenceObject(context);
-            PhQueueItemWorkQueue(PhGetGlobalWorkQueue(), UpdateCheckThread, context);
+            PhCreateThread2(UpdateCheckThread, context);
         }
         break;
     }
@@ -58,13 +57,38 @@ VOID ShowCheckingForUpdatesDialog(
     config.cbSize = sizeof(TASKDIALOGCONFIG);
     config.dwFlags = TDF_USE_HICON_MAIN | TDF_ALLOW_DIALOG_CANCELLATION | TDF_CAN_BE_MINIMIZED | TDF_SHOW_MARQUEE_PROGRESS_BAR;
     config.dwCommonButtons = TDCBF_CLOSE_BUTTON;
-    config.hMainIcon = Context->IconLargeHandle;
+    config.hMainIcon = PhGetApplicationIcon(FALSE);
     config.cxWidth = 200;
     config.pfCallback = CheckingForUpdatesCallbackProc;
     config.lpCallbackData = (LONG_PTR)Context;
 
-    config.pszWindowTitle = L"Process Hacker - Updater";
-    config.pszMainInstruction = L"Checking for new releases...";
+    config.pszWindowTitle = L"System Informer - Updater";
+
+    if (Context->SwitchingChannel)
+    {
+        switch (Context->Channel)
+        {
+        case PhReleaseChannel:
+            config.pszMainInstruction = L"Checking the release channel...";
+            break;
+        //case PhPreviewChannel:
+        //    config.pszMainInstruction = L"Checking the preview channel...";
+        //    break;
+        case PhCanaryChannel:
+            config.pszMainInstruction = L"Checking the canary channel...";
+            break;
+        //case PhDeveloperChannel:
+        //    config.pszMainInstruction = L"Checking the developer channel...";
+        //    break;
+        default:
+            config.pszMainInstruction = L"Checking the channel...";
+            break;
+        }
+    }
+    else
+    {
+        config.pszMainInstruction = L"Checking for an updated release...";
+    }
 
     TaskDialogNavigatePage(Context->DialogHandle, &config);
 }

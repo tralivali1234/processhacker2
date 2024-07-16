@@ -1,736 +1,1089 @@
-﻿/*
- * Process Hacker Toolchain - 
- *   Build script
- * 
- * Copyright (C) dmex
- * 
- * This file is part of Process Hacker.
- * 
- * Process Hacker is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
+/*
+ * Copyright (c) 2022 Winsider Seminars & Solutions, Inc.  All rights reserved.
  *
- * Process Hacker is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
+ * This file is part of System Informer.
  *
- * You should have received a copy of the GNU General Public License
- * along with Process Hacker.  If not, see <http://www.gnu.org/licenses/>.
+ * Authors:
+ *
+ *     dmex
+ *
  */
-
-using System;
-using System.Collections.Generic;
-using System.Diagnostics;
-using System.IO;
-using System.Runtime.InteropServices;
-using System.Runtime.Serialization;
-using System.Runtime.Serialization.Json;
-using System.Security.Cryptography;
-using System.Text;
 
 namespace CustomBuildTool
 {
-    [System.Security.SuppressUnmanagedCodeSecurity]
-    public static class Win32
+    public static class Utils
     {
-        public static int CreateProcess(string FileName, string args)
+        private static Dictionary<string, string> EnvironmentBlock = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        public static readonly Encoding UTF8NoBOM = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
+        private static string GitFilePath;
+        private static string VsWhereFilePath;
+
+        /// <summary>
+        /// Splits a string into key-value pairs.
+        /// </summary>
+        public static Dictionary<string, string> ParseArgs(string[] args)
         {
-            using (Process process = Process.Start(new ProcessStartInfo
+            var dict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            string argPending = null;
+
+            foreach (string s in args)
             {
-                UseShellExecute = false,
-                FileName = FileName,
-                CreateNoWindow = true
-            }))
-            {
-                process.StartInfo.Arguments = args;
-                process.Start();
-
-                process.WaitForExit();
-
-                return process.ExitCode;
-            }
-        }
-
-        public static string ShellExecute(string FileName, string args)
-        {
-            string output = string.Empty;
-            using (Process process = Process.Start(new ProcessStartInfo
-            {
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-                FileName = FileName,
-                CreateNoWindow = true
-            }))
-            {
-                process.StartInfo.Arguments = args;
-                process.Start();
-
-                output = process.StandardOutput.ReadToEnd();
-                output = output.Replace("\n\n", "\r\n", StringComparison.OrdinalIgnoreCase).Trim();
-
-                process.WaitForExit();
-            }
-
-            return output;
-        }
-
-        public static string SearchFile(string FileName)
-        {
-            try
-            {
-                if (File.Exists(FileName))
-                    return Path.GetFullPath(FileName);
-
-                string values = Environment.GetEnvironmentVariable("PATH");
-
-                foreach (string path in values.Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries))
+                if (s.StartsWith("-", StringComparison.OrdinalIgnoreCase))
                 {
-                    string whereResult = Path.Combine(path, FileName);
+                    dict.TryAdd(s, string.Empty);
 
-                    if (File.Exists(whereResult))
-                        return whereResult;
-                }
-            }
-            catch (Exception) { }
-
-            return null;
-        }
-
-        public static void CopyIfNewer(string CurrentFile, string NewFile)
-        {
-            if (!File.Exists(CurrentFile))
-                return;
-
-            if (CurrentFile.EndsWith(".sys", StringComparison.OrdinalIgnoreCase))
-            {
-                if (!File.Exists(NewFile))
-                {
-                    File.Copy(CurrentFile, NewFile, true);
+                    argPending = s;
                 }
                 else
                 {
-                    FileVersionInfo currentInfo = FileVersionInfo.GetVersionInfo(CurrentFile);
-                    FileVersionInfo newInfo = FileVersionInfo.GetVersionInfo(NewFile);
-                    var currentInfoVersion = new Version(currentInfo.FileVersion);
-                    var newInfoVersion = new Version(newInfo.FileVersion);
-
-                    if (
-                        currentInfoVersion > newInfoVersion ||
-                        File.GetLastWriteTime(CurrentFile) > File.GetLastWriteTime(NewFile)
-                        )
+                    if (argPending != null)
                     {
-                        File.Copy(CurrentFile, NewFile, true);
+                        dict[argPending] = s;
+                        argPending = null;
+                    }
+                    else
+                    {
+                        dict.TryAdd(string.Empty, s);
                     }
                 }
             }
-            else
-            {
-                if (File.GetLastWriteTime(CurrentFile) > File.GetLastWriteTime(NewFile))
-                    File.Copy(CurrentFile, NewFile, true);
-            }
+
+            return dict;
         }
 
-        //public static string SearchFile(string FileName)
-        //{
-        //    string where = Environment.ExpandEnvironmentVariables("%SystemRoot%\\System32\\where.exe");
-        //
-        //    if (File.Exists(where))
-        //    {
-        //        string whereResult = ShellExecute(where, FileName);
-        //
-        //        if (!string.IsNullOrEmpty(whereResult))
-        //            return whereResult;
-        //    }
-        //
-        //    return null;
-        //}
-        //
-        //public static void ImageResizeFile(int size, string FileName, string OutName)
-        //{
-        //    using (var src = System.Drawing.Image.FromFile(FileName))
-        //    using (var dst = new System.Drawing.Bitmap(size, size))
-        //    using (var g = System.Drawing.Graphics.FromImage(dst))
-        //    {
-        //        g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
-        //        g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
-        //
-        //        g.DrawImage(src, 0, 0, dst.Width, dst.Height);
-        //
-        //        dst.Save(OutName, System.Drawing.Imaging.ImageFormat.Png);
-        //    }
-        //}
-    }
-
-    public static class Json<T> where T : class
-    {
-        public static string Serialize(T instance)
+        /// <summary>
+        /// Splits a string into a dictionary.
+        /// </summary>
+        public static Dictionary<string, string> ParseInput(string[] args)
         {
-            DataContractJsonSerializer serializer = new DataContractJsonSerializer(typeof(T));
+            var dict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
-            using (MemoryStream stream = new MemoryStream())
+            foreach (string s in args)
             {
-                serializer.WriteObject(stream, instance);
-
-                return Encoding.Default.GetString(stream.ToArray());
+                dict.TryAdd(s, string.Empty);
             }
+
+            return dict;
         }
 
-        public static T DeSerialize(string json)
+        public static int ExecuteMsbuildCommand(string Command, BuildFlags Flags, out string OutputString)
         {
-            using (MemoryStream stream = new MemoryStream(Encoding.Default.GetBytes(json)))
+            string file = GetMsbuildFilePath(Flags);
+
+            if (string.IsNullOrWhiteSpace(file))
             {
-                DataContractJsonSerializer serializer = new DataContractJsonSerializer(typeof(T));
-
-                return (T)serializer.ReadObject(stream);
+                OutputString = "[ExecuteMsbuildCommand] MsbuildFilePath is invalid.";
+                return 3; // file not found.
             }
-        }
-    }
 
-    public static class Verify
-    {
-        private static Rijndael GetRijndael(string secret)
+            return Win32.CreateProcess(file, Command, out OutputString, false);
+        }
+
+        public static string ExecuteVsWhereCommand(string Command)
         {
-            using (Rfc2898DeriveBytes rfc2898DeriveBytes = new Rfc2898DeriveBytes(secret, Convert.FromBase64String("e0U0RTY2RjU5LUNBRjItNEMzOS1BN0Y4LTQ2MDk3QjFDNDYxQn0="), 10000))
+            string file = GetVswhereFilePath();
+
+            if (string.IsNullOrWhiteSpace(file))
             {
-                Rijndael rijndael = Rijndael.Create();
-
-                rijndael.Key = rfc2898DeriveBytes.GetBytes(32);
-                rijndael.IV = rfc2898DeriveBytes.GetBytes(16);
-
-                return rijndael;
+                Program.PrintColorMessage("[ExecuteVsWhereCommand] VswhereFilePath is invalid.", ConsoleColor.Red);
+                return null;
             }
+
+            string output = Win32.ShellExecute(file, Command, false);
+            output = output.Trim();
+            return output;
         }
 
-        public static void Encrypt(string fileName, string outFileName, string secret)
-        {
-            using (FileStream fileOutStream = File.Create(outFileName))
-            using (Rijndael rijndael = GetRijndael(secret))
-            using (FileStream fileStream = File.OpenRead(fileName))
-            using (CryptoStream cryptoStream = new CryptoStream(fileOutStream, rijndael.CreateEncryptor(), CryptoStreamMode.Write, true))
-            {
-                fileStream.CopyTo(cryptoStream);
-            }
-        }
-
-        public static bool Decrypt(string FileName, string outFileName, string secret)
+        public static bool SetCurrentDirectoryParent(string FileName)
         {
             try
             {
-                using (FileStream fileOutStream = File.Create(outFileName))
-                using (Rijndael rijndael = GetRijndael(secret))
-                using (FileStream fileStream = File.OpenRead(FileName))
-                using (CryptoStream cryptoStream = new CryptoStream(fileOutStream, rijndael.CreateDecryptor(), CryptoStreamMode.Write, true))
+                DirectoryInfo info = new DirectoryInfo(".");
+
+                while (info.Parent?.Parent != null)
                 {
-                    fileStream.CopyTo(cryptoStream);
+                    info = info.Parent;
+
+                    if (File.Exists($"{info.FullName}\\{FileName}"))
+                    {
+                        Directory.SetCurrentDirectory(info.FullName);
+                        break;
+                    }
                 }
-            }
-            catch
-            {
-                return false;
-            }
-
-            return true;
-        }
-
-        public static string HashFile(string FileName)
-        {
-            //using (HashAlgorithm algorithm = new SHA256CryptoServiceProvider())
-            //{
-            //    byte[] inputBytes = Encoding.UTF8.GetBytes(input);
-            //    byte[] hashBytes = algorithm.ComputeHash(inputBytes);
-            //    return BitConverter.ToString(hashBytes).Replace("-", String.Empty);
-            //}
-
-            using (FileStream fileInStream = File.OpenRead(FileName))
-            using (BufferedStream bufferedStream = new BufferedStream(fileInStream, 0x1000))
-            using (SHA256Managed sha = new SHA256Managed())
-            {
-                byte[] checksum = sha.ComputeHash(bufferedStream);
-
-                return BitConverter.ToString(checksum).Replace("-", string.Empty);
-            }
-        }
-    }
-
-    public static class VisualStudio
-    {
-        private static readonly string[] CustomSignToolPathArray =
-        {
-            "\\tools\\CustomSignTool\\bin\\Release32\\CustomSignTool.exe",
-            "\\tools\\CustomSignTool\\bin\\Release64\\CustomSignTool.exe",
-            //"\\tools\\CustomSignTool\\bin\\Debug32\\CustomSignTool.exe",
-            //"\\tools\\CustomSignTool\\bin\\RDebug64\\CustomSignTool.exe",
-        };
-
-        private static readonly string[] MsBuildPathArray =
-        {
-            "\\MSBuild\\Current\\Bin\\MSBuild.exe",
-            "\\MSBuild\\15.0\\Bin\\MSBuild.exe"
-        };
-
-        private static readonly string[] GitPathArray =
-        {
-            "%ProgramFiles%\\Git\\bin\\git.exe",
-            "%ProgramFiles(x86)%\\Git\\bin\\git.exe",
-            "%ProgramW6432%\\Git\\bin\\git.exe"
-        };
-
-        private static readonly string[] VswherePathArray =
-        {
-            "%ProgramFiles%\\Microsoft Visual Studio\\Installer\\vswhere.exe",
-            "%ProgramFiles(x86)%\\Microsoft Visual Studio\\Installer\\vswhere.exe",
-            "%ProgramW6432%\\Microsoft Visual Studio\\Installer\\vswhere.exe"
-        };
-
-        public static string GetOutputDirectoryPath()
-        {
-            string folder = Environment.CurrentDirectory + "\\build\\output";
-
-            if (File.Exists(folder))
-            {
-                return folder;
-            }
-
-            try
-            {
-                Directory.CreateDirectory(folder);
-
-                return folder;
             }
             catch (Exception ex)
             {
-                Program.PrintColorMessage("Error creating output directory. " + ex, ConsoleColor.Red);
+                Program.PrintColorMessage($"Unable to find directory: {ex}", ConsoleColor.Red);
+                return false;
             }
 
-            return null;
+            return File.Exists(FileName);
         }
 
-        public static string GetGitFilePath()
+        public static string GetOutputDirectoryPath(string FileName)
         {
-            string git = Win32.SearchFile("git.exe");
+            return Path.Join([Build.BuildWorkingFolder, FileName]);
+        }
 
-            if (File.Exists(git))
-                return git;
+        public static void CreateOutputDirectory()
+        {
+            if (string.IsNullOrWhiteSpace(Build.BuildOutputFolder))
+                return;
+            if (File.Exists(Build.BuildOutputFolder))
+                return;
 
-            foreach (string path in GitPathArray)
+            try
             {
-                git = Environment.ExpandEnvironmentVariables(path);
-
-                if (File.Exists(git))
-                    return git;
+                Directory.CreateDirectory(Build.BuildOutputFolder);
             }
-
-            return null;
-        }
-
-        public static string GetGitWorkPath(string Directory)
-        {
-            return "--git-dir=\"" + Directory + "\\.git\" --work-tree=\"" + Directory + "\" "; ;
+            catch (Exception ex)
+            {
+                Program.PrintColorMessage($"Error creating output directory: {ex}", ConsoleColor.Red);
+            }
         }
 
         public static string GetVswhereFilePath()
         {
-            foreach (string path in VswherePathArray)
+            if (string.IsNullOrWhiteSpace(VsWhereFilePath))
             {
-                string file = Environment.ExpandEnvironmentVariables(path);
+                string[] vswherePathArray =
+                [
+                    "%ProgramFiles%\\Microsoft Visual Studio\\Installer\\vswhere.exe",
+                    "%ProgramFiles(x86)%\\Microsoft Visual Studio\\Installer\\vswhere.exe",
+                    "%ProgramW6432%\\Microsoft Visual Studio\\Installer\\vswhere.exe"
+                ];
 
-                if (File.Exists(file))
-                    return file;
-            }
-
-            return null;
-        }
-
-        public static string GetCustomSignToolFilePath()
-        {
-            foreach (string path in CustomSignToolPathArray)
-            {
-                string file = Environment.CurrentDirectory + path;
-
-                if (File.Exists(file))
-                    return file;
-            }
-
-            return null;
-        }
-
-        public static string GetMsbuildFilePath()
-        {
-            VisualStudioInstance instance;
-            string vswhere;
-            string vswhereResult;
-
-            instance = GetVisualStudioInstance();
-
-            if (instance != null)
-            {
-                foreach (string path in MsBuildPathArray)
+                foreach (string path in vswherePathArray)
                 {
-                    string file = instance.Path + path;
+                    string file = Utils.ExpandFullPath(path);
 
                     if (File.Exists(file))
                     {
-                        return file;
+                        VsWhereFilePath = file;
+                        break;
                     }
                 }
-            }
 
-            vswhere = GetVswhereFilePath();
-
-            if (string.IsNullOrEmpty(vswhere))
-                return null;
-
-            vswhereResult = Win32.ShellExecute(
-                vswhere,
-                "-latest " +
-                "-prerelease " +
-                "-products * " +
-                "-requiresAny " +
-                "-requires Microsoft.Component.MSBuild " +
-                "-property installationPath "
-                );
-
-            if (string.IsNullOrEmpty(vswhereResult))
-                return null;
-
-            foreach (string path in MsBuildPathArray)
-            {
-                string file = vswhereResult + path;
-
-                if (File.Exists(file))
+                if (string.IsNullOrWhiteSpace(VsWhereFilePath))
                 {
-                    return file;
-                }
-            }
+                    string file = Win32.SearchPath("vswhere.exe");
 
-            return null;
-        }
-
-
-        private static List<VisualStudioInstance> VisualStudioInstanceList = null;
-        public static VisualStudioInstance GetVisualStudioInstance()
-        {
-            if (VisualStudioInstanceList == null)
-            {
-                VisualStudioInstanceList = new List<VisualStudioInstance>();
-
-                try
-                {
-                    var setupConfiguration = new SetupConfigurationClass() as ISetupConfiguration2;
-                    var instanceEnumerator = setupConfiguration.EnumAllInstances();
-                    var instances = new ISetupInstance2[3];
-
-                    instanceEnumerator.Next(instances.Length, instances, out var instancesFetched);
-
-                    if (instancesFetched == 0)
-                        return null;
-
-                    do
+                    if (File.Exists(file))
                     {
-                        for (int i = 0; i < instancesFetched; i++)
-                        {
-                            VisualStudioInstanceList.Add(new VisualStudioInstance(instances[i]));
-                        }
-
-                        instanceEnumerator.Next(instances.Length, instances, out instancesFetched);
+                        VsWhereFilePath = file;
                     }
-                    while (instancesFetched != 0);
                 }
-                catch { }
             }
 
-            foreach (VisualStudioInstance instance in VisualStudioInstanceList)
+            return VsWhereFilePath;
+        }
+
+        private static string GetMsbuildFilePath(BuildFlags Flags)
+        {
+            string MsBuildFilePath = null;
+            List<string> MsBuildPath = 
+            [
+                "\\MSBuild\\Current\\Bin\\amd64\\MSBuild.exe",
+                "\\MSBuild\\Current\\Bin\\MSBuild.exe",
+                "\\MSBuild\\15.0\\Bin\\MSBuild.exe"
+            ];
+
+            if (Flags.HasFlag(BuildFlags.BuildArm64bit) && RuntimeInformation.OSArchitecture == Architecture.Arm64)
             {
-                if (
-                    instance.HasRequiredDependency &&
-                    instance.DisplayName.EndsWith("2019", StringComparison.OrdinalIgnoreCase) // HACK
-                    )
+                MsBuildPath.Insert(0, "\\MSBuild\\Current\\Bin\\arm64\\MSBuild.exe");
+            }
+
+            VisualStudioInstance instance = VisualStudio.GetVisualStudioInstance();
+
+            if (instance != null)
+            {
+                foreach (string path in MsBuildPath)
                 {
-                    return instance;
+                    string file = Path.Join([instance.Path, path]);
+
+                    if (File.Exists(file))
+                    {
+                        MsBuildFilePath = file;
+                        break;
+                    }
+                }
+            }
+
+            if (string.IsNullOrWhiteSpace(MsBuildFilePath))
+            {
+                // -latest -requires Microsoft.Component.MSBuild -find "MSBuild\**\Bin\MSBuild.exe"
+                string vswhereResult = ExecuteVsWhereCommand(
+                    "-latest -prerelease -products * -requiresAny -requires Microsoft.Component.MSBuild -property installationPath"
+                    );
+
+                if (!string.IsNullOrWhiteSpace(vswhereResult))
+                {
+                    foreach (string path in MsBuildPath)
+                    {
+                        string file = Path.Join([vswhereResult, path]);
+
+                        if (File.Exists(file))
+                        {
+                            MsBuildFilePath = file;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            return MsBuildFilePath;
+        }
+
+        public static string GetGitFilePath()
+        {
+            if (string.IsNullOrWhiteSpace(GitFilePath))
+            {
+                string[] GitPathArray =
+                [
+                    "%ProgramFiles%\\Git\\bin\\git.exe",
+                    "%ProgramFiles(x86)%\\Git\\bin\\git.exe",
+                    "%ProgramW6432%\\Git\\bin\\git.exe"
+                ];
+
+                foreach (string path in GitPathArray)
+                {
+                    string file = Utils.ExpandFullPath(path);
+
+                    if (File.Exists(file))
+                    {
+                        GitFilePath = file;
+                        break;
+                    }
+                }
+
+                if (string.IsNullOrWhiteSpace(GitFilePath))
+                {
+                    string file = Win32.SearchPath("git.exe");
+
+                    if (File.Exists(file))
+                    {
+                        GitFilePath = file;
+                    }
+                }
+            }
+
+            return GitFilePath;
+        }
+
+        private static string GetGitWorkPath(string DirectoryPath)
+        {
+            if (string.IsNullOrWhiteSpace(DirectoryPath))
+                return null;
+
+            if (!Directory.Exists($"{DirectoryPath}\\.git"))
+                return null;
+
+            return $"--git-dir=\"{DirectoryPath}\\.git\" --work-tree=\"{DirectoryPath}\" ";
+        }
+
+        public static string ExecuteGitCommand(string WorkingFolder, string Command)
+        {
+            string currentGitDirectory = GetGitWorkPath(WorkingFolder);
+
+            if (string.IsNullOrWhiteSpace(currentGitDirectory))
+            {
+                Program.PrintColorMessage("[ExecuteGitCommand] WorkingFolder is invalid.", ConsoleColor.Red);
+                return null;
+            }
+
+            string currentGitPath = GetGitFilePath();
+
+            if (string.IsNullOrWhiteSpace(currentGitPath))
+            {
+                Program.PrintColorMessage("[ExecuteGitCommand] GitFilePath is invalid.", ConsoleColor.Red);
+                return null;
+            }
+
+            string output = Win32.ShellExecute(currentGitPath, $"{currentGitDirectory} {Command}", false);
+            output = output.Trim();
+            return output;
+        }
+
+        public static string GetWindowsSdkIncludePath()
+        {
+            List<KeyValuePair<Version, string>> versionList = new List<KeyValuePair<Version, string>>();
+            string kitsRoot = Win32.GetKeyValue(true, "Software\\Microsoft\\Windows Kits\\Installed Roots", "KitsRoot10", "%ProgramFiles(x86)%\\Windows Kits\\10\\");
+            string kitsPath = Utils.ExpandFullPath(Path.Join([kitsRoot, "\\Include"]));
+
+            if (Directory.Exists(kitsPath))
+            {
+                var windowsKitsDirectory = Directory.EnumerateDirectories(kitsPath);
+
+                foreach (string path in windowsKitsDirectory)
+                {
+                    string name = Path.GetFileName(path);
+
+                    if (Version.TryParse(name, out var version))
+                    {
+                        versionList.Add(new KeyValuePair<Version, string>(version, path));
+                    }
+                }
+
+                versionList.Sort((first, second) => first.Key.CompareTo(second.Key));
+
+                if (versionList.Count > 0)
+                {
+                    var result = versionList[versionList.Count - 1];
+
+                    if (!string.IsNullOrWhiteSpace(result.Value))
+                    {
+                        return result.Value;
+                    }
                 }
             }
 
             return null;
         }
-    }
 
-    public static class AppVeyor
-    {
-        public static bool UpdateBuildVersion(string BuildVersion)
+        public static string GetWindowsSdkPath()
         {
+            List<KeyValuePair<Version, string>> versionList = new List<KeyValuePair<Version, string>>();
+            string kitsRoot = Win32.GetKeyValue(true, "Software\\Microsoft\\Windows Kits\\Installed Roots", "KitsRoot10", "%ProgramFiles(x86)%\\Windows Kits\\10\\");
+            string kitsPath = Utils.ExpandFullPath(Path.Join([kitsRoot, "\\bin"]));
+
+            if (Directory.Exists(kitsPath))
+            {
+                var windowsKitsDirectory = Directory.EnumerateDirectories(kitsPath);
+
+                foreach (string path in windowsKitsDirectory)
+                {
+                    var name = Path.GetFileName(path);
+
+                    if (Version.TryParse(name, out var version))
+                    {
+                        versionList.Add(new KeyValuePair<Version, string>(version, path));
+                    }
+                }
+
+                versionList.Sort((first, second) => first.Key.CompareTo(second.Key));
+
+                if (versionList.Count > 0)
+                {
+                    var result = versionList[^1];
+
+                    if (!string.IsNullOrWhiteSpace(result.Value))
+                    {
+                        return result.Value;
+                    }
+                }
+            }
+
+            return null;
+        }
+
+        public static string GetWindowsSdkVersion()
+        {
+            List<KeyValuePair<Version, string>> versionList = new List<KeyValuePair<Version, string>>();
+            string kitsRoot = Win32.GetKeyValue(true, "Software\\Microsoft\\Windows Kits\\Installed Roots", "KitsRoot10", "%ProgramFiles(x86)%\\Windows Kits\\10\\");
+            string kitsPath = Utils.ExpandFullPath(Path.Join([kitsRoot, "\\bin"]));
+
+            if (Directory.Exists(kitsPath))
+            {
+                var windowsKitsDirectory = Directory.EnumerateDirectories(kitsPath);
+
+                foreach (string path in windowsKitsDirectory)
+                {
+                    var name = Path.GetFileName(path.AsSpan());
+
+                    if (Version.TryParse(name, out var version))
+                    {
+                        versionList.Add(new KeyValuePair<Version, string>(version, path));
+                    }
+                }
+
+                versionList.Sort((first, second) => first.Key.CompareTo(second.Key));
+
+                if (versionList.Count > 0)
+                {
+                    var result = versionList[^1];
+                    var value = result.Key.ToString();
+
+                    if (!string.IsNullOrWhiteSpace(value))
+                    {
+                        return value;
+                    }
+                }
+            }
+
+            return null;
+        }
+
+        public static string GetVisualStudioVersion(BuildFlags Flags)
+        {
+            string msbuild = GetMsbuildFilePath(Flags);
+
+            if (string.IsNullOrWhiteSpace(msbuild))
+                return string.Empty;
+
             try
             {
-                string AppVeyorFilePath = Win32.SearchFile("appveyor.exe");
+                var directory = Path.GetDirectoryName(msbuild);
 
-                if (!string.IsNullOrWhiteSpace(AppVeyorFilePath) && !string.IsNullOrWhiteSpace(BuildVersion))
+                if (string.IsNullOrWhiteSpace(directory))
+                    return string.Empty;
+
+                DirectoryInfo info = new DirectoryInfo(directory);
+
+                while (info.Parent != null && info.Parent.Parent != null)
                 {
-                    Win32.ShellExecute("appveyor", $"UpdateBuild -Version \"{BuildVersion}\" ");
-                    return true;
+                    info = info.Parent;
+
+                    if (File.Exists(Path.Join([info.FullName, "\\Common7\\IDE\\devenv.exe"])))
+                    {
+                        FileVersionInfo currentInfo = FileVersionInfo.GetVersionInfo(Path.Join([info.FullName, "\\Common7\\IDE\\devenv.exe"]));
+                        return currentInfo.ProductVersion ?? string.Empty;
+                    }
                 }
             }
             catch (Exception ex)
             {
-                Program.PrintColorMessage("[UpdateBuildVersion] " + ex, ConsoleColor.Red, true);
+                Program.PrintColorMessage($"Unable to find devenv directory: {ex}", ConsoleColor.Red);
             }
+
+            return string.Empty;
+        }
+
+        public static string GetMakeAppxPath()
+        {
+            string windowsSdkPath = Utils.GetWindowsSdkPath();
+
+            if (string.IsNullOrWhiteSpace(windowsSdkPath))
+                return null;
+
+            string makeAppxPath = Path.Join([windowsSdkPath, "\\x64\\MakeAppx.exe"]);
+
+            if (string.IsNullOrWhiteSpace(makeAppxPath))
+                return null;
+
+            if (!File.Exists(makeAppxPath))
+            {
+                string sdkRootPath = Win32.GetKeyValue(true, "Software\\Microsoft\\Windows Kits\\Installed Roots", "WdkBinRootVersioned", null);
+
+                if (string.IsNullOrWhiteSpace(sdkRootPath))
+                    return null;
+
+                makeAppxPath = Utils.ExpandFullPath(Path.Join([sdkRootPath, "\\x64\\MakeAppx.exe"]));
+
+                if (!File.Exists(makeAppxPath))
+                    return null;
+            }
+
+            return makeAppxPath;
+        }
+
+        public static string ExecuteMsixCommand(string Command)
+        {
+            string currentMisxPath = GetMakeAppxPath();
+
+            if (string.IsNullOrWhiteSpace(currentMisxPath))
+            {
+                Program.PrintColorMessage("[ExecuteMsixCommand] File is invalid.", ConsoleColor.Red);
+                return null;
+            }
+
+            string output = Win32.ShellExecute(currentMisxPath, Command, false);
+            output = output.Trim();
+            return output;
+        }
+
+        public static string GetSignToolPath()
+        {
+            string windowsSdkPath = Utils.GetWindowsSdkPath();
+
+            if (string.IsNullOrWhiteSpace(windowsSdkPath))
+                return string.Empty;
+
+            string signToolPath = Path.Join([windowsSdkPath, "\\x64\\SignTool.exe"]);
+
+            if (string.IsNullOrWhiteSpace(signToolPath))
+                return string.Empty;
+
+            if (!File.Exists(signToolPath))
+                return string.Empty;
+
+            return signToolPath;
+        }
+
+        //public static string GetMsbuildFilePath()
+        //{
+        //    VisualStudioInstance instance;
+        //    string vswhere;
+        //    string vswhereResult;
+        //
+        //    instance = GetVisualStudioInstance();
+        //
+        //    if (instance != null)
+        //    {
+        //        foreach (string path in MsBuildPathArray)
+        //        {
+        //            string file = instance.Path + path;
+        //
+        //            if (File.Exists(file))
+        //            {
+        //                return file;
+        //            }
+        //        }
+        //    }
+        //
+        //    vswhere = GetVswhereFilePath();
+        //
+        //    if (string.IsNullOrWhiteSpace(vswhere))
+        //        return null;
+        //
+        //    vswhereResult = Win32.ShellExecute(
+        //        vswhere,
+        //        "-latest " +
+        //        "-prerelease " +
+        //        "-products * " +
+        //        "-requiresAny " +
+        //        "-requires Microsoft.Component.MSBuild " +
+        //        "-property installationPath "
+        //        );
+        //
+        //    if (string.IsNullOrWhiteSpace(vswhereResult))
+        //        return null;
+        //
+        //    foreach (string path in MsBuildPathArray)
+        //    {
+        //        string file = vswhereResult + path;
+        //
+        //        if (File.Exists(file))
+        //        {
+        //            return file;
+        //        }
+        //    }
+        //
+        //    return null;
+        //}
+
+        public static string ReadAllText(string FileName)
+        {
+            FileStreamOptions options = new FileStreamOptions
+            {
+                Mode = FileMode.Open,
+                Access = FileAccess.Read,
+                Share = FileShare.Read | FileShare.Delete,
+                Options = FileOptions.SequentialScan,
+                BufferSize = 0x1000
+            };
+
+            using (StreamReader sr = new StreamReader(FileName, Utils.UTF8NoBOM, detectEncodingFromByteOrderMarks: true, options))
+            {
+                return sr.ReadToEnd();
+            }
+        }
+
+        public static void WriteAllText(string FileName, string Content)
+        {
+            FileStreamOptions options = new FileStreamOptions
+            {
+                Mode = FileMode.Create,
+                Access = FileAccess.Write,
+                Share = FileShare.None,
+                Options = FileOptions.SequentialScan,
+                BufferSize = 0x1000
+            };
+
+            using (StreamWriter sw = new StreamWriter(FileName, Utils.UTF8NoBOM, options))
+            {
+                sw.Write(Content);
+            }
+        }
+
+        public static byte[] ReadAllBytes(string FileName)
+        {
+            FileStreamOptions options = new FileStreamOptions
+            {
+                Mode = FileMode.Open,
+                Access = FileAccess.Read,
+                Share = FileShare.Read | FileShare.Delete,
+                Options = FileOptions.SequentialScan,
+                BufferSize = 0x1000
+            };
+
+            long length = Win32.GetFileSize(FileName);
+
+            byte[] buffer = new byte[length];
+
+            using (MemoryStream stream = new MemoryStream(buffer, true))
+            using (FileStream sr = new FileStream(FileName, options))
+            {
+                sr.CopyTo(stream);
+            }
+
+            return buffer;
+        }
+
+        public static void WriteAllBytes(string FileName, byte[] Buffer)
+        {
+            FileStreamOptions options = new FileStreamOptions
+            {
+                Mode = FileMode.Create,
+                Access = FileAccess.Write,
+                Share = FileShare.Write | FileShare.Delete,
+                Options = FileOptions.SequentialScan,
+                PreallocationSize = Buffer.LongLength,
+                BufferSize = 0x1000,
+            };
+
+            using (MemoryStream stream = new MemoryStream(Buffer, true))
+            using (FileStream filestream = new FileStream(FileName, options))
+            {
+                stream.CopyTo(filestream);
+            }
+        }
+
+        public static bool IsSpanNullOrWhiteSpace(ReadOnlySpan<char> value)
+        {
+            if (value == null)
+                return true;
+            if (value.IsEmpty)
+                return true;
+            if (value.IsWhiteSpace())
+                return true;
 
             return false;
         }
 
-        public static bool UploadFile(string FileName)
+        public static string ExpandFullPath(string Name)
         {
-            try
-            {
-                string AppVeyorFilePath = Win32.SearchFile("appveyor.exe");
+            string value = Environment.ExpandEnvironmentVariables(Name);
 
-                if (!string.IsNullOrWhiteSpace(AppVeyorFilePath) && !string.IsNullOrWhiteSpace(FileName))
+            value = Path.GetFullPath(value);
+
+            return value;
+        }
+
+        public static Dictionary<string, string> GetSystemEnvironmentBlock()
+        {
+            if (EnvironmentBlock.Count == 0)
+            {
+                if (NativeMethods.CreateEnvironmentBlock(out IntPtr block, IntPtr.Zero, false))
                 {
-                    Win32.ShellExecute("appveyor", $"PushArtifact \"{FileName}\" ");
-                    return true;
+                    IntPtr offset = block;
+
+                    while (offset != IntPtr.Zero)
+                    {
+                        string variable = Marshal.PtrToStringUni(offset);
+
+                        if (string.IsNullOrEmpty(variable))
+                            break;
+
+                        string[] parts = variable.Split('=', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                        EnvironmentBlock.Add(parts[0], parts.Length <= 1 ? string.Empty : parts[1]);
+
+                        offset = new IntPtr(offset.ToInt64() + (variable.Length + 1) * sizeof(char));
+                    }
+
+                    NativeMethods.DestroyEnvironmentBlock(block);
                 }
             }
-            catch (Exception ex)
-            {
-                Program.PrintColorMessage("[UploadFile] " + ex, ConsoleColor.Red, true);
-            }
 
-            return false;
+            return EnvironmentBlock;
+        }
+
+        public static string GetBuildLogPath(string Solution, string Platform, BuildFlags Flags)
+        {
+            return $"{Path.GetFileNameWithoutExtension(Solution)}{(Flags.HasFlag(BuildFlags.BuildDebug) ? "Debug" : "Release")}{Platform}";
         }
     }
 
-    public class VisualStudioInstance : IComparable, IComparable<VisualStudioInstance>
-    {
-        public bool IsLaunchable { get; }
-        public bool IsComplete { get; }
-        public string Name { get; }
-        public string Path { get; }
-        public string Version { get; }
-        public string DisplayName { get; }
-        public string ResolvePath { get; }
-        public string ProductPath { get; }
-        public string InstanceId { get; }
-        public InstanceState State { get; }
-        public List<VisualStudioPackage> Packages { get; }
-
-        public VisualStudioInstance()
-        {
-            this.Packages = new List<VisualStudioPackage>();
-        }
-
-        public VisualStudioInstance(ISetupInstance2 FromInstance)
-        {
-            this.Packages = new List<VisualStudioPackage>();
-            this.IsLaunchable = FromInstance.IsLaunchable();
-            this.IsComplete = FromInstance.IsComplete();
-            this.Name = FromInstance.GetInstallationName();
-            this.Path = FromInstance.GetInstallationPath();
-            this.Version = FromInstance.GetInstallationVersion();
-            this.DisplayName = FromInstance.GetDisplayName();
-            this.ResolvePath = FromInstance.ResolvePath();
-            this.InstanceId = FromInstance.GetInstanceId();
-            this.ProductPath = FromInstance.GetProductPath();
-            this.State = FromInstance.GetState();
-
-            var packages = FromInstance.GetPackages();
-            foreach (var item in packages)
-            {
-                this.Packages.Add(new VisualStudioPackage(item));
-            }
-        }
-
-        private VisualStudioPackage GetLatestSdkPackage()
-        {
-            var found = this.Packages.FindAll(p => p.Id.StartsWith("Microsoft.VisualStudio.Component.Windows10SDK.", StringComparison.OrdinalIgnoreCase));
-
-            if (found == null)
-                return null;
-            if (found.Count == 0)
-                return null;
-
-            found.Sort((p1, p2) => string.Compare(p1.Id, p2.Id, StringComparison.OrdinalIgnoreCase));
-
-            return found[found.Count - 1];
-        }
-
-        public string GetWindowsSdkVersion()
-        {
-            VisualStudioPackage package = GetLatestSdkPackage();
-
-            if (package == null)
-                return string.Empty;
-
-            return package.Id.Substring("Microsoft.VisualStudio.Component.Windows10SDK.".Length);
-        }
-
-        public string GetWindowsSdkFullVersion()
-        {
-            VisualStudioPackage package = GetLatestSdkPackage();
-
-            if (package == null)
-                return string.Empty;
-
-            return package.Version;
-        }
-
-        public bool HasRequiredDependency
-        {
-            get
-            {
-                bool hasbuild = false;
-                bool hasruntimes = false;
-                bool haswindowssdk = false;
-                //string[] vctoolsPackageArray =
-                //{
-                //    "Microsoft.Component.MSBuild",
-                //    "Microsoft.VisualStudio.Component.Windows10SDK.17134",
-                //    "Microsoft.VisualStudio.Component.Windows10SDK.17763",
-                //    "Microsoft.VisualStudio.Component.Windows10SDK.18362",
-                //    "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
-                //    "Microsoft.VisualStudio.Component.VC.14.20.x86.x64",
-                //    "Microsoft.VisualStudio.Component.VC.14.21.x86.x64",
-                //    "Microsoft.VisualStudio.Component.VC.14.22.x86.x64",
-                //};
-
-                // Microsoft.VisualStudio.Component.VC.Redist.14.Latest
-                // Microsoft.VisualStudio.Component.VC.Tools.x86.x64
-
-                hasbuild = this.Packages.Find(p => p.Id.StartsWith("Microsoft.Component.MSBuild", StringComparison.OrdinalIgnoreCase)) != null;
-                hasruntimes = this.Packages.Find(p => p.Id.StartsWith("Microsoft.VisualStudio.Component.VC", StringComparison.OrdinalIgnoreCase)) != null;
-                haswindowssdk = this.Packages.Find(p => p.Id.StartsWith("Microsoft.VisualStudio.Component.Windows10SDK", StringComparison.OrdinalIgnoreCase)) != null;
-
-                return hasbuild && hasruntimes && haswindowssdk;
-            }
-        }
-
-        public string MissingDependencyList
-        {
-            get
-            {
-                string list = string.Empty;
-                //string[] vctoolsPackageArray =
-                //{
-                //    "Microsoft.Component.MSBuild",
-                //    "Microsoft.VisualStudio.Component.Windows10SDK.17134",
-                //    "Microsoft.VisualStudio.Component.Windows10SDK.17763",
-                //    "Microsoft.VisualStudio.Component.Windows10SDK.18362",
-                //    "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
-                //    "Microsoft.VisualStudio.Component.VC.14.20.x86.x64",
-                //    "Microsoft.VisualStudio.Component.VC.14.21.x86.x64",
-                //    "Microsoft.VisualStudio.Component.VC.14.22.x86.x64",
-                //};
-
-                if (this.Packages.Find(p => p.Id.StartsWith("Microsoft.Component.MSBuild", StringComparison.OrdinalIgnoreCase)) == null)
-                {
-                    list += "MSBuild" + Environment.NewLine;
-                }
-
-                if (this.Packages.Find(p => p.Id.StartsWith("Microsoft.VisualStudio.Component.VC", StringComparison.OrdinalIgnoreCase)) == null)
-                {
-                    list += "VC.14.Redist" + Environment.NewLine;
-                }
-
-                if (this.Packages.Find(p => p.Id.StartsWith("Microsoft.VisualStudio.Component.Windows10SDK", StringComparison.OrdinalIgnoreCase)) == null)
-                {
-                    list += "Windows10SDK" + Environment.NewLine;
-                }
-
-                return list;
-            }
-        }
-
-        public override string ToString()
-        {
-            return this.DisplayName;
-        }
-
-        public int CompareTo(object obj)
-        {
-            if (obj == null)
-                return 1;
-
-            if (obj is VisualStudioInstance instance)
-                return this.Name.CompareTo(instance.Name);
-            else
-                return 1;
-        }
-
-        public int CompareTo(VisualStudioInstance obj)
-        {
-            if (obj == null)
-                return 1;
-
-            return this.Name.CompareTo(obj.Name);
-        }
-    }
-
-    public class VisualStudioPackage : IComparable, IComparable<VisualStudioPackage>
-    {
-        public string Id { get; }
-        public string Version { get; }
-        public string Type { get; }
-        public string UniqueId { get; }
-
-        public VisualStudioPackage(ISetupPackageReference FromPackage)
-        {
-            this.Id = FromPackage.GetId();
-            this.Version = FromPackage.GetVersion();
-            this.Type = FromPackage.GetType();
-            this.UniqueId = FromPackage.GetUniqueId();
-        }
-
-        public override string ToString()
-        {
-            return this.Id;
-        }
-
-        public int CompareTo(object obj)
-        {
-            if (obj == null)
-                return 1;
-
-            if (obj is VisualStudioPackage package)
-                return this.Id.CompareTo(package.Id);
-            else
-                return 1;
-        }
-
-        public int CompareTo(VisualStudioPackage obj)
-        {
-            if (obj == null)
-                return 1;
-
-            return this.Id.CompareTo(obj.Id);
-        }
-    }
-
-    [DataContract]
     public class BuildUpdateRequest
     {
-        [DataMember(Name = "build_version")] public string BuildVersion { get; set; }
-        [DataMember(Name = "build_commit")] public string BuildCommit { get; set; }
-        [DataMember(Name = "build_updated")] public string BuildUpdated { get; set; }
-        [DataMember(Name = "build_message")] public string BuildMessage { get; set; }
+        [JsonPropertyName("build_id")] public string BuildId { get; init; }
+        [JsonPropertyName("build_display")] public string BuildDisplay { get; init; }
+        [JsonPropertyName("build_version")] public string BuildVersion { get; init; }
+        [JsonPropertyName("build_commit")] public string BuildCommit { get; init; }
+        [JsonPropertyName("build_updated")] public string BuildUpdated { get; init; }
 
-        [DataMember(Name = "bin_url")] public string BinUrl { get; set; }
-        [DataMember(Name = "bin_length")] public string BinLength { get; set; }
-        [DataMember(Name = "bin_hash")] public string BinHash { get; set; }
-        [DataMember(Name = "bin_sig")] public string BinSig { get; set; }
+        [JsonPropertyName("bin_url")] public string BinUrl { get; init; }
+        [JsonPropertyName("bin_length")] public string BinLength { get; init; }
+        [JsonPropertyName("bin_hash")] public string BinHash { get; init; }
+        [JsonPropertyName("bin_sig")] public string BinSig { get; init; }
 
-        [DataMember(Name = "setup_url")] public string SetupUrl { get; set; }
-        [DataMember(Name = "setup_length")] public string SetupLength { get; set; }
-        [DataMember(Name = "setup_hash")] public string SetupHash { get; set; }
-        [DataMember(Name = "setup_sig")] public string SetupSig { get; set; }
+        [JsonPropertyName("setup_url")] public string SetupUrl { get; init; }
+        [JsonPropertyName("setup_length")] public string SetupLength { get; init; }
+        [JsonPropertyName("setup_hash")] public string SetupHash { get; init; }
+        [JsonPropertyName("setup_sig")] public string SetupSig { get; init; }
 
-        [DataMember(Name = "websetup_url")] public string WebSetupUrl { get; set; }
-        [DataMember(Name = "websetup_version")] public string WebSetupVersion { get; set; }
-        [DataMember(Name = "websetup_length")] public string WebSetupLength { get; set; }
-        [DataMember(Name = "websetup_hash")] public string WebSetupHash { get; set; }
-        [DataMember(Name = "websetup_sig")] public string WebSetupSig { get; set; }
+        [JsonPropertyName("release_bin_url")] public string ReleaseBinUrl { get; init; }
+        [JsonPropertyName("release_bin_length")] public string ReleaseBinLength { get; init; }
+        [JsonPropertyName("release_bin_hash")] public string ReleaseBinHash { get; init; }
+        [JsonPropertyName("release_bin_sig")] public string ReleaseBinSig { get; init; }
 
-        [DataMember(Name = "message")] public string Message { get; set; }
-        [DataMember(Name = "changelog")] public string Changelog { get; set; }
+        [JsonPropertyName("release_setup_url")] public string ReleaseSetupUrl { get; init; }
+        [JsonPropertyName("release_setup_length")] public string ReleaseSetupLength { get; init; }
+        [JsonPropertyName("release_setup_hash")] public string ReleaseSetupHash { get; init; }
+        [JsonPropertyName("release_setup_sig")] public string ReleaseSetupSig { get; init; }
     }
+
+    public class GithubReleasesRequest
+    {
+        [JsonPropertyName("tag_name")] public string ReleaseTag { get; init; }
+        [JsonPropertyName("target_commitish")] public string Branch { get; init; }
+        [JsonPropertyName("name")] public string Name { get; init; }
+        [JsonPropertyName("body")] public string Description { get; init; }
+
+        [JsonPropertyName("draft")] public bool Draft { get; init; }
+        [JsonPropertyName("prerelease")] public bool Prerelease { get; init; }
+        [JsonPropertyName("generate_release_notes")] public bool GenerateReleaseNotes { get; init; }
+
+        public override string ToString()
+        {
+            return this.ReleaseTag;
+        }
+    }
+
+    public class GithubReleasesResponse
+    {
+        [JsonPropertyName("id")] public long ID { get; init; }
+        [JsonPropertyName("upload_url")] public string UploadUrl { get; init; }
+        [JsonPropertyName("html_url")] public string HtmlUrl { get; init; }
+        [JsonPropertyName("assets")] public List<GithubAssetsResponse> Assets { get; init; }
+        [JsonIgnore] public string ReleaseId { get { return this.ID.ToString(); } }
+
+        public override string ToString()
+        {
+            return this.ReleaseId;
+        }
+    }
+
+    public class GithubAssetsResponse
+    {
+        [JsonPropertyName("name")] public string Name { get; init; }
+        [JsonPropertyName("label")] public string Label { get; init; }
+        [JsonPropertyName("size")] public long Size { get; init; }
+        [JsonPropertyName("state")] public string State { get; init; }
+        [JsonPropertyName("browser_download_url")] public string DownloadUrl { get; init; }
+
+        [JsonIgnore]
+        public bool Uploaded
+        {
+            get
+            {
+                return !string.IsNullOrWhiteSpace(this.State) && string.Equals(this.State, "uploaded", StringComparison.OrdinalIgnoreCase);
+            }
+        }
+
+        public override string ToString()
+        {
+            return this.Name;
+        }
+    }
+
+    public class GithubAuthor
+    {
+        [JsonPropertyName("name")]
+        public string name { get; init; }
+
+        [JsonPropertyName("email")]
+        public string email { get; init; }
+
+        [JsonPropertyName("date")]
+        public DateTime date { get; init; }
+
+        [JsonPropertyName("login")]
+        public string login { get; init; }
+
+        [JsonPropertyName("id")]
+        public long id { get; init; }
+
+        [JsonPropertyName("node_id")]
+        public string node_id { get; init; }
+
+        [JsonPropertyName("avatar_url")]
+        public string avatar_url { get; init; }
+
+        [JsonPropertyName("gravatar_id")]
+        public string gravatar_id { get; init; }
+
+        [JsonPropertyName("url")]
+        public string url { get; init; }
+
+        [JsonPropertyName("html_url")]
+        public string html_url { get; init; }
+
+        [JsonPropertyName("followers_url")]
+        public string followers_url { get; init; }
+
+        [JsonPropertyName("following_url")]
+        public string following_url { get; init; }
+
+        [JsonPropertyName("gists_url")]
+        public string gists_url { get; init; }
+
+        [JsonPropertyName("starred_url")]
+        public string starred_url { get; init; }
+
+        [JsonPropertyName("subscriptions_url")]
+        public string subscriptions_url { get; init; }
+
+        [JsonPropertyName("organizations_url")]
+        public string organizations_url { get; init; }
+
+        [JsonPropertyName("repos_url")]
+        public string repos_url { get; init; }
+
+        [JsonPropertyName("events_url")]
+        public string events_url { get; init; }
+
+        [JsonPropertyName("received_events_url")]
+        public string received_events_url { get; init; }
+
+        [JsonPropertyName("type")]
+        public string type { get; init; }
+
+        [JsonPropertyName("site_admin")]
+        public bool site_admin { get; init; }
+    }
+
+    public class GithubCommit
+    {
+        [JsonPropertyName("author")]
+        public GithubAuthor author { get; init; }
+
+        [JsonPropertyName("committer")]
+        public GithubCommitAuthor committer { get; init; }
+
+        [JsonPropertyName("message")]
+        public string message { get; init; }
+
+        [JsonPropertyName("tree")]
+        public GithubCommitTree tree { get; init; }
+
+        [JsonPropertyName("url")]
+        public string url { get; init; }
+
+        [JsonPropertyName("comment_count")]
+        public int comment_count { get; init; }
+
+        [JsonPropertyName("verification")]
+        public GithubCommitVerification verification { get; init; }
+    }
+
+    public class GithubCommitAuthor
+    {
+        [JsonPropertyName("name")]
+        public string name { get; init; }
+
+        [JsonPropertyName("email")]
+        public string email { get; init; }
+
+        [JsonPropertyName("date")]
+        public DateTime date { get; init; }
+
+        [JsonPropertyName("login")]
+        public string login { get; init; }
+
+        [JsonPropertyName("id")]
+        public int id { get; init; }
+
+        [JsonPropertyName("node_id")]
+        public string node_id { get; init; }
+
+        [JsonPropertyName("avatar_url")]
+        public string avatar_url { get; init; }
+
+        [JsonPropertyName("gravatar_id")]
+        public string gravatar_id { get; init; }
+
+        [JsonPropertyName("url")]
+        public string url { get; init; }
+
+        [JsonPropertyName("html_url")]
+        public string html_url { get; init; }
+
+        [JsonPropertyName("followers_url")]
+        public string followers_url { get; init; }
+
+        [JsonPropertyName("following_url")]
+        public string following_url { get; init; }
+
+        [JsonPropertyName("gists_url")]
+        public string gists_url { get; init; }
+
+        [JsonPropertyName("starred_url")]
+        public string starred_url { get; init; }
+
+        [JsonPropertyName("subscriptions_url")]
+        public string subscriptions_url { get; init; }
+
+        [JsonPropertyName("organizations_url")]
+        public string organizations_url { get; init; }
+
+        [JsonPropertyName("repos_url")]
+        public string repos_url { get; init; }
+
+        [JsonPropertyName("events_url")]
+        public string events_url { get; init; }
+
+        [JsonPropertyName("received_events_url")]
+        public string received_events_url { get; init; }
+
+        [JsonPropertyName("type")]
+        public string type { get; init; }
+
+        [JsonPropertyName("site_admin")]
+        public bool site_admin { get; init; }
+    }
+
+    //public class GithubFile
+    //{
+    //    [JsonPropertyName("sha")]
+    //    public string sha { get; init; }
+    //
+    //    [JsonPropertyName("filename")]
+    //    public string filename { get; init; }
+    //
+    //    [JsonPropertyName("status")]
+    //    public string status { get; init; }
+    //
+    //    [JsonPropertyName("additions")]
+    //    public int additions { get; init; }
+    //
+    //    [JsonPropertyName("deletions")]
+    //    public int deletions { get; init; }
+    //
+    //    [JsonPropertyName("changes")]
+    //    public int changes { get; init; }
+    //
+    //    [JsonPropertyName("blob_url")]
+    //    public string blob_url { get; init; }
+    //
+    //    [JsonPropertyName("raw_url")]
+    //    public string raw_url { get; init; }
+    //
+    //    [JsonPropertyName("contents_url")]
+    //    public string contents_url { get; init; }
+    //
+    //    [JsonPropertyName("patch")]
+    //    public string patch { get; init; }
+    //}
+    //
+    //public class GithubParent
+    //{
+    //    [JsonPropertyName("sha")]
+    //    public string sha { get; init; }
+    //
+    //    [JsonPropertyName("url")]
+    //    public string url { get; init; }
+    //
+    //    [JsonPropertyName("html_url")]
+    //    public string html_url { get; init; }
+    //}
+
+    public class GithubCommitResponse
+    {
+        [JsonPropertyName("sha")]
+        public string sha { get; init; }
+
+        [JsonPropertyName("node_id")]
+        public string node_id { get; init; }
+
+        [JsonPropertyName("commit")]
+        public GithubCommit commit { get; init; }
+
+        [JsonPropertyName("url")]
+        public string url { get; init; }
+
+        [JsonPropertyName("html_url")]
+        public string html_url { get; init; }
+
+        [JsonPropertyName("comments_url")]
+        public string comments_url { get; init; }
+
+        [JsonPropertyName("author")]
+        public GithubAuthor author { get; init; }
+
+        [JsonPropertyName("committer")]
+        public GithubCommitAuthor committer { get; init; }
+
+        //[JsonPropertyName("parents")]
+        //public List<GithubParent> parents { get; init; }
+
+        [JsonPropertyName("stats")]
+        public GithubCommitStats stats { get; init; }
+
+        //[JsonPropertyName("files")]
+        //public List<GithubFile> files { get; init; }
+    }
+
+    public class GithubCommitStats
+    {
+        [JsonPropertyName("total")]
+        public int total { get; init; }
+
+        [JsonPropertyName("additions")]
+        public int additions { get; init; }
+
+        [JsonPropertyName("deletions")]
+        public int deletions { get; init; }
+    }
+
+    public class GithubCommitTree
+    {
+        [JsonPropertyName("sha")]
+        public string sha { get; init; }
+
+        [JsonPropertyName("url")]
+        public string url { get; init; }
+    }
+
+    public class GithubCommitVerification
+    {
+        [JsonPropertyName("verified")]
+        public bool verified { get; init; }
+
+        [JsonPropertyName("reason")]
+        public string reason { get; init; }
+
+        [JsonPropertyName("signature")]
+        public string signature { get; init; }
+
+        [JsonPropertyName("payload")]
+        public string payload { get; init; }
+    }
+
+    [JsonSerializable(typeof(BuildUpdateRequest))]
+    [JsonSourceGenerationOptions(DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull, GenerationMode = JsonSourceGenerationMode.Default)]
+    public partial class BuildUpdateRequestContext : JsonSerializerContext
+    {
+
+    }
+
+    [JsonSerializable(typeof(GithubReleasesRequest))]
+    [JsonSourceGenerationOptions(DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull, GenerationMode = JsonSourceGenerationMode.Default)]
+    public partial class GithubReleasesRequestContext : JsonSerializerContext
+    {
+
+    }
+
+    [JsonSerializable(typeof(GithubReleasesResponse))]
+    [JsonSourceGenerationOptions(DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull, GenerationMode = JsonSourceGenerationMode.Default)]
+    public partial class GithubReleasesResponseContext : JsonSerializerContext
+    {
+
+    }
+
+    [JsonSerializable(typeof(GithubAssetsResponse))]
+    [JsonSourceGenerationOptions(DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull, GenerationMode = JsonSourceGenerationMode.Default)]
+    public partial class GithubAssetsResponseContext : JsonSerializerContext
+    {
+
+    }
+
+    [JsonSerializable(typeof(GithubCommitResponse))]
+    [JsonSourceGenerationOptions(DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull, GenerationMode = JsonSourceGenerationMode.Default)]
+    public partial class GithubCommitResponseContext : JsonSerializerContext
+    {
+
+    }
+    
 
     public static class Extextensions
     {
@@ -750,180 +1103,64 @@ namespace CustomBuildTool
             double asGb = Math.Round((double)value / OneGb, decimalPlaces);
             double asMb = Math.Round((double)value / OneMb, decimalPlaces);
             double asKb = Math.Round((double)value / OneKb, decimalPlaces);
-            string chosenValue = asTb > 1 ? string.Format("{0}Tb", asTb)
-                : asGb > 1 ? string.Format("{0}Gb", asGb)
-                : asMb > 1 ? string.Format("{0}Mb", asMb)
-                : asKb > 1 ? string.Format("{0}Kb", asKb)
-                : string.Format("{0}B", Math.Round((double)value, decimalPlaces));
+            string chosenValue = asTb > 1 ? $"{asTb}Tb"
+                : asGb > 1 ? $"{asGb}Gb"
+                : asMb > 1 ? $"{asMb}Mb"
+                : asKb > 1 ? $"{asKb}Kb"
+                : $"{Math.Round((double)value, decimalPlaces)}B";
             return chosenValue;
         }
     }
 
     [Flags]
-    public enum ConsoleMode : uint
+    public enum BuildFlags
     {
-        DEFAULT,
-        ENABLE_PROCESSED_INPUT = 0x0001,
-        ENABLE_LINE_INPUT = 0x0002,
-        ENABLE_ECHO_INPUT = 0x0004,
-        ENABLE_WINDOW_INPUT = 0x0008,
-        ENABLE_MOUSE_INPUT = 0x0010,
-        ENABLE_INSERT_MODE = 0x0020,
-        ENABLE_QUICK_EDIT_MODE = 0x0040,
-        ENABLE_EXTENDED_FLAGS = 0x0080,
-        ENABLE_AUTO_POSITION = 0x0100,
-        ENABLE_PROCESSED_OUTPUT = 0x0001,
-        ENABLE_WRAP_AT_EOL_OUTPUT = 0x0002,
-        ENABLE_VIRTUAL_TERMINAL_PROCESSING = 0x0004,
-        DISABLE_NEWLINE_AUTO_RETURN = 0x0008,
-        ENABLE_LVB_GRID_WORLDWIDE = 0x0010,
-        ENABLE_VIRTUAL_TERMINAL_INPUT = 0x0200
+        None,
+        Build32bit = 1,
+        Build64bit = 2,
+        BuildArm64bit = 4,
+        BuildDebug = 8,
+        BuildRelease = 16,
+        BuildVerbose = 32,
+        BuildApi = 64,
+        BuildMsix = 128,
+
+        Debug = Build32bit | Build64bit | BuildArm64bit | BuildDebug | BuildApi | BuildVerbose,
+        Release = Build32bit | Build64bit | BuildArm64bit | BuildRelease | BuildApi | BuildVerbose,
+        All = Build32bit | Build64bit | BuildArm64bit | BuildDebug | BuildRelease | BuildApi | BuildVerbose,
     }
 
-    [Flags]
-    public enum InstanceState : uint
+    /// <summary>
+    /// https://learn.microsoft.com/en-us/dotnet/csharp/whats-new/tutorials/interpolated-string-handler
+    /// </summary>
+    [InterpolatedStringHandler]
+    public readonly ref struct LogInterpolatedStringHandler
     {
-        None = 0u,
-        Local = 1u,
-        Registered = 2u,
-        NoRebootRequired = 4u,
-        NoErrors = 8u,
-        Complete = 4294967295u
-    }
+        public readonly StringBuilder builder;
 
-    [ComImport, ClassInterface(ClassInterfaceType.None), Guid("177F0C4A-1CD3-4DE7-A32C-71DBBB9FA36D")]
-    public class SetupConfigurationClass
-    {
+        public LogInterpolatedStringHandler(int literalLength, int formattedCount)
+        {
+            builder = new StringBuilder(literalLength);
+        }
 
-    }
+        public void AppendLiteral(string s)
+        {
+            builder.Append(s.AsSpan());
+        }
 
-    [ComImport, CoClass(typeof(SetupConfigurationClass)), Guid("42843719-DB4C-46C2-8E7C-64F1816EFD5B")]
-    public interface ISetupConfigurationClass : ISetupConfiguration2, ISetupConfiguration
-    {
+        public void AppendFormatted<T>(T t)
+        {
+            builder.Append(t?.ToString());
+        }
 
-    }
+        public void AppendFormatted<T>(T t, string format) where T : IFormattable
+        {
+            builder.Append(t?.ToString(format, null));
+        }
 
-    [ComImport, Guid("6380BCFF-41D3-4B2E-8B2E-BF8A6810C848"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-    public interface IEnumSetupInstances
-    {
-        void Next(
-            [MarshalAs(UnmanagedType.U4)] [In] int celt,
-            [MarshalAs(UnmanagedType.LPArray, ArraySubType = UnmanagedType.Interface)] [Out] ISetupInstance[] rgelt,
-            [MarshalAs(UnmanagedType.U4)] out int pceltFetched
-            );
-
-        void Skip([MarshalAs(UnmanagedType.U4)] [In] int celt);
-        void Reset();
-        IEnumSetupInstances Clone();
-    }
-
-    [ComImport, Guid("42843719-DB4C-46C2-8E7C-64F1816EFD5B"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-    public interface ISetupConfiguration
-    {
-        IEnumSetupInstances EnumInstances();
-        ISetupInstance GetInstanceForCurrentProcess();
-        ISetupInstance GetInstanceForPath([In] string path);
-    }
-
-    [ComImport, Guid("26AAB78C-4A60-49D6-AF3B-3C35BC93365D"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-    public interface ISetupConfiguration2 : ISetupConfiguration
-    {
-        IEnumSetupInstances EnumAllInstances();
-    }
-
-    [ComImport, Guid("46DCCD94-A287-476A-851E-DFBC2FFDBC20"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-    public interface ISetupErrorState
-    {
-        ISetupFailedPackageReference[] GetFailedPackages();
-        ISetupPackageReference[] GetSkippedPackages();
-    }
-
-    [ComImport, Guid("E73559CD-7003-4022-B134-27DC650B280F"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-    public interface ISetupFailedPackageReference : ISetupPackageReference
-    {
-        new string GetId();
-        new string GetVersion();
-        new string GetChip();
-        new string GetLanguage();
-        new string GetBranch();
-        new string GetType();
-        new string GetUniqueId();
-        new bool GetIsExtension();
-    }
-
-    [ComImport, Guid("42B21B78-6192-463E-87BF-D577838F1D5C"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-    public interface ISetupHelper
-    {
-        /// <summary>
-        /// Parses a dotted quad version string into a 64-bit unsigned integer.
-        /// </summary>
-        /// <param name="version">The dotted quad version string to parse, e.g. 1.2.3.4.</param>
-        /// <returns>A 64-bit unsigned integer representing the version. You can compare this to other versions.</returns>
-        ulong ParseVersion([In] string version);
-
-        /// <summary>
-        /// Parses a dotted quad version string into a 64-bit unsigned integer.
-        /// </summary>
-        /// <param name="versionRange">The string containing 1 or 2 dotted quad version strings to parse, e.g. [1.0,) that means 1.0.0.0 or newer.</param>
-        /// <param name="minVersion">A 64-bit unsigned integer representing the minimum version, which may be 0. You can compare this to other versions.</param>
-        /// <param name="maxVersion">A 64-bit unsigned integer representing the maximum version, which may be MAXULONGLONG. You can compare this to other versions.</param>
-        void ParseVersionRange([In] string versionRange, out ulong minVersion, out ulong maxVersion);
-    }
-
-    [ComImport, Guid("B41463C3-8866-43B5-BC33-2B0676F7F42E"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-    public interface ISetupInstance
-    {
-        string GetInstanceId();
-        System.Runtime.InteropServices.ComTypes.FILETIME GetInstallDate();
-        string GetInstallationName();
-        string GetInstallationPath();
-        string GetInstallationVersion();
-        string GetDisplayName([In] int lcid = 0);
-        string GetDescription([In] int lcid = 0);
-        string ResolvePath([In] string pwszRelativePath = null);
-    }
-
-    [ComImport, Guid("89143C9A-05AF-49B0-B717-72E218A2185C"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-    public interface ISetupInstance2 : ISetupInstance
-    {
-        new string GetInstanceId();
-        new System.Runtime.InteropServices.ComTypes.FILETIME GetInstallDate();
-        new string GetInstallationName();
-        new string GetInstallationPath();
-        new string GetInstallationVersion();
-        new string GetDisplayName([MarshalAs(UnmanagedType.U4)] [In] int lcid = 0);
-        new string GetDescription([MarshalAs(UnmanagedType.U4)] [In] int lcid = 0);
-        new string ResolvePath([MarshalAs(21)] [In] string pwszRelativePath = null);
-        InstanceState GetState();
-        ISetupPackageReference[] GetPackages();
-        ISetupPackageReference GetProduct();
-        string GetProductPath();
-        ISetupErrorState GetErrors();
-        bool IsLaunchable();
-        bool IsComplete();
-        ISetupPropertyStore GetProperties();
-        string GetEnginePath();
-    }
-
-    [ComImport, Guid("DA8D8A16-B2B6-4487-A2F1-594CCCCD6BF5"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-    public interface ISetupPackageReference
-    {
-        string GetId();
-        string GetVersion();
-        string GetChip();
-        string GetLanguage();
-        string GetBranch();
-        string GetType();
-        string GetUniqueId();
-        bool GetIsExtension();
-    }
-
-    [ComImport, Guid("c601c175-a3be-44bc-91f6-4568d230fc83"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-    public interface ISetupPropertyStore
-    {
-        [return: MarshalAs(UnmanagedType.SafeArray, SafeArraySubType = VarEnum.VT_BSTR)]
-        string[] GetNames();
-
-        object GetValue([MarshalAs(UnmanagedType.LPWStr)] [In] string pwszName);
+        internal string GetFormattedText()
+        {
+            return builder.ToString();
+        }
     }
 }

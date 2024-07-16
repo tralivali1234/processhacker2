@@ -1,23 +1,13 @@
 /*
- * Process Hacker Extended Tools -
- *   ETW disk monitoring
+ * Copyright (c) 2022 Winsider Seminars & Solutions, Inc.  All rights reserved.
  *
- * Copyright (C) 2011 wj32
+ * This file is part of System Informer.
  *
- * This file is part of Process Hacker.
+ * Authors:
  *
- * Process Hacker is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
+ *     wj32    2011-2013
+ *     dmex    2015-2023
  *
- * Process Hacker is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with Process Hacker.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include "exttools.h"
@@ -84,10 +74,11 @@ VOID EtInitializeDiskInformation(
         );
 
     PhInitializeFreeList(&EtDiskPacketFreeList, sizeof(ETP_DISK_PACKET), 64);
-    RtlInitializeSListHead(&EtDiskPacketListHead);
+    PhInitializeSListHead(&EtDiskPacketListHead);
     EtFileNameHashtable = PhCreateSimpleHashtable(128);
 
-    NtQueryPerformanceCounter(&performanceCounter, &EtpPerformanceFrequency);
+    PhQueryPerformanceCounter(&performanceCounter);
+    PhQueryPerformanceFrequency(&EtpPerformanceFrequency);
 
     EtDiskEnabled = TRUE;
 
@@ -138,7 +129,7 @@ BOOLEAN NTAPI EtpDiskHashtableEqualFunction(
     PET_DISK_ITEM diskItem1 = *(PET_DISK_ITEM *)Entry1;
     PET_DISK_ITEM diskItem2 = *(PET_DISK_ITEM *)Entry2;
 
-    return diskItem1->ProcessId == diskItem2->ProcessId && PhEqualString(diskItem1->FileName, diskItem2->FileName, TRUE);
+    return diskItem1->ProcessId == diskItem2->ProcessId && diskItem1->FileObject == diskItem2->FileObject;
 }
 
 ULONG NTAPI EtpDiskHashtableHashFunction(
@@ -147,12 +138,12 @@ ULONG NTAPI EtpDiskHashtableHashFunction(
 {
     PET_DISK_ITEM diskItem = *(PET_DISK_ITEM *)Entry;
 
-    return (HandleToUlong(diskItem->ProcessId) / 4) ^ PhHashStringRef(&diskItem->FileName->sr, TRUE);
+    return (HandleToUlong(diskItem->ProcessId) / 4) ^ PhHashIntPtr((ULONG_PTR)diskItem->FileObject);
 }
 
 PET_DISK_ITEM EtReferenceDiskItem(
     _In_ HANDLE ProcessId,
-    _In_ PPH_STRING FileName
+    _In_ PVOID FileObject
     )
 {
     ET_DISK_ITEM lookupDiskItem;
@@ -161,7 +152,7 @@ PET_DISK_ITEM EtReferenceDiskItem(
     PET_DISK_ITEM diskItem;
 
     lookupDiskItem.ProcessId = ProcessId;
-    lookupDiskItem.FileName = FileName;
+    lookupDiskItem.FileObject = FileObject;
 
     PhAcquireQueuedLockShared(&EtDiskHashtableLock);
 
@@ -194,13 +185,21 @@ VOID EtDiskProcessDiskEvent(
     )
 {
     PETP_DISK_PACKET packet;
+    PPH_STRING fileName;
 
     if (!EtDiskEnabled)
         return;
 
+    fileName = EtFileObjectToFileName(Event->FileObject);
+
+    // Ignore packets with no file name - this is useless to the user. (wj32)
+
+    if (!fileName)
+        return;
+
     packet = PhAllocateFromFreeList(&EtDiskPacketFreeList);
     memcpy(&packet->Event, Event, sizeof(ET_ETW_DISK_EVENT));
-    packet->FileName = EtFileObjectToFileName(Event->FileObject);
+    packet->FileName = fileName;
     RtlInterlockedPushEntrySList(&EtDiskPacketListHead, &packet->ListEntry);
 }
 
@@ -284,11 +283,7 @@ VOID EtpProcessDiskPacket(
     if (diskEvent->TransferSize == 0)
         return;
 
-    // Ignore packets with no file name - this is useless to the user.
-    if (!Packet->FileName)
-        return;
-
-    diskItem = EtReferenceDiskItem(diskEvent->ClientId.UniqueProcess, Packet->FileName);
+    diskItem = EtReferenceDiskItem(diskEvent->ClientId.UniqueProcess, diskEvent->FileObject);
 
     if (!diskItem)
     {
@@ -297,10 +292,15 @@ VOID EtpProcessDiskPacket(
         // Disk item not found (or the address was re-used), create it.
 
         diskItem = EtCreateDiskItem();
-
+        diskItem->FileObject = diskEvent->FileObject;
         diskItem->ProcessId = diskEvent->ClientId.UniqueProcess;
-        PhSetReference(&diskItem->FileName, Packet->FileName);
-        diskItem->FileNameWin32 = PhGetFileName(diskItem->FileName);
+        PhPrintUInt32(diskItem->ProcessIdString, HandleToUlong(diskItem->ProcessId));
+
+        if (Packet->FileName)
+        {
+            PhSetReference(&diskItem->FileName, Packet->FileName);
+            diskItem->FileNameWin32 = PhGetFileName(diskItem->FileName);
+        }
 
         if (processItem = PhReferenceProcessItem(diskItem->ProcessId))
         {
@@ -312,7 +312,7 @@ VOID EtpProcessDiskPacket(
 
             if (!diskItem->ProcessIconValid && PhTestEvent(&processItem->Stage1Event))
             {
-                diskItem->ProcessIcon = processItem->SmallIcon;
+                diskItem->ProcessIconIndex = processItem->SmallIconIndex;
                 diskItem->ProcessIconValid = TRUE;
             }
 
@@ -515,7 +515,7 @@ VOID NTAPI EtpDiskProcessesUpdatedCallback(
 
                 if (!diskItem->ProcessIconValid && PhTestEvent(&diskItem->ProcessItem->Stage1Event))
                 {
-                    diskItem->ProcessIcon = diskItem->ProcessItem->SmallIcon;
+                    diskItem->ProcessIconIndex = diskItem->ProcessItem->SmallIconIndex;
                     diskItem->ProcessIconValid = TRUE;
                     modified = TRUE;
                 }

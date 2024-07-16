@@ -1,24 +1,13 @@
 /*
- * Process Hacker Extended Tools -
- *   services referencing module
+ * Copyright (c) 2022 Winsider Seminars & Solutions, Inc.  All rights reserved.
  *
- * Copyright (C) 2010-2011 wj32
- * Copyright (C) 2018-2019 dmex
+ * This file is part of System Informer.
  *
- * This file is part of Process Hacker.
+ * Authors:
  *
- * Process Hacker is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
+ *     wj32    2010-2011
+ *     dmex    2018-2019
  *
- * Process Hacker is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with Process Hacker.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include "exttools.h"
@@ -51,12 +40,12 @@ NTSTATUS EtpModuleServicesDialogThreadStart(
 
     PhInitializeAutoPool(&autoPool);
 
-    windowHandle = CreateDialogParam(
+    windowHandle = PhCreateDialog(
         PluginInstance->DllBase,
         MAKEINTRESOURCE(IDD_MODSERVICES),
         NULL,
         EtpModuleServicesDlgProc,
-        (LPARAM)Parameter
+        Parameter
         );
 
     ShowWindow(windowHandle, SW_SHOW);
@@ -109,7 +98,7 @@ ULONG PhpQueryModuleServiceReferences(
     PPH_LIST serviceList;
 
     if (!(I_QueryTagInformation = PhGetModuleProcAddress(L"advapi32.dll", "I_QueryTagInformation")))
-        return ERROR_SUCCESS;
+        return ERROR_PROC_NOT_FOUND;
 
     memset(&namesReferencingModule, 0, sizeof(TAG_INFO_NAMES_REFERENCING_MODULE));
     namesReferencingModule.InParams.dwPid = HandleToUlong(Context->ProcessId);
@@ -127,29 +116,22 @@ ULONG PhpQueryModuleServiceReferences(
 
     if (namesReferencingModule.OutParams.pmszNames)
     {
-        PPH_SERVICE_ITEM serviceItem;
         PWSTR serviceName;
-        ULONG nameLength;
+        PPH_SERVICE_ITEM serviceItem;
 
-        serviceName = namesReferencingModule.OutParams.pmszNames;
-
-        while (TRUE)
+        for (serviceName = namesReferencingModule.OutParams.pmszNames; *serviceName; serviceName += PhCountStringZ(serviceName) + 1)
         {
-            nameLength = (ULONG)PhCountStringZ(serviceName);
-
-            if (nameLength == 0)
-                break;
-
             if (serviceItem = PhReferenceServiceItem(serviceName))
                 PhAddItemList(serviceList, serviceItem);
-
-            serviceName += nameLength + 1;
         }
 
         LocalFree(namesReferencingModule.OutParams.pmszNames);
     }
 
-    *ServiceList = serviceList;
+    if (ServiceList)
+    {
+        *ServiceList = serviceList;
+    }
 
     //if (serviceList->Count == 0)
     //{
@@ -158,7 +140,7 @@ ULONG PhpQueryModuleServiceReferences(
     //    return NULL;
     //}
 
-    return win32Result;
+    return ERROR_SUCCESS;
 }
 
 INT_PTR CALLBACK EtpModuleServicesDlgProc(
@@ -202,8 +184,7 @@ INT_PTR CALLBACK EtpModuleServicesDlgProc(
                 return FALSE;
             }
 
-            SendMessage(hwndDlg, WM_SETICON, ICON_SMALL, (LPARAM)PH_LOAD_SHARED_ICON_SMALL(PhInstanceHandle, MAKEINTRESOURCE(PHAPP_IDI_PROCESSHACKER)));
-            SendMessage(hwndDlg, WM_SETICON, ICON_BIG, (LPARAM)PH_LOAD_SHARED_ICON_LARGE(PhInstanceHandle, MAKEINTRESOURCE(PHAPP_IDI_PROCESSHACKER)));
+            PhSetApplicationWindowIcon(hwndDlg);
 
             serviceItems = PhAllocateCopy(serviceList->Items, serviceList->Count * sizeof(PPH_SERVICE_ITEM));
             context->ServiceListHandle = PhCreateServiceListControl(hwndDlg, serviceItems, serviceList->Count);
@@ -254,15 +235,18 @@ INT_PTR CALLBACK EtpModuleServicesDlgProc(
         break;
     case WM_DESTROY:
         {
-            PhRemoveWindowContext(hwndDlg, PH_WINDOW_CONTEXT_DEFAULT);
-
             if (context->LayoutManager.List) // HACK (dmex)
                 PhDeleteLayoutManager(&context->LayoutManager);
 
             PhDereferenceObject(context->ModuleName);
-            PhFree(context);
 
             PostQuitMessage(0);
+        }
+        break;
+    case WM_NCDESTROY:
+        {
+            PhRemoveWindowContext(hwndDlg, PH_WINDOW_CONTEXT_DEFAULT);
+            PhFree(context);
         }
         break;
     case WM_SIZE:

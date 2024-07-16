@@ -1,23 +1,13 @@
 /*
- * Process Hacker Extended Tools -
- *   unloaded DLLs display
+ * Copyright (c) 2022 Winsider Seminars & Solutions, Inc.  All rights reserved.
  *
- * Copyright (C) 2010-2011 wj32
+ * This file is part of System Informer.
  *
- * This file is part of Process Hacker.
+ * Authors:
  *
- * Process Hacker is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
+ *     wj32    2010-2011
+ *     dmex    2016-2023
  *
- * Process Hacker is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with Process Hacker.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include "exttools.h"
@@ -26,9 +16,11 @@ typedef struct _UNLOADED_DLLS_CONTEXT
 {
     BOOLEAN IsWow64;
     HWND ListViewHandle;
-    PPH_PROCESS_ITEM ProcessItem;
+    HWND ParentWindowHandle;
     PH_LAYOUT_MANAGER LayoutManager;
     PVOID CapturedEventTrace;
+    HANDLE ProcessId;
+    HANDLE QueryHandle;
 } UNLOADED_DLLS_CONTEXT, *PUNLOADED_DLLS_CONTEXT;
 
 INT_PTR CALLBACK EtpUnloadedDllsDlgProc(
@@ -39,17 +31,47 @@ INT_PTR CALLBACK EtpUnloadedDllsDlgProc(
     );
 
 VOID EtShowUnloadedDllsDialog(
+    _In_ HWND ParentWindowHandle,
     _In_ PPH_PROCESS_ITEM ProcessItem
     )
 {
-    PhReferenceObject(ProcessItem);
+    NTSTATUS status;
+    PUNLOADED_DLLS_CONTEXT context;
+    HANDLE queryHandle;
 
-    DialogBoxParam(
+    status = PhOpenProcess(
+        &queryHandle,
+        PROCESS_QUERY_INFORMATION,
+        ProcessItem->ProcessId
+        );
+
+    if (!NT_SUCCESS(status))
+    {
+        status = PhOpenProcess(
+            &queryHandle,
+            PROCESS_QUERY_LIMITED_INFORMATION,
+            ProcessItem->ProcessId
+            );
+    }
+
+    if (!NT_SUCCESS(status))
+    {
+        PhShowStatus(ParentWindowHandle, L"Unable to open the process.", status, 0);
+        return;
+    }
+
+    context = PhAllocateZero(sizeof(UNLOADED_DLLS_CONTEXT));
+    context->ParentWindowHandle = ParentWindowHandle;
+    context->ProcessId = ProcessItem->ProcessId;
+    context->IsWow64 = !!ProcessItem->IsWow64;
+    context->QueryHandle = queryHandle;
+
+    PhDialogBox(
         PluginInstance->DllBase,
         MAKEINTRESOURCE(IDD_UNLOADEDDLLS),
-        NULL,
+        !!PhGetIntegerSetting(L"ForceNoParent") ? NULL : ParentWindowHandle,
         EtpUnloadedDllsDlgProc,
-        (LPARAM)ProcessItem
+        context
         );
 }
 
@@ -59,41 +81,38 @@ NTSTATUS EtpRefreshUnloadedDlls(
     )
 {
     NTSTATUS status;
-#ifdef _WIN64
-    BOOLEAN isWow64;
-#endif
     ULONG capturedElementSize;
     ULONG capturedElementCount;
     PVOID capturedEventTrace = NULL;
-    ULONG i;
     PVOID currentEvent;
+    ULONG i;
 
 #ifdef _WIN64
-    if (!Context->ProcessItem->QueryHandle)
+    if (!Context->QueryHandle)
         return STATUS_FAIL_CHECK;
 
-    if (!NT_SUCCESS(status = PhGetProcessIsWow64(Context->ProcessItem->QueryHandle, &isWow64)))
-        return status;
-
-    Context->IsWow64 = isWow64;
-
-    if (isWow64)
+    if (Context->IsWow64)
     {
         PPH_STRING eventTraceString;
+        ULONG capturedEventTraceLength;
 
         if (!PhUiConnectToPhSvcEx(hwndDlg, Wow64PhSvcMode, FALSE))
             return STATUS_FAIL_CHECK;
 
-        if (!NT_SUCCESS(status = CallGetProcessUnloadedDlls(Context->ProcessItem->ProcessId, &eventTraceString)))
+        if (!NT_SUCCESS(status = CallGetProcessUnloadedDlls(Context->ProcessId, &eventTraceString)))
         {
             PhUiDisconnectFromPhSvc();
             return status;
         }
 
-        capturedEventTrace = PhAllocate(sizeof(RTL_UNLOAD_EVENT_TRACE32) * RTL_UNLOAD_EVENT_TRACE_NUMBER);
-        memset(capturedEventTrace, 0, sizeof(RTL_UNLOAD_EVENT_TRACE32) * RTL_UNLOAD_EVENT_TRACE_NUMBER);
+        capturedEventTraceLength = sizeof(RTL_UNLOAD_EVENT_TRACE32) * RTL_UNLOAD_EVENT_TRACE_NUMBER;
+        capturedEventTrace = PhAllocateZero(capturedEventTraceLength);
 
-        if (!PhHexStringToBuffer(&eventTraceString->sr, (PUCHAR)capturedEventTrace))
+        if (!PhHexStringToBufferEx(
+            &eventTraceString->sr,
+            capturedEventTraceLength,
+            capturedEventTrace
+            ))
         {
             PhUiDisconnectFromPhSvc();
 
@@ -133,12 +152,12 @@ NTSTATUS EtpRefreshUnloadedDlls(
             PhSetListViewSubItem(Context->ListViewHandle, lvItemIndex, 2, buffer);
 
             // Size
-            string = PhFormatSize(rtlEvent->SizeOfImage, -1);
+            string = PhFormatSize(rtlEvent->SizeOfImage, ULONG_MAX);
             PhSetListViewSubItem(Context->ListViewHandle, lvItemIndex, 3, string->Buffer);
             PhDereferenceObject(string);
 
             // Time Stamp
-            RtlSecondsSince1970ToTime(rtlEvent->TimeDateStamp, &time);
+            PhSecondsSince1970ToTime(rtlEvent->TimeDateStamp, &time);
             PhLargeIntegerToLocalSystemTime(&systemTime, &time);
             string = PhFormatDateTime(&systemTime);
             PhSetListViewSubItem(Context->ListViewHandle, lvItemIndex, 4, string->Buffer);
@@ -158,17 +177,14 @@ NTSTATUS EtpRefreshUnloadedDlls(
     {
 #endif
         status = PhGetProcessUnloadedDlls(
-            Context->ProcessItem->ProcessId,
+            Context->ProcessId,
             &capturedEventTrace,
             &capturedElementSize,
             &capturedElementCount
             );
 
         if (!NT_SUCCESS(status))
-        {
-            PhShowStatus(NULL, L"Unable to retrieve unload event trace information.", status, 0);
-            return FALSE;
-        }
+            return status;
 
         currentEvent = capturedEventTrace;
 
@@ -201,12 +217,12 @@ NTSTATUS EtpRefreshUnloadedDlls(
             PhSetListViewSubItem(Context->ListViewHandle, lvItemIndex, 2, buffer);
 
             // Size
-            string = PhFormatSize(rtlEvent->SizeOfImage, -1);
+            string = PhFormatSize(rtlEvent->SizeOfImage, ULONG_MAX);
             PhSetListViewSubItem(Context->ListViewHandle, lvItemIndex, 3, string->Buffer);
             PhDereferenceObject(string);
 
             // Time Stamp
-            RtlSecondsSince1970ToTime(rtlEvent->TimeDateStamp, &time);
+            PhSecondsSince1970ToTime(rtlEvent->TimeDateStamp, &time);
             PhLargeIntegerToLocalSystemTime(&systemTime, &time);
             string = PhFormatDateTime(&systemTime);
             PhSetListViewSubItem(Context->ListViewHandle, lvItemIndex, 4, string->Buffer);
@@ -231,7 +247,7 @@ NTSTATUS EtpRefreshUnloadedDlls(
 
     Context->CapturedEventTrace = capturedEventTrace;
 
-    return NT_SUCCESS(status);
+    return status;
 }
 
 static INT NTAPI EtpNumberCompareFunction(
@@ -243,7 +259,7 @@ static INT NTAPI EtpNumberCompareFunction(
 #ifdef _WIN64
     PUNLOADED_DLLS_CONTEXT context = Context;
 
-    if (context->IsWow64)
+    if (context && context->IsWow64)
     {
         PRTL_UNLOAD_EVENT_TRACE32 item1 = Item1;
         PRTL_UNLOAD_EVENT_TRACE32 item2 = Item2;
@@ -269,7 +285,7 @@ static INT NTAPI EtpBaseAddressCompareFunction(
 #ifdef _WIN64
     PUNLOADED_DLLS_CONTEXT context = Context;
 
-    if (context->IsWow64)
+    if (context && context->IsWow64)
     {
         PRTL_UNLOAD_EVENT_TRACE32 item1 = Item1;
         PRTL_UNLOAD_EVENT_TRACE32 item2 = Item2;
@@ -295,7 +311,7 @@ static INT NTAPI EtpSizeCompareFunction(
 #ifdef _WIN64
     PUNLOADED_DLLS_CONTEXT context = Context;
 
-    if (context->IsWow64)
+    if (context && context->IsWow64)
     {
         PRTL_UNLOAD_EVENT_TRACE32 item1 = Item1;
         PRTL_UNLOAD_EVENT_TRACE32 item2 = Item2;
@@ -321,7 +337,7 @@ static INT NTAPI EtpTimeStampCompareFunction(
 #ifdef _WIN64
     PUNLOADED_DLLS_CONTEXT context = Context;
 
-    if (context->IsWow64)
+    if (context && context->IsWow64)
     {
         PRTL_UNLOAD_EVENT_TRACE32 item1 = Item1;
         PRTL_UNLOAD_EVENT_TRACE32 item2 = Item2;
@@ -347,7 +363,7 @@ static INT NTAPI EtpCheckSumCompareFunction(
 #ifdef _WIN64
     PUNLOADED_DLLS_CONTEXT context = Context;
 
-    if (context->IsWow64)
+    if (context && context->IsWow64)
     {
         PRTL_UNLOAD_EVENT_TRACE32 item1 = Item1;
         PRTL_UNLOAD_EVENT_TRACE32 item2 = Item2;
@@ -375,8 +391,7 @@ INT_PTR CALLBACK EtpUnloadedDllsDlgProc(
 
     if (uMsg == WM_INITDIALOG)
     {
-        context = PhAllocateZero(sizeof(UNLOADED_DLLS_CONTEXT));
-        context->ProcessItem = (PPH_PROCESS_ITEM)lParam;
+        context = (PUNLOADED_DLLS_CONTEXT)lParam;
 
         PhSetWindowContext(hwndDlg, PH_WINDOW_CONTEXT_DEFAULT, context);
     }
@@ -398,12 +413,11 @@ INT_PTR CALLBACK EtpUnloadedDllsDlgProc(
             NTSTATUS status;
             HWND lvHandle;
 
-            SendMessage(hwndDlg, WM_SETICON, ICON_SMALL, (LPARAM)PH_LOAD_SHARED_ICON_SMALL(PhInstanceHandle, MAKEINTRESOURCE(PHAPP_IDI_PROCESSHACKER)));
-            SendMessage(hwndDlg, WM_SETICON, ICON_BIG, (LPARAM)PH_LOAD_SHARED_ICON_LARGE(PhInstanceHandle, MAKEINTRESOURCE(PHAPP_IDI_PROCESSHACKER)));
-
             context->ListViewHandle = lvHandle = GetDlgItem(hwndDlg, IDC_LIST);
 
-            PhSetListViewStyle(lvHandle, FALSE, TRUE);
+            PhSetApplicationWindowIcon(hwndDlg);
+
+            PhSetListViewStyle(lvHandle, TRUE, TRUE);
             PhSetControlTheme(lvHandle, L"explorer");
             PhAddListViewColumn(lvHandle, 0, 0, 0, LVCFMT_LEFT, 40, L"No.");
             PhAddListViewColumn(lvHandle, 1, 1, 1, LVCFMT_LEFT, 120, L"Name");
@@ -429,11 +443,11 @@ INT_PTR CALLBACK EtpUnloadedDllsDlgProc(
             if (PhGetIntegerPairSetting(SETTING_NAME_UNLOADED_WINDOW_POSITION).X != 0)
                 PhLoadWindowPlacementFromSetting(SETTING_NAME_UNLOADED_WINDOW_POSITION, SETTING_NAME_UNLOADED_WINDOW_SIZE, hwndDlg);
             else
-                PhCenterWindow(hwndDlg, PhMainWndHandle); // GetParent(hwndDlg)
+                PhCenterWindow(hwndDlg, GetParent(hwndDlg));
 
             if (!NT_SUCCESS(status = EtpRefreshUnloadedDlls(hwndDlg, context)))
             {
-                PhShowStatus(NULL, L"Unable to retrieve unload event trace information.", status, 0);
+                PhShowStatus(context->ParentWindowHandle, L"Unable to retrieve unload event trace information.", status, 0);
                 EndDialog(hwndDlg, IDCANCEL);
                 return FALSE;
             }
@@ -451,7 +465,8 @@ INT_PTR CALLBACK EtpUnloadedDllsDlgProc(
             if (context->CapturedEventTrace)
                 PhFree(context->CapturedEventTrace);
 
-            PhDereferenceObject(context->ProcessItem);
+            if (context->QueryHandle)
+                NtClose(context->QueryHandle);
 
             PhFree(context);
         }
@@ -480,6 +495,65 @@ INT_PTR CALLBACK EtpUnloadedDllsDlgProc(
             PhLayoutManagerLayout(&context->LayoutManager);
         }
         break;
+    case WM_CONTEXTMENU:
+        {
+            if ((HWND)wParam == context->ListViewHandle)
+            {
+                POINT point;
+                PPH_EMENU menu;
+                PPH_EMENU item;
+                PVOID* listviewItems;
+                ULONG numberOfItems;
+
+                point.x = GET_X_LPARAM(lParam);
+                point.y = GET_Y_LPARAM(lParam);
+
+                if (point.x == -1 && point.y == -1)
+                    PhGetListViewContextMenuPoint(context->ListViewHandle, &point);
+
+                PhGetSelectedListViewItemParams(context->ListViewHandle, &listviewItems, &numberOfItems);
+
+                if (numberOfItems != 0)
+                {
+                    menu = PhCreateEMenu();
+                    PhInsertEMenuItem(menu, PhCreateEMenuItem(0, PHAPP_IDC_COPY, L"&Copy", NULL, NULL), ULONG_MAX);
+                    PhInsertCopyListViewEMenuItem(menu, PHAPP_IDC_COPY, context->ListViewHandle);
+
+                    item = PhShowEMenu(
+                        menu,
+                        hwndDlg,
+                        PH_EMENU_SHOW_SEND_COMMAND | PH_EMENU_SHOW_LEFTRIGHT,
+                        PH_ALIGN_LEFT | PH_ALIGN_TOP,
+                        point.x,
+                        point.y
+                        );
+
+                    if (item)
+                    {
+                        if (!PhHandleCopyListViewEMenuItem(item))
+                        {
+                            switch (item->Id)
+                            {
+                            case PHAPP_IDC_COPY:
+                                PhCopyListView(context->ListViewHandle);
+                                break;
+                            }
+                        }
+                    }
+
+                    PhDestroyEMenu(menu);
+                }
+
+                PhFree(listviewItems);
+            }
+        }
+        break;
+    case WM_CTLCOLORBTN:
+        return HANDLE_WM_CTLCOLORBTN(hwndDlg, wParam, lParam, PhWindowThemeControlColor);
+    case WM_CTLCOLORDLG:
+        return HANDLE_WM_CTLCOLORDLG(hwndDlg, wParam, lParam, PhWindowThemeControlColor);
+    case WM_CTLCOLORSTATIC:
+        return HANDLE_WM_CTLCOLORSTATIC(hwndDlg, wParam, lParam, PhWindowThemeControlColor);
     }
 
     return FALSE;

@@ -1,23 +1,12 @@
 /*
- * Process Hacker -
- *   fast resource lock
+ * Copyright (c) 2022 Winsider Seminars & Solutions, Inc.  All rights reserved.
  *
- * Copyright (C) 2009-2010 wj32
+ * This file is part of System Informer.
  *
- * This file is part of Process Hacker.
+ * Authors:
  *
- * Process Hacker is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
+ *     wj32    2009-2010
  *
- * Process Hacker is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with Process Hacker.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include <phbase.h>
@@ -35,15 +24,15 @@
 #define PH_LOCK_EXCLUSIVE_WAKING 0x2
 
 #define PH_LOCK_SHARED_OWNERS_SHIFT 2
-#define PH_LOCK_SHARED_OWNERS_MASK 0x3ff
+#define PH_LOCK_SHARED_OWNERS_MASK 0x3fful
 #define PH_LOCK_SHARED_OWNERS_INC 0x4
 
 #define PH_LOCK_SHARED_WAITERS_SHIFT 12
-#define PH_LOCK_SHARED_WAITERS_MASK 0x3ff
+#define PH_LOCK_SHARED_WAITERS_MASK 0x3fful
 #define PH_LOCK_SHARED_WAITERS_INC 0x1000
 
 #define PH_LOCK_EXCLUSIVE_WAITERS_SHIFT 22
-#define PH_LOCK_EXCLUSIVE_WAITERS_MASK 0x3ff
+#define PH_LOCK_EXCLUSIVE_WAITERS_MASK 0x3fful
 #define PH_LOCK_EXCLUSIVE_WAITERS_INC 0x400000
 
 #define PH_LOCK_EXCLUSIVE_MASK \
@@ -101,7 +90,7 @@ FORCEINLINE ULONG PhpGetSpinCount(
     VOID
     )
 {
-    if ((ULONG)PhSystemBasicInformation.NumberOfProcessors > 1)
+    if (PhSystemBasicInformation.NumberOfProcessors > 1)
         return 4000;
     else
         return 0;

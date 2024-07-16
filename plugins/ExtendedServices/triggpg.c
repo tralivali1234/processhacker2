@@ -1,23 +1,13 @@
 /*
- * Process Hacker Extended Services -
- *   triggers page
+ * Copyright (c) 2022 Winsider Seminars & Solutions, Inc.  All rights reserved.
  *
- * Copyright (C) 2015 wj32
+ * This file is part of System Informer.
  *
- * This file is part of Process Hacker.
+ * Authors:
  *
- * Process Hacker is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
+ *     wj32    2015
+ *     dmex    2016-2023
  *
- * Process Hacker is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with Process Hacker.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include "extsrv.h"
@@ -31,50 +21,54 @@ typedef struct _SERVICE_TRIGGERS_CONTEXT
 } SERVICE_TRIGGERS_CONTEXT, *PSERVICE_TRIGGERS_CONTEXT;
 
 NTSTATUS EspLoadTriggerInfo(
-    _In_ HWND hwndDlg,
+    _In_ HWND WindowHandle,
     _In_ PSERVICE_TRIGGERS_CONTEXT Context
     )
 {
-    NTSTATUS status = STATUS_SUCCESS;
+    NTSTATUS status;
     SC_HANDLE serviceHandle;
 
-    if (!(serviceHandle = PhOpenService(Context->ServiceItem->Name->Buffer, SERVICE_QUERY_CONFIG)))
-        return NTSTATUS_FROM_WIN32(GetLastError());
+    status = PhOpenService(
+        &serviceHandle,
+        SERVICE_QUERY_CONFIG,
+        PhGetString(Context->ServiceItem->Name)
+        );
 
-    EsLoadServiceTriggerInfo(Context->TriggerContext, serviceHandle);
-    CloseServiceHandle(serviceHandle);
+    if (NT_SUCCESS(status))
+    {
+        EsLoadServiceTriggerInfo(Context->TriggerContext, serviceHandle);
+
+        PhCloseServiceHandle(serviceHandle);
+    }
 
     return status;
 }
 
 INT_PTR CALLBACK EspServiceTriggersDlgProc(
-    _In_ HWND hwndDlg,
-    _In_ UINT uMsg,
+    _In_ HWND WindowHandle,
+    _In_ UINT WindowMessage,
     _In_ WPARAM wParam,
     _In_ LPARAM lParam
     )
 {
     PSERVICE_TRIGGERS_CONTEXT context;
 
-    if (uMsg == WM_INITDIALOG)
+    if (WindowMessage == WM_INITDIALOG)
     {
         context = PhAllocate(sizeof(SERVICE_TRIGGERS_CONTEXT));
         memset(context, 0, sizeof(SERVICE_TRIGGERS_CONTEXT));
 
-        PhSetWindowContext(hwndDlg, PH_WINDOW_CONTEXT_DEFAULT, context);
+        PhSetWindowContext(WindowHandle, PH_WINDOW_CONTEXT_DEFAULT, context);
     }
     else
     {
-        context = PhGetWindowContext(hwndDlg, PH_WINDOW_CONTEXT_DEFAULT);
-
-        if (uMsg == WM_DESTROY)
-            PhRemoveWindowContext(hwndDlg, PH_WINDOW_CONTEXT_DEFAULT);
+        context = PhGetWindowContext(WindowHandle, PH_WINDOW_CONTEXT_DEFAULT);
     }
 
     if (!context)
         return FALSE;
 
-    switch (uMsg)
+    switch (WindowMessage)
     {
     case WM_INITDIALOG:
         {
@@ -84,21 +78,21 @@ INT_PTR CALLBACK EspServiceTriggersDlgProc(
             HWND triggersLv;
 
             context->ServiceItem = serviceItem;
-            context->TriggersLv = triggersLv = GetDlgItem(hwndDlg, IDC_TRIGGERS);
+            context->TriggersLv = triggersLv = GetDlgItem(WindowHandle, IDC_TRIGGERS);
             context->TriggerContext = EsCreateServiceTriggerContext(
                 context->ServiceItem,
-                hwndDlg,
+                WindowHandle,
                 triggersLv
                 );
 
-            status = EspLoadTriggerInfo(hwndDlg, context);
+            status = EspLoadTriggerInfo(WindowHandle, context);
 
             if (!NT_SUCCESS(status))
             {
                 PPH_STRING errorMessage = PhGetNtMessage(status);
 
                 PhShowWarning(
-                    hwndDlg,
+                    WindowHandle,
                     L"Unable to query service trigger information: %s",
                     PhGetStringOrDefault(errorMessage, L"Unknown error.")
                     );
@@ -106,17 +100,19 @@ INT_PTR CALLBACK EspServiceTriggersDlgProc(
                 PhClearReference(&errorMessage);
             }
 
-            PhInitializeLayoutManager(&context->LayoutManager, hwndDlg);
-            PhAddLayoutItem(&context->LayoutManager, GetDlgItem(hwndDlg, IDC_TRIGGERS), NULL, PH_ANCHOR_ALL);
-            PhAddLayoutItem(&context->LayoutManager, GetDlgItem(hwndDlg, IDC_NEW), NULL, PH_ANCHOR_BOTTOM | PH_ANCHOR_RIGHT);
-            PhAddLayoutItem(&context->LayoutManager, GetDlgItem(hwndDlg, IDC_EDIT), NULL, PH_ANCHOR_BOTTOM | PH_ANCHOR_RIGHT);
-            PhAddLayoutItem(&context->LayoutManager, GetDlgItem(hwndDlg, IDC_DELETE), NULL, PH_ANCHOR_BOTTOM | PH_ANCHOR_RIGHT);
+            PhInitializeLayoutManager(&context->LayoutManager, WindowHandle);
+            PhAddLayoutItem(&context->LayoutManager, GetDlgItem(WindowHandle, IDC_TRIGGERS), NULL, PH_ANCHOR_ALL);
+            PhAddLayoutItem(&context->LayoutManager, GetDlgItem(WindowHandle, IDC_NEW), NULL, PH_ANCHOR_BOTTOM | PH_ANCHOR_RIGHT);
+            PhAddLayoutItem(&context->LayoutManager, GetDlgItem(WindowHandle, IDC_EDIT), NULL, PH_ANCHOR_BOTTOM | PH_ANCHOR_RIGHT);
+            PhAddLayoutItem(&context->LayoutManager, GetDlgItem(WindowHandle, IDC_DELETE), NULL, PH_ANCHOR_BOTTOM | PH_ANCHOR_RIGHT);
 
-            PhInitializeWindowTheme(hwndDlg, !!PhGetIntegerSetting(L"EnableThemeSupport"));
+            PhInitializeWindowTheme(WindowHandle, !!PhGetIntegerSetting(L"EnableThemeSupport"));
         }
         break;
     case WM_DESTROY:
         {
+            PhRemoveWindowContext(WindowHandle, PH_WINDOW_CONTEXT_DEFAULT);
+
             PhDeleteLayoutManager(&context->LayoutManager);
 
             EsDestroyServiceTriggerContext(context->TriggerContext);
@@ -150,33 +146,33 @@ INT_PTR CALLBACK EspServiceTriggersDlgProc(
             {
             case PSN_KILLACTIVE:
                 {
-                    SetWindowLongPtr(hwndDlg, DWLP_MSGRESULT, FALSE);
+                    SetWindowLongPtr(WindowHandle, DWLP_MSGRESULT, FALSE);
                 }
                 return TRUE;
             case PSN_APPLY:
                 {
-                    ULONG win32Result = ERROR_SUCCESS;
+                    NTSTATUS status = STATUS_SUCCESS;
 
-                    SetWindowLongPtr(hwndDlg, DWLP_MSGRESULT, PSNRET_NOERROR);
+                    SetWindowLongPtr(WindowHandle, DWLP_MSGRESULT, PSNRET_NOERROR);
 
-                    if (!EsSaveServiceTriggerInfo(context->TriggerContext, &win32Result))
+                    if (!EsSaveServiceTriggerInfo(context->TriggerContext, &status))
                     {
-                        if (win32Result == ERROR_CANCELLED)
+                        if (status == STATUS_CANCELLED)
                         {
-                            SetWindowLongPtr(hwndDlg, DWLP_MSGRESULT, PSNRET_INVALID);
+                            SetWindowLongPtr(WindowHandle, DWLP_MSGRESULT, PSNRET_INVALID);
                         }
                         else
                         {
-                            PPH_STRING errorMessage = PhGetWin32Message(win32Result);
+                            PPH_STRING errorMessage = PhGetNtMessage(status);
 
                             if (PhShowMessage(
-                                hwndDlg,
+                                WindowHandle,
                                 MB_ICONERROR | MB_RETRYCANCEL,
                                 L"Unable to change service trigger information: %s",
                                 PhGetStringOrDefault(errorMessage, L"Unknown error.")
                                 ) == IDRETRY)
                             {
-                                SetWindowLongPtr(hwndDlg, DWLP_MSGRESULT, PSNRET_INVALID);
+                                SetWindowLongPtr(WindowHandle, DWLP_MSGRESULT, PSNRET_INVALID);
                             }
 
                             PhClearReference(&errorMessage);

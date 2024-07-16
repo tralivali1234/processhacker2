@@ -1,23 +1,12 @@
 /*
- * Process Hacker .NET Tools -
- *   IPC support functions
+ * Copyright (c) 2022 Winsider Seminars & Solutions, Inc.  All rights reserved.
  *
- * Copyright (C) 2015-2018 dmex
+ * This file is part of System Informer.
  *
- * This file is part of Process Hacker.
+ * Authors:
  *
- * Process Hacker is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
+ *     dmex    2015-2020
  *
- * Process Hacker is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with Process Hacker.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include "dn.h"
@@ -146,7 +135,7 @@ PPH_LIST EnumerateAppDomainIpcBlock(
     }
 
     // Acquire the mutex, only waiting two seconds.
-    // We can't actually gaurantee that the target put a mutex object in here.
+    // We can't actually guarantee that the target put a mutex object in here.
     if (NtWaitForSingleObject(
         legacyPrivateBlockMutexHandle,
         FALSE,
@@ -168,8 +157,8 @@ PPH_LIST EnumerateAppDomainIpcBlock(
     // Beware: If the target pid is not properly honoring the mutex, the data in the IPC block may still shift underneath us.
     // If we get here, then hMutex is held by this process.
 
-    // Make a copy of the IPC block so that we can gaurantee that it's not changing on us.
-    memcpy(&tempBlock, AppDomainIpcBlock, sizeof(AppDomainEnumerationIPCBlock));
+    // Make a copy of the IPC block so that we can guarantee that it's not changing on us.
+    memcpy_s(&tempBlock, sizeof(tempBlock), AppDomainIpcBlock, sizeof(AppDomainEnumerationIPCBlock));
 
     // It's possible the process will not have any appdomains.
     if ((tempBlock.ListOfAppDomains == NULL) != (tempBlock.SizeInBytes == 0))
@@ -232,7 +221,7 @@ PPH_LIST EnumerateAppDomainIpcBlock(
         // If it's not on a WCHAR boundary, then we may have a 1-byte buffer-overflow.
         appDomainNameLength = appDomainInfoBlock[i].NameLengthInBytes / sizeof(WCHAR);
 
-        if ((appDomainNameLength * sizeof(WCHAR)) != appDomainInfoBlock[i].NameLengthInBytes)
+        if ((appDomainNameLength * sizeof(WCHAR)) != (SIZE_T)appDomainInfoBlock[i].NameLengthInBytes)
             continue;
 
         // It should at least have 1 char for the null terminator.
@@ -307,7 +296,7 @@ PPH_LIST EnumerateAppDomainIpcBlockWow64(
     }
 
     // Acquire the mutex, only waiting two seconds.
-    // We can't actually gaurantee that the target put a mutex object in here.
+    // We can't actually guarantee that the target put a mutex object in here.
     if (NtWaitForSingleObject(
         legacyPrivateBlockMutexHandle,
         FALSE,
@@ -329,8 +318,8 @@ PPH_LIST EnumerateAppDomainIpcBlockWow64(
     // Beware: If the target pid is not properly honoring the mutex, the data in the IPC block may still shift underneath us.
     // If we get here, then hMutex is held by this process.
 
-    // Make a copy of the IPC block so that we can gaurantee that it's not changing on us.
-    memcpy(&tempBlock, AppDomainIpcBlock, sizeof(AppDomainEnumerationIPCBlock_Wow64));
+    // Make a copy of the IPC block so that we can guarantee that it's not changing on us.
+    memcpy_s(&tempBlock, sizeof(tempBlock), AppDomainIpcBlock, sizeof(AppDomainEnumerationIPCBlock_Wow64));
 
     // It's possible the process will not have any appdomains.
     if ((tempBlock.ListOfAppDomains == 0) != (tempBlock.SizeInBytes == 0))
@@ -393,7 +382,7 @@ PPH_LIST EnumerateAppDomainIpcBlockWow64(
         // If it's not on a WCHAR boundary, then we may have a 1-byte buffer-overflow.
         appDomainNameLength = appDomainInfoBlock[i].NameLengthInBytes / sizeof(WCHAR);
 
-        if ((appDomainNameLength * sizeof(WCHAR)) != appDomainInfoBlock[i].NameLengthInBytes)
+        if ((appDomainNameLength * sizeof(WCHAR)) != (SIZE_T)appDomainInfoBlock[i].NameLengthInBytes)
             continue;
 
         // It should at least have 1 char for the null terminator.
@@ -442,15 +431,20 @@ BOOLEAN OpenDotNetPublicControlBlock_V2(
     _Out_ PVOID* BlockTableAddress
     )
 {
-    BOOLEAN result = FALSE;
     HANDLE blockTableHandle = NULL;
     PVOID blockTableAddress = NULL;
+    PPH_STRING legacyPublicIPCBlockName;
     UNICODE_STRING sectionNameUs;
     OBJECT_ATTRIBUTES objectAttributes;
     LARGE_INTEGER sectionOffset = { 0 };
     SIZE_T viewSize = 0;
 
-    if (!PhStringRefToUnicodeString(&PhaFormatString(L"\\BaseNamedObjects\\" CorLegacyPublicIPCBlock, HandleToUlong(ProcessId))->sr, &sectionNameUs))
+    legacyPublicIPCBlockName = PhaFormatString(
+        L"\\BaseNamedObjects\\" CorLegacyPublicIPCBlock,
+        HandleToUlong(ProcessId)
+        );
+
+    if (!PhStringRefToUnicodeString(&legacyPublicIPCBlockName->sr, &sectionNameUs))
         return FALSE;
 
     InitializeObjectAttributes(
@@ -478,7 +472,7 @@ BOOLEAN OpenDotNetPublicControlBlock_V2(
         viewSize,
         &sectionOffset,
         &viewSize,
-        ViewShare,
+        ViewUnmap,
         0,
         PAGE_READONLY
         )))
@@ -506,12 +500,13 @@ BOOLEAN OpenDotNetPublicControlBlock_V4(
     _Out_ PVOID* BlockTableAddress
     )
 {
+    static SID everyoneSid = { SID_REVISION, 1, SECURITY_WORLD_SID_AUTHORITY, { SECURITY_WORLD_RID } };
     BOOLEAN result = FALSE;
-    PVOID boundaryDescriptorHandle = NULL;
+    PPH_STRING legacyBoundaryDescriptorName;
+    POBJECT_BOUNDARY_DESCRIPTOR boundaryDescriptorHandle = NULL;
     HANDLE privateNamespaceHandle = NULL;
     HANDLE blockTableHandle = NULL;
     HANDLE tokenHandle = NULL;
-    PSID everyoneSIDHandle = NULL;
     PVOID blockTableAddress = NULL;
     LARGE_INTEGER sectionOffset = { 0 };
     SIZE_T viewSize = 0;
@@ -523,19 +518,21 @@ BOOLEAN OpenDotNetPublicControlBlock_V4(
     PTOKEN_APPCONTAINER_INFORMATION appContainerInfo = NULL;
     SID_IDENTIFIER_AUTHORITY SIDWorldAuth = SECURITY_WORLD_SID_AUTHORITY;
 
-    if (!PhStringRefToUnicodeString(&PhaFormatString(CorSxSBoundaryDescriptor, HandleToUlong(ProcessId))->sr, &boundaryNameUs))
+    legacyBoundaryDescriptorName = PhFormatString(
+        CorSxSBoundaryDescriptor,
+        HandleToUlong(ProcessId)
+        );
+
+    if (!PhStringRefToUnicodeString(&legacyBoundaryDescriptorName->sr, &boundaryNameUs))
         goto CleanupExit;
 
     if (!(boundaryDescriptorHandle = RtlCreateBoundaryDescriptor(&boundaryNameUs, 0)))
         goto CleanupExit;
 
-    if (!NT_SUCCESS(RtlAllocateAndInitializeSid(&SIDWorldAuth, 1, SECURITY_WORLD_RID, 0, 0, 0, 0, 0, 0, 0, &everyoneSIDHandle)))
+    if (!NT_SUCCESS(RtlAddSIDToBoundaryDescriptor(&boundaryDescriptorHandle, &everyoneSid)))
         goto CleanupExit;
 
-    if (!NT_SUCCESS(RtlAddSIDToBoundaryDescriptor(&boundaryDescriptorHandle, everyoneSIDHandle)))
-        goto CleanupExit;
-
-    if (IsImmersive && WindowsVersion >= WINDOWS_8)
+    if (IsImmersive && PhWindowsVersion >= WINDOWS_8)
     {
         if (NT_SUCCESS(PhOpenProcessToken(ProcessHandle, TOKEN_QUERY, &tokenHandle)))
         {
@@ -592,7 +589,7 @@ BOOLEAN OpenDotNetPublicControlBlock_V4(
         viewSize,
         &sectionOffset,
         &viewSize,
-        ViewShare,
+        ViewUnmap,
         0,
         PAGE_READONLY
         )))
@@ -636,15 +633,12 @@ CleanupExit:
         NtClose(privateNamespaceHandle);
     }
 
-    if (everyoneSIDHandle)
-    {
-        RtlFreeSid(everyoneSIDHandle);
-    }
-
     if (boundaryDescriptorHandle)
     {
         RtlDeleteBoundaryDescriptor(boundaryDescriptorHandle);
     }
+
+    PhDereferenceObject(legacyBoundaryDescriptorName);
 
     return result;
 }
@@ -656,7 +650,7 @@ PPH_LIST QueryDotNetAppDomainsForPid_V2(
     )
 {
     PPH_LIST appDomainsList = NULL;
-    PPH_STRING legacyPrivateBlockName = NULL;
+    PPH_STRING legacyPrivateBlockName;
     HANDLE legacyPrivateBlockHandle = NULL;
     PVOID ipcControlBlockTable = NULL;
     OBJECT_ATTRIBUTES objectAttributes;
@@ -700,7 +694,7 @@ PPH_LIST QueryDotNetAppDomainsForPid_V2(
         viewSize,
         &sectionOffset,
         &viewSize,
-        ViewShare,
+        ViewUnmap,
         0,
         PAGE_READONLY
         )))
@@ -785,15 +779,15 @@ PPH_LIST QueryDotNetAppDomainsForPid_V4(
     )
 {
     PPH_LIST appDomainsList = NULL;
-    PPH_STRING legacyPrivateBlockName = NULL;
+    PPH_STRING legacyPrivateBlockName;
     HANDLE legacyPrivateBlockHandle = NULL;
     PVOID ipcControlBlockTable = NULL;
     OBJECT_ATTRIBUTES objectAttributes;
     UNICODE_STRING sectionNameUs;
     LARGE_INTEGER sectionOffset;
     SIZE_T viewSize;
-    
-    legacyPrivateBlockName = PhaFormatString(
+
+    legacyPrivateBlockName = PhFormatString(
         L"\\BaseNamedObjects\\" CorLegacyPrivateIPCBlockTempV4,
         HandleToUlong(ProcessId)
         );
@@ -829,7 +823,7 @@ PPH_LIST QueryDotNetAppDomainsForPid_V4(
         viewSize,
         &sectionOffset,
         &viewSize,
-        ViewShare,
+        ViewUnmap,
         0,
         PAGE_READONLY
         )))
@@ -899,6 +893,8 @@ CleanupExit:
     {
         NtClose(legacyPrivateBlockHandle);
     }
+
+    PhDereferenceObject(legacyPrivateBlockName);
 
     return appDomainsList;
 }

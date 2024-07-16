@@ -1,3 +1,9 @@
+/*
+ * NT Header annotations
+ *
+ * This file is part of System Informer.
+ */
+
 #ifndef _PHNT_H
 #define _PHNT_H
 
@@ -40,13 +46,22 @@
 #define PHNT_REDSTONE5 106
 #define PHNT_19H1 107
 #define PHNT_19H2 108
+#define PHNT_20H1 109
+#define PHNT_20H2 110
+#define PHNT_21H1 111
+#define PHNT_WIN10_21H2 112
+#define PHNT_WIN10_22H2 113
+#define PHNT_WIN11 114
+#define PHNT_WIN11_22H2 115
+#define PHNT_WIN11_23H2 116
+#define PHNT_WIN11_24H2 117
 
 #ifndef PHNT_MODE
 #define PHNT_MODE PHNT_MODE_USER
 #endif
 
 #ifndef PHNT_VERSION
-#define PHNT_VERSION PHNT_WIN7
+#define PHNT_VERSION PHNT_WIN11
 #endif
 
 // Options
@@ -60,12 +75,13 @@ extern "C" {
 #if (PHNT_MODE != PHNT_MODE_KERNEL)
 #include <phnt_ntdef.h>
 #include <ntnls.h>
-#include <ntkeapi.h>
 #endif
 
+#include <ntkeapi.h>
 #include <ntldr.h>
 #include <ntexapi.h>
 
+#include <ntbcd.h>
 #include <ntmmapi.h>
 #include <ntobapi.h>
 #include <ntpsapi.h>
@@ -80,6 +96,7 @@ extern "C" {
 #include <ntpoapi.h>
 #include <ntregapi.h>
 #include <ntrtl.h>
+#include <ntimage.h>
 #endif
 
 #if (PHNT_MODE != PHNT_MODE_KERNEL)
@@ -95,6 +112,7 @@ extern "C" {
 #include <ntsam.h>
 
 #include <ntmisc.h>
+#include <ntwmi.h>
 
 #include <ntzwapi.h>
 

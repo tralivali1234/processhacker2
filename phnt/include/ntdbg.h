@@ -1,21 +1,7 @@
 /*
- * Process Hacker -
- *   Debugger support functions
+ * Debugger support functions
  *
- * This file is part of Process Hacker.
- *
- * Process Hacker is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * Process Hacker is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with Process Hacker.  If not, see <http://www.gnu.org/licenses/>.
+ * This file is part of System Informer.
  */
 
 #ifndef _NTDBG_H
@@ -56,7 +42,7 @@ NTSYSAPI
 ULONG
 STDAPIVCALLTYPE
 DbgPrint(
-    _In_z_ _Printf_format_string_ PSTR Format,
+    _In_z_ _Printf_format_string_ PCSTR Format,
     ...
     );
 
@@ -66,7 +52,7 @@ STDAPIVCALLTYPE
 DbgPrintEx(
     _In_ ULONG ComponentId,
     _In_ ULONG Level,
-    _In_z_ _Printf_format_string_ PSTR Format,
+    _In_z_ _Printf_format_string_ PCSTR Format,
     ...
     );
 
@@ -76,7 +62,7 @@ NTAPI
 vDbgPrintEx(
     _In_ ULONG ComponentId,
     _In_ ULONG Level,
-    _In_z_ PCH Format,
+    _In_z_ PCCH Format,
     _In_ va_list arglist
     );
 
@@ -84,10 +70,10 @@ NTSYSAPI
 ULONG
 NTAPI
 vDbgPrintExWithPrefix(
-    _In_z_ PCH Prefix,
+    _In_z_ PCCH Prefix,
     _In_ ULONG ComponentId,
     _In_ ULONG Level,
-    _In_z_ PCH Format,
+    _In_z_ PCCH Format,
     _In_ va_list arglist
     );
 
@@ -112,7 +98,7 @@ NTSYSAPI
 ULONG
 NTAPI
 DbgPrompt(
-    _In_ PCH Prompt,
+    _In_ PCCH Prompt,
     _Out_writes_bytes_(Length) PCH Response,
     _In_ ULONG Length
     );
@@ -222,7 +208,7 @@ typedef struct _DBGUI_WAIT_STATE_CHANGE
 typedef enum _DEBUGOBJECTINFOCLASS
 {
     DebugObjectUnusedInformation,
-    DebugObjectKillProcessOnExitInformation,
+    DebugObjectKillProcessOnExitInformation, // s: ULONG
     MaxDebugObjectInfoClass
 } DEBUGOBJECTINFOCLASS, *PDEBUGOBJECTINFOCLASS;
 
@@ -234,7 +220,7 @@ NTAPI
 NtCreateDebugObject(
     _Out_ PHANDLE DebugObjectHandle,
     _In_ ACCESS_MASK DesiredAccess,
-    _In_ POBJECT_ATTRIBUTES ObjectAttributes,
+    _In_opt_ POBJECT_ATTRIBUTES ObjectAttributes,
     _In_ ULONG Flags
     );
 
@@ -359,7 +345,15 @@ DbgUiConvertStateChangeStructure(
     _Out_ LPDEBUG_EVENT DebugEvent
     );
 
-struct _EVENT_FILTER_DESCRIPTOR;
+NTSYSAPI
+NTSTATUS
+NTAPI
+DbgUiConvertStateChangeStructureEx(
+    _In_ PDBGUI_WAIT_STATE_CHANGE StateChange,
+    _Out_ LPDEBUG_EVENT DebugEvent
+    );
+
+typedef struct _EVENT_FILTER_DESCRIPTOR *PEVENT_FILTER_DESCRIPTOR;
 
 typedef VOID (NTAPI *PENABLECALLBACK)(
     _In_ LPCGUID SourceId,
@@ -367,7 +361,7 @@ typedef VOID (NTAPI *PENABLECALLBACK)(
     _In_ UCHAR Level,
     _In_ ULONGLONG MatchAnyKeyword,
     _In_ ULONGLONG MatchAllKeyword,
-    _In_opt_ struct _EVENT_FILTER_DESCRIPTOR *FilterData,
+    _In_opt_ PEVENT_FILTER_DESCRIPTOR FilterData,
     _Inout_opt_ PVOID CallbackContext
     );
 

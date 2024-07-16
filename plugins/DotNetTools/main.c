@@ -1,24 +1,13 @@
 /*
- * Process Hacker .NET Tools -
- *   main program
+ * Copyright (c) 2022 Winsider Seminars & Solutions, Inc.  All rights reserved.
  *
- * Copyright (C) 2011-2015 wj32
- * Copyright (C) 2015-2016 dmex
+ * This file is part of System Informer.
  *
- * This file is part of Process Hacker.
+ * Authors:
  *
- * Process Hacker is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
+ *     wj32    2011-2015
+ *     dmex    2015-2024
  *
- * Process Hacker is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with Process Hacker.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include "dn.h"
@@ -56,14 +45,11 @@ VOID NTAPI UnloadCallback(
 }
 
 VOID NTAPI MenuItemCallback(
-    _In_opt_ PVOID Parameter,
-    _In_opt_ PVOID Context
+    _In_ PVOID Parameter,
+    _In_ PVOID Context
     )
 {
     PPH_PLUGIN_MENU_ITEM menuItem = Parameter;
-
-    if (!menuItem)
-        return;
 
     switch (menuItem->Id)
     {
@@ -74,52 +60,45 @@ VOID NTAPI MenuItemCallback(
 }
 
 VOID NTAPI TreeNewMessageCallback(
-    _In_opt_ PVOID Parameter,
-    _In_opt_ PVOID Context
+    _In_ PVOID Parameter,
+    _In_ PVOID Context
     )
 {
-    if (Parameter)
-        DispatchTreeNewMessage(Parameter);
+    DispatchTreeNewMessage(Parameter);
 }
 
 VOID NTAPI PhSvcRequestCallback(
-    _In_opt_ PVOID Parameter,
-    _In_opt_ PVOID Context
+    _In_ PVOID Parameter,
+    _In_ PVOID Context
     )
 {
-    if (Parameter)
-        DispatchPhSvcRequest(Parameter);
+    DispatchPhSvcRequest(Parameter);
 }
 
 VOID NTAPI ThreadTreeNewInitializingCallback(
-    _In_opt_ PVOID Parameter,
-    _In_opt_ PVOID Context
+    _In_ PVOID Parameter,
+    _In_ PVOID Context
     )
 {
-    if (Parameter)
-        ThreadTreeNewInitializing(Parameter);
+    ThreadTreeNewInitializing(Parameter);
 }
 
 VOID NTAPI ThreadTreeNewUninitializingCallback(
-    _In_opt_ PVOID Parameter,
-    _In_opt_ PVOID Context
+    _In_ PVOID Parameter,
+    _In_ PVOID Context
     )
 {
-    if (Parameter)
-        ThreadTreeNewUninitializing(Parameter);
+    ThreadTreeNewUninitializing(Parameter);
 }
 
 VOID NTAPI ProcessPropertiesInitializingCallback(
-    _In_opt_ PVOID Parameter,
-    _In_opt_ PVOID Context
+    _In_ PVOID Parameter,
+    _In_ PVOID Context
     )
 {
     PPH_PLUGIN_PROCESS_PROPCONTEXT propContext = Parameter;
     BOOLEAN isDotNet = FALSE;
     ULONG flags = 0;
-
-    if (!propContext)
-        return;
 
     if (NT_SUCCESS(PhGetProcessIsDotNetEx(
         propContext->ProcessItem->ProcessId,
@@ -134,7 +113,7 @@ VOID NTAPI ProcessPropertiesInitializingCallback(
             AddAsmPageToPropContext(propContext);
             AddPerfPageToPropContext(propContext);
         }
-        else if (flags & PH_CLR_JIT_PRESENT)
+        else if (flags & PH_CLR_CORELIB_PRESENT)
         {
             isDotNet = TRUE;
             AddAsmPageToPropContext(propContext);
@@ -183,13 +162,10 @@ VOID NTAPI ProcessTreeNewInitializingCallback(
 }
 
 VOID NTAPI ThreadStackControlCallback(
-    _In_opt_ PVOID Parameter,
-    _In_opt_ PVOID Context
+    _In_ PVOID Parameter,
+    _In_ PVOID Context
     )
 {
-    if (!Parameter)
-        return;
-
     ProcessThreadStackControl(Parameter);
 }
 
@@ -231,10 +207,12 @@ LOGICAL DllMain(
             {
                 { StringSettingType, SETTING_NAME_ASM_TREE_LIST_COLUMNS, L"" },
                 { IntegerSettingType, SETTING_NAME_ASM_TREE_LIST_FLAGS, L"0" },
+                { IntegerPairSettingType, SETTING_NAME_ASM_TREE_LIST_SORT, L"0,0" },
                 { IntegerSettingType, SETTING_NAME_DOT_NET_CATEGORY_INDEX, L"5" },
                 { StringSettingType, SETTING_NAME_DOT_NET_COUNTERS_COLUMNS, L"" },
                 { StringSettingType, SETTING_NAME_DOT_NET_COUNTERS_SORTCOLUMN, L"" },
-                { StringSettingType, SETTING_NAME_DOT_NET_COUNTERS_GROUPSTATES, L"" }
+                { StringSettingType, SETTING_NAME_DOT_NET_COUNTERS_GROUPSTATES, L"" },
+                { IntegerSettingType, SETTING_NAME_DOT_NET_VERIFYSIGNATURE, L"1" },
             };
 
             PluginInstance = PhRegisterPlugin(PLUGIN_NAME, Instance, &info);
@@ -245,21 +223,19 @@ LOGICAL DllMain(
             info->DisplayName = L".NET Tools";
             info->Author = L"dmex, wj32";
             info->Description = L"Adds .NET performance counters, assembly information, thread stack support, and more.";
-            info->Url = L"https://wj32.org/processhacker/forums/viewtopic.php?t=1111";
-            info->HasOptions = FALSE;
 
-            PhRegisterCallback(
-                PhGetPluginCallback(PluginInstance, PluginCallbackLoad),
-                LoadCallback,
-                NULL,
-                &PluginLoadCallbackRegistration
-                );
-            PhRegisterCallback(
-                PhGetPluginCallback(PluginInstance, PluginCallbackUnload),
-                UnloadCallback,
-                NULL,
-                &PluginUnloadCallbackRegistration
-                );
+            //PhRegisterCallback(
+            //    PhGetPluginCallback(PluginInstance, PluginCallbackLoad),
+            //    LoadCallback,
+            //    NULL,
+            //    &PluginLoadCallbackRegistration
+            //    );
+            //PhRegisterCallback(
+            //    PhGetPluginCallback(PluginInstance, PluginCallbackUnload),
+            //    UnloadCallback,
+            //    NULL,
+            //    &PluginUnloadCallbackRegistration
+            //    );
             //PhRegisterCallback(
             //    PhGetPluginCallback(PluginInstance, PluginCallbackMenuItem),
             //    MenuItemCallback,

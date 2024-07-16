@@ -1,3 +1,9 @@
+/*
+ * Transaction Manager support functions
+ *
+ * This file is part of System Informer.
+ */
+
 #ifndef _NTTMAPI_H
 #define _NTTMAPI_H
 
@@ -121,7 +127,7 @@ NTAPI
 NtOpenTransaction(
     _Out_ PHANDLE TransactionHandle,
     _In_ ACCESS_MASK DesiredAccess,
-    _In_ POBJECT_ATTRIBUTES ObjectAttributes,
+    _In_opt_ POBJECT_ATTRIBUTES ObjectAttributes,
     _In_ LPGUID Uow,
     _In_opt_ HANDLE TmHandle
     );

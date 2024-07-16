@@ -1,29 +1,22 @@
 /*
- * Process Hacker -
- *   PE viewer
+ * Copyright (c) 2022 Winsider Seminars & Solutions, Inc.  All rights reserved.
  *
- * Copyright (C) 2010 wj32
- * Copyright (C) 2017-2019 dmex
+ * This file is part of System Informer.
  *
- * This file is part of Process Hacker.
+ * Authors:
  *
- * Process Hacker is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
+ *     wj32    2010
+ *     dmex    2017-2023
  *
- * Process Hacker is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with Process Hacker.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include <peview.h>
 
 PPH_STRING PvFileName = NULL;
+
+BOOLEAN PvInitializeExceptionPolicy(
+    VOID
+    );
 
 BOOLEAN NTAPI PvpCommandLineCallback(
     _In_opt_ PPH_COMMAND_LINE_OPTION Option,
@@ -37,6 +30,28 @@ BOOLEAN NTAPI PvpCommandLineCallback(
     return TRUE;
 }
 
+NTSTATUS PvpConnectKph(
+    VOID
+    )
+{
+    NTSTATUS status;
+    PPH_STRING portName = NULL;
+
+    status = KphInitialize();
+    if (!NT_SUCCESS(status))
+        return status;
+
+    // TODO: get the current configured port name from the main binary, settings aren't shared.
+    //if (PhIsNullOrEmptyString(portName = PhGetStringSetting(L"KsiPortName")))
+        PhMoveReference(&portName, PhCreateString(KPH_PORT_NAME));
+
+    status = KphCommsStart(&portName->sr, NULL);
+
+    PhDereferenceObject(portName);
+
+    return status;
+}
+
 INT WINAPI wWinMain(
     _In_ HINSTANCE hInstance,
     _In_opt_ HINSTANCE hPrevInstance,
@@ -48,28 +63,46 @@ INT WINAPI wWinMain(
     {
         { 0, L"h", NoArgumentType }
     };
-    PPH_STRING commandLine;
+    PH_STRINGREF commandLine;
 
-    if (!NT_SUCCESS(PhInitializePhLibEx(L"PE Viewer", ULONG_MAX, hInstance, 0, 0)))
+    if (!NT_SUCCESS(PhInitializePhLib(L"PE Viewer", hInstance)))
+        return 1;
+    if (!PvInitializeExceptionPolicy())
         return 1;
 
     // Create a mutant for the installer.
     {
         HANDLE mutantHandle;
-        PPH_STRING objectName;
         OBJECT_ATTRIBUTES objectAttributes;
-        UNICODE_STRING objectNameUs;
+        UNICODE_STRING objectName;
+        PH_STRINGREF objectNameSr;
+        SIZE_T returnLength;
+        WCHAR formatBuffer[PH_INT64_STR_LEN_1];
         PH_FORMAT format[2];
 
-        PhInitFormatS(&format[0], L"PeViewerMutant_");
+        PhInitFormatS(&format[0], L"SiViewerMutant_");
         PhInitFormatU(&format[1], HandleToUlong(NtCurrentProcessId()));
 
-        objectName = PhFormat(format, 2, 16);
-        PhStringRefToUnicodeString(&objectName->sr, &objectNameUs);
+        if (!PhFormatToBuffer(
+            format,
+            RTL_NUMBER_OF(format),
+            formatBuffer,
+            sizeof(formatBuffer),
+            &returnLength
+            ))
+        {
+            return FALSE;
+        }
+
+        objectNameSr.Length = returnLength - sizeof(UNICODE_NULL);
+        objectNameSr.Buffer = formatBuffer;
+
+        if (!PhStringRefToUnicodeString(&objectNameSr, &objectName))
+            return FALSE;
 
         InitializeObjectAttributes(
             &objectAttributes,
-            &objectNameUs,
+            &objectName,
             OBJ_CASE_INSENSITIVE,
             PhGetNamespaceHandle(),
             NULL
@@ -81,8 +114,6 @@ INT WINAPI wWinMain(
             &objectAttributes,
             TRUE
             );
-
-        PhDereferenceObject(objectName);
     }
 
 #ifndef DEBUG
@@ -90,38 +121,40 @@ INT WINAPI wWinMain(
     {
         PhShowWarning(
             NULL,
+            L"%s",
             L"You are attempting to run the 32-bit version of PE Viewer on 64-bit Windows. "
             L"Most features will not work correctly.\n\n"
             L"Please run the 64-bit version of PE Viewer instead."
             );
-        RtlExitUserProcess(STATUS_IMAGE_SUBSYSTEM_NOT_PRESENT);
+        PhExitApplication(STATUS_IMAGE_SUBSYSTEM_NOT_PRESENT);
     }
 #endif
 
     PhGuiSupportInitialization();
     PhSettingsInitialization();
-    PeInitializeSettings();
+    PvInitializeSettings();
     PvPropInitialization();
     PhTreeNewInitialization();
+    PvInitializeSuperclassControls();
+    PvpConnectKph();
 
-    if (!NT_SUCCESS(PhGetProcessCommandLine(NtCurrentProcess(), &commandLine)))
+    if (!NT_SUCCESS(PhGetProcessCommandLineStringRef(&commandLine)))
         return 1;
 
     PhParseCommandLine(
-        &commandLine->sr,
+        &commandLine,
         options,
         RTL_NUMBER_OF(options),
         PH_COMMAND_LINE_IGNORE_FIRST_PART,
         PvpCommandLineCallback,
         NULL
         );
-    PhDereferenceObject(commandLine);
 
     if (!PvFileName)
     {
         static PH_FILETYPE_FILTER filters[] =
         {
-            { L"Supported files (*.exe;*.dll;*.com;*.ocx;*.sys;*.scr;*.cpl;*.ax;*.acm;*.lib;*.winmd;*.efi;*.pdb)", L"*.exe;*.dll;*.com;*.ocx;*.sys;*.scr;*.cpl;*.ax;*.acm;*.lib;*.winmd;*.efi;*.pdb" },
+            { L"Supported files (*.exe;*.dll;*.com;*.ocx;*.sys;*.scr;*.cpl;*.ax;*.acm;*.lib;*.winmd;*.mui;*.mun;*.efi;*.pdb)", L"*.exe;*.dll;*.com;*.ocx;*.sys;*.scr;*.cpl;*.ax;*.acm;*.lib;*.winmd;*.mui;*.mun;*.efi;*.pdb" },
             { L"All files (*.*)", L"*.*" }
         };
         PVOID fileDialog;
@@ -130,7 +163,7 @@ INT WINAPI wWinMain(
             return 1;
 
         fileDialog = PhCreateOpenFileDialog();
-        PhSetFileDialogOptions(fileDialog, PH_FILEDIALOG_NOPATHVALIDATE);
+        PhSetFileDialogOptions(fileDialog, PH_FILEDIALOG_SHOWHIDDEN | PH_FILEDIALOG_NOPATHVALIDATE);
         PhSetFileDialogFilter(fileDialog, filters, RTL_NUMBER_OF(filters));
 
         if (PhShowFileDialog(NULL, fileDialog))
@@ -140,21 +173,24 @@ INT WINAPI wWinMain(
 #ifndef DEBUG
                 PPH_STRING applicationFileName;
 
-                if (applicationFileName = PhGetApplicationFileName())
+                if (applicationFileName = PhGetApplicationFileNameWin32())
                 {
                     PhMoveReference(&PvFileName, PhConcatStrings(3, L"\"", PvFileName->Buffer, L"\""));
 
-                    if (PhShellExecuteEx(
+                    AllowSetForegroundWindow(ASFW_ANY);
+
+                    if (NT_SUCCESS(PhShellExecuteEx(
                         NULL,
                         PhGetString(applicationFileName),
                         PvFileName->Buffer,
-                        SW_SHOWDEFAULT,
-                        PH_SHELL_EXECUTE_NOZONECHECKS,
+                        NULL,
+                        SW_SHOWNORMAL,
+                        PH_SHELL_EXECUTE_DEFAULT,
                         0,
                         NULL
-                        ))
+                        )))
                     {
-                        RtlExitUserProcess(STATUS_SUCCESS);
+                        PhExitApplication(STATUS_SUCCESS);
                     }
 
                     PhDereferenceObject(applicationFileName);
@@ -168,6 +204,24 @@ INT WINAPI wWinMain(
 
     if (PhIsNullOrEmptyString(PvFileName))
         return 1;
+
+    // Note: Resolve the filename when we're passed a native device prefix (dmex)
+    PhMoveReference(&PvFileName, PhGetFileName(PvFileName));
+
+#ifdef DEBUG
+    if (!PhDoesFileExistWin32(PhGetString(PvFileName)))
+    {
+        PPH_STRING fileName;
+
+        fileName = PhGetBaseName(PvFileName);
+        PhMoveReference(&fileName, PhSearchFilePath(PhGetString(fileName), NULL));
+
+        if (!PhIsNullOrEmptyString(fileName))
+        {
+            PhMoveReference(&PvFileName, fileName);
+        }
+    }
+#endif
 
     if (PhEndsWithString2(PvFileName, L".lnk", TRUE))
     {
@@ -190,7 +244,7 @@ INT WINAPI wWinMain(
 
         status = PhCreateFileWin32(
             &fileHandle,
-            PvFileName->Buffer,
+            PhGetString(PvFileName),
             FILE_READ_ATTRIBUTES | FILE_READ_DATA | SYNCHRONIZE,
             FILE_ATTRIBUTE_NORMAL,
             FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
@@ -198,12 +252,31 @@ INT WINAPI wWinMain(
             FILE_NON_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT
             );
 
+        if (status == STATUS_IO_REPARSE_TAG_NOT_HANDLED)
+        {
+            PPH_STRING targetFileName;
+
+            if (targetFileName = PvResolveReparsePointTarget(PvFileName))
+            {
+                PhMoveReference(&PvFileName, targetFileName);
+            }
+
+            status = PhCreateFileWin32(
+                &fileHandle,
+                PhGetString(PvFileName),
+                FILE_READ_ATTRIBUTES | FILE_READ_DATA | SYNCHRONIZE,
+                FILE_ATTRIBUTE_NORMAL,
+                FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                FILE_OPEN,
+                FILE_NON_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT
+                );
+        }
+
         if (NT_SUCCESS(status))
         {
             status = PhLoadMappedImageEx(
-                PvFileName->Buffer,
+                NULL,
                 fileHandle,
-                TRUE,
                 &PvMappedImage
                 );
             NtClose(fileHandle);
@@ -213,7 +286,12 @@ INT WINAPI wWinMain(
                 switch (PvMappedImage.Signature)
                 {
                 case IMAGE_DOS_SIGNATURE:
-                    PvPeProperties();
+                    {
+                        if (PhGetIntegerSetting(L"EnableLegacyPropertiesDialog"))
+                            PvPeProperties();
+                        else
+                            PvShowPePropertiesWindow();
+                    }
                     break;
                 case IMAGE_ELF_SIGNATURE:
                     PvExlfProperties();
@@ -222,17 +300,74 @@ INT WINAPI wWinMain(
                     status = STATUS_IMAGE_SUBSYSTEM_NOT_PRESENT;
                     break;
                 }
-            }
 
-            if (NT_SUCCESS(status))
                 PhUnloadMappedImage(&PvMappedImage);
+            }
         }
 
         if (!NT_SUCCESS(status))
-            PhShowStatus(NULL, L"Unable to load the file.", status, 0);
+        {
+            if (status == STATUS_IMAGE_SUBSYSTEM_NOT_PRESENT)
+                PhShowError2(NULL, L"Unable to load the file.", L"%s", L"PE Viewer does not support this image type.");
+            else
+                PhShowStatus(NULL, L"Unable to load the file.", status, 0);
+        }
     }
 
-    PeSaveSettings();
+    PvSaveSettings();
 
     return 0;
+}
+
+#ifndef DEBUG
+ULONG CALLBACK PvUnhandledExceptionCallback(
+    _In_ PEXCEPTION_POINTERS ExceptionInfo
+    )
+{
+    PPH_STRING errorMessage;
+    PPH_STRING message;
+
+    if (NT_NTWIN32(ExceptionInfo->ExceptionRecord->ExceptionCode))
+        errorMessage = PhGetStatusMessage(0, PhNtStatusToDosError(ExceptionInfo->ExceptionRecord->ExceptionCode));
+    else
+        errorMessage = PhGetStatusMessage(ExceptionInfo->ExceptionRecord->ExceptionCode, 0);
+
+    message = PhFormatString(
+        L"0x%08X (%s)",
+        ExceptionInfo->ExceptionRecord->ExceptionCode,
+        PhGetStringOrEmpty(errorMessage)
+        );
+
+    PhShowMessage(
+        NULL,
+        MB_OK | MB_ICONWARNING,
+        L"PE Viewer has crashed :(\r\n\r\n%s",
+        PhGetStringOrEmpty(message)
+        );
+
+    PhExitApplication(ExceptionInfo->ExceptionRecord->ExceptionCode);
+
+    PhDereferenceObject(message);
+    PhDereferenceObject(errorMessage);
+
+    return EXCEPTION_EXECUTE_HANDLER;
+}
+#endif
+
+BOOLEAN PvInitializeExceptionPolicy(
+    VOID
+    )
+{
+#ifndef DEBUG
+    ULONG errorMode;
+
+    if (NT_SUCCESS(PhGetProcessErrorMode(NtCurrentProcess(), &errorMode)))
+    {
+        ClearFlag(errorMode, SEM_NOOPENFILEERRORBOX | SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
+        PhSetProcessErrorMode(NtCurrentProcess(), errorMode);
+    }
+
+    RtlSetUnhandledExceptionFilter(PvUnhandledExceptionCallback);
+#endif
+    return TRUE;
 }

@@ -1,31 +1,44 @@
+/*
+ * Copyright (c) 2022 Winsider Seminars & Solutions, Inc.  All rights reserved.
+ *
+ * This file is part of System Informer.
+ *
+ * Authors:
+ *
+ *     wj32    2010-2016
+ *     dmex    2016-2023
+ *
+ */
+
 #ifndef _PH_SECEDITP_H
 #define _PH_SECEDITP_H
 
-#include <aclui.h>
-#include <aclapi.h>
-
 typedef struct
 {
-    ISecurityInformationVtbl *VTable;
+    const ISecurityInformationVtbl *VTable;
 
     ULONG RefCount;
 
     HWND WindowHandle;
     BOOLEAN IsPage;
+    BOOLEAN HaveGenericMapping;
     PPH_ACCESS_ENTRY AccessEntriesArray;
     PSI_ACCESS AccessEntries;
     ULONG NumberOfAccessEntries;
+    GENERIC_MAPPING GenericMapping;
 
     PPH_STRING ObjectName;
     PPH_STRING ObjectType;
     PPH_OPEN_OBJECT OpenObject;
     PPH_CLOSE_OBJECT CloseObject;
+    PPH_GET_OBJECT_SECURITY GetObjectSecurity;
+    PPH_SET_OBJECT_SECURITY SetObjectSecurity;
     PVOID Context;
 } PhSecurityInformation;
 
 typedef struct
 {
-    ISecurityInformation2Vtbl *VTable;
+    const ISecurityInformation2Vtbl *VTable;
 
     PhSecurityInformation *Context;
     ULONG RefCount;
@@ -33,7 +46,7 @@ typedef struct
 
 typedef struct
 {
-    ISecurityInformation3Vtbl *VTable;
+    const ISecurityInformation3Vtbl *VTable;
 
     PhSecurityInformation *Context;
     ULONG RefCount;
@@ -41,7 +54,7 @@ typedef struct
 
 typedef struct
 {
-    IDataObjectVtbl *VTable;
+    const IDataObjectVtbl *VTable;
 
     PhSecurityInformation *Context;
     ULONG RefCount;
@@ -50,6 +63,13 @@ typedef struct
     PPH_LIST NameCache;
 } PhSecurityIDataObject;
 
+typedef struct
+{
+    const IEffectivePermissionVtbl *VTable;
+
+    PhSecurityInformation *Context;
+    ULONG RefCount;
+} PhEffectivePermission;
 
 #undef INTERFACE
 #define INTERFACE   ISecurityObjectTypeInfoEx
@@ -69,7 +89,7 @@ typedef ISecurityObjectTypeInfoEx* LPSecurityObjectTypeInfoEx;
 
 typedef struct
 {
-    ISecurityObjectTypeInfoExVtbl* VTable;
+    const ISecurityObjectTypeInfoExVtbl* VTable;
 
     PhSecurityInformation* Context;
     ULONG RefCount;
@@ -83,6 +103,8 @@ ISecurityInformation *PhSecurityInformation_Create(
     _In_ PWSTR ObjectType,
     _In_ PPH_OPEN_OBJECT OpenObject,
     _In_opt_ PPH_CLOSE_OBJECT CloseObject,
+    _In_opt_ PPH_GET_OBJECT_SECURITY GetObjectSecurity,
+    _In_opt_ PPH_SET_OBJECT_SECURITY SetObjectSecurity,
     _In_opt_ PVOID Context,
     _In_ BOOLEAN IsPage
     );
@@ -121,7 +143,7 @@ HRESULT STDMETHODCALLTYPE PhSecurityInformation_SetSecurity(
 
 HRESULT STDMETHODCALLTYPE PhSecurityInformation_GetAccessRights(
     _In_ ISecurityInformation *This,
-    _In_ const GUID *ObjectType,
+    _In_ PCGUID ObjectType,
     _In_ ULONG Flags,
     _Out_ PSI_ACCESS *Access,
     _Out_ PULONG Accesses,
@@ -130,7 +152,7 @@ HRESULT STDMETHODCALLTYPE PhSecurityInformation_GetAccessRights(
 
 HRESULT STDMETHODCALLTYPE PhSecurityInformation_MapGeneric(
     _In_ ISecurityInformation *This,
-    _In_ const GUID *ObjectType,
+    _In_ PCGUID ObjectType,
     _In_ PUCHAR AceFlags,
     _Inout_ PACCESS_MASK Mask
     );
@@ -192,7 +214,7 @@ ULONG STDMETHODCALLTYPE PhSecurityInformation3_Release(
     _In_ ISecurityInformation3 *This
     );
 
-BOOL STDMETHODCALLTYPE PhSecurityInformation3_GetFullResourceName(
+HRESULT STDMETHODCALLTYPE PhSecurityInformation3_GetFullResourceName(
     _In_ ISecurityInformation3 *This,
     _Outptr_ PWSTR *ppszResourceName
     );
@@ -293,6 +315,34 @@ HRESULT STDMETHODCALLTYPE PhSecurityObjectTypeInfo_GetInheritSource(
     _In_ SECURITY_INFORMATION SecurityInfo,
     _In_ PACL Acl,
     _Out_ PINHERITED_FROM *InheritArray
+    );
+
+// IEffectivePermission
+
+HRESULT STDMETHODCALLTYPE PhEffectivePermission_QueryInterface(
+    _In_ IEffectivePermission* This,
+    _In_ REFIID Riid,
+    _Out_ PVOID* Object
+    );
+
+ULONG STDMETHODCALLTYPE PhEffectivePermission_AddRef(
+    _In_ IEffectivePermission* This
+    );
+
+ULONG STDMETHODCALLTYPE PhEffectivePermission_Release(
+    _In_ IEffectivePermission* This
+    );
+
+HRESULT STDMETHODCALLTYPE PhEffectivePermission_GetEffectivePermission(
+    _In_ IEffectivePermission* This,
+    _In_ LPCGUID GuidObjectType,
+    _In_ PSID UserSid,
+    _In_ LPCWSTR ServerName,
+    _In_ PSECURITY_DESCRIPTOR SecurityDescriptor,
+    _Out_ POBJECT_TYPE_LIST* ObjectTypeList,
+    _Out_ PULONG ObjectTypeListLength,
+    _Out_ PACCESS_MASK* GrantedAccessList,
+    _Out_ PULONG GrantedAccessListLength
     );
 
 #endif

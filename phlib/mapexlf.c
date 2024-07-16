@@ -1,23 +1,12 @@
 /*
- * Process Hacker -
- *   ELF library support
+ * Copyright (c) 2022 Winsider Seminars & Solutions, Inc.  All rights reserved.
  *
- * Copyright (C) 2017 dmex
+ * This file is part of System Informer.
  *
- * This file is part of Process Hacker.
+ * Authors:
  *
- * Process Hacker is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
+ *     dmex    2017
  *
- * Process Hacker is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with Process Hacker.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include <ph.h>
@@ -30,16 +19,16 @@ NTSTATUS PhInitializeMappedWslImage(
     )
 {
     MappedWslImage->ViewBase = ViewBase;
-    MappedWslImage->Size = Size;
+    MappedWslImage->ViewSize = Size;
     MappedWslImage->Header = (PELF_IMAGE_HEADER)ViewBase;
 
     __try
     {
         PhProbeAddress(
-            MappedWslImage->Header, 
-            sizeof(ELF_IMAGE_HEADER), 
-            MappedWslImage->ViewBase, 
-            MappedWslImage->Size,
+            MappedWslImage->Header,
+            sizeof(ELF_IMAGE_HEADER),
+            MappedWslImage->ViewBase,
+            MappedWslImage->ViewSize,
             1
             );
     }
@@ -62,10 +51,10 @@ NTSTATUS PhInitializeMappedWslImage(
         __try
         {
             PhProbeAddress(
-                MappedWslImage->Headers64, 
-                sizeof(ELF64_IMAGE_SECTION_HEADER), 
-                MappedWslImage->ViewBase, 
-                MappedWslImage->Size, 
+                MappedWslImage->Headers64,
+                sizeof(ELF64_IMAGE_SECTION_HEADER),
+                MappedWslImage->ViewBase,
+                MappedWslImage->ViewSize,
                 1
                 );
         }
@@ -211,15 +200,56 @@ PELF64_IMAGE_SECTION_HEADER PhGetMappedWslImageSectionByType(
     return NULL;
 }
 
+PELF64_IMAGE_SECTION_HEADER PhGetMappedWslImageSectionByName(
+    _In_ PPH_MAPPED_IMAGE MappedWslImage,
+    _In_ PSTR Name
+    )
+{
+    if (Name)
+    {
+        PELF64_IMAGE_SECTION_HEADER sectionHeader;
+        PELF64_IMAGE_SECTION_HEADER stringSection;
+        PELF64_IMAGE_SECTION_HEADER section;
+        PVOID stringTable;
+        USHORT i;
+
+        sectionHeader = IMAGE_FIRST_ELF64_SECTION(MappedWslImage);
+        stringSection = IMAGE_ELF64_SECTION_BY_INDEX(sectionHeader, MappedWslImage->Headers64->e_shstrndx);
+        stringTable = PTR_ADD_OFFSET(MappedWslImage->Header, stringSection->sh_offset);
+
+        for (i = 0; i < MappedWslImage->Headers64->e_shnum; i++)
+        {
+            section = IMAGE_ELF64_SECTION_BY_INDEX(sectionHeader, i);
+
+            if (PhEqualBytesZ(Name, PTR_ADD_OFFSET(stringTable, section->sh_name), FALSE))
+            {
+                return section;
+            }
+        }
+    }
+
+    return NULL;
+}
+
 ULONG64 PhGetMappedWslImageBaseAddress(
     _In_ PPH_MAPPED_IMAGE MappedWslImage
     )
 {
     ULONG64 baseAddress = MAXULONG64;
     PELF64_IMAGE_SEGMENT_HEADER segment;
+    ULONG loadBias = 0;
     USHORT i;
 
     segment = IMAGE_FIRST_ELF64_SEGMENT(MappedWslImage);
+
+    for (i = 0; i < MappedWslImage->Headers64->e_phnum; i++)
+    {
+        if (segment[i].p_type == PT_LOAD)
+        {
+            loadBias = (ULONG)ALIGN_DOWN_BY(segment[i].p_vaddr, PAGE_SIZE);
+            break;
+        }
+    }
 
     for (i = 0; i < MappedWslImage->Headers64->e_phnum; i++)
     {
@@ -261,7 +291,7 @@ BOOLEAN PhGetMappedWslImageSections(
 
     // Get the string table (The string table is an array of null terminated strings).
     stringTableAddress = PTR_ADD_OFFSET(MappedWslImage->Header, stringSection->sh_offset);
-                                                                                  
+
     // Enumerate the sections.
     for (i = 0; i < count; i++)
     {
@@ -274,9 +304,9 @@ BOOLEAN PhGetMappedWslImageSections(
         if (sectionHeader[i].sh_name)
         {
             // Get the section name from the ELF string table and convert to unicode.
-            PhCopyStringZFromBytes(
+            PhCopyStringZFromUtf8(
                 PTR_ADD_OFFSET(stringTableAddress, sectionHeader[i].sh_name),
-                -1,
+                SIZE_MAX,
                 sections[i].Name,
                 sizeof(sections[i].Name),
                 NULL
@@ -402,7 +432,7 @@ BOOLEAN PhGetMappedWslImageSymbols(
         entry = PTR_ADD_OFFSET(MappedWslImage->Header, section->sh_offset);
         stringTable = PhGetMappedWslImageSectionData(MappedWslImage, NULL, section->sh_link);
 
-        // NOTE: SHT_DYNSYM entries include the version in the symbol name (e.g. printf@GLIBC_2.2.5) 
+        // NOTE: SHT_DYNSYM entries include the version in the symbol name (e.g. printf@GLIBC_2.2.5)
         // instead of using a version record entry from the SHT_SUNW_versym section -dmex
         versionTable = PhGetMappedWslImageSectionDataByType(MappedWslImage, SHT_SUNW_versym);
         versionRecords = PhpParseMappedWslImageVersionRecords(MappedWslImage, stringTable);
@@ -424,7 +454,7 @@ BOOLEAN PhGetMappedWslImageSymbols(
                 // function name
                 PhCopyStringZFromBytes(
                     PTR_ADD_OFFSET(stringTable, entry[ii].st_name),
-                    -1,
+                    SIZE_MAX,
                     import->Name,
                     sizeof(import->Name),
                     NULL
@@ -437,9 +467,9 @@ BOOLEAN PhGetMappedWslImageSymbols(
 
                     if (moduleName = PhpFindWslImageVersionRecordName(versionRecords, versionTable[ii].vs_vers))
                     {
-                        PhCopyStringZFromBytes(
+                        PhCopyStringZFromUtf8(
                             moduleName,
-                            -1,
+                            SIZE_MAX,
                             import->Module,
                             sizeof(import->Module),
                             NULL
@@ -465,9 +495,9 @@ BOOLEAN PhGetMappedWslImageSymbols(
                 export->SectionIndex = entry[ii].st_shndx;
 
                 // function name
-                PhCopyStringZFromBytes(
+                PhCopyStringZFromUtf8(
                     PTR_ADD_OFFSET(stringTable, entry[ii].st_name),
-                    -1,
+                    SIZE_MAX,
                     export->Name,
                     sizeof(export->Name),
                     NULL
@@ -488,9 +518,9 @@ BOOLEAN PhGetMappedWslImageSymbols(
                 export->SectionIndex = entry[ii].st_shndx;
 
                 // function name
-                PhCopyStringZFromBytes(
+                PhCopyStringZFromUtf8(
                     PTR_ADD_OFFSET(stringTable, entry[ii].st_name),
-                    -1,
+                    SIZE_MAX,
                     export->Name,
                     sizeof(export->Name),
                     NULL

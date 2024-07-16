@@ -1,23 +1,12 @@
 /*
- * Process Hacker Plugins -
- *   Online Checks Plugin
+ * Copyright (c) 2022 Winsider Seminars & Solutions, Inc.  All rights reserved.
  *
- * Copyright (C) 2016 dmex
+ * This file is part of System Informer.
  *
- * This file is part of Process Hacker.
+ * Authors:
  *
- * Process Hacker is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
+ *     dmex    2016
  *
- * Process Hacker is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with Process Hacker.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include "onlnchk.h"
@@ -38,8 +27,8 @@ HRESULT CALLBACK TaskDialogErrorProc(
         {
             if (context->TaskbarListClass)
             {
-                ITaskbarList3_SetProgressValue(context->TaskbarListClass, PhMainWndHandle, 1, 1);
-                ITaskbarList3_SetProgressState(context->TaskbarListClass, PhMainWndHandle, TBPF_ERROR);
+                PhTaskbarListSetProgressValue(context->TaskbarListClass, context->DialogHandle, 1, 1);
+                PhTaskbarListSetProgressState(context->TaskbarListClass, context->DialogHandle, TBPF_ERROR);
             }
         }
         break;
@@ -58,7 +47,7 @@ VOID VirusTotalShowErrorDialog(
     config.cbSize = sizeof(TASKDIALOGCONFIG);
     config.dwFlags = TDF_USE_HICON_MAIN | TDF_ALLOW_DIALOG_CANCELLATION | TDF_CAN_BE_MINIMIZED | TDF_ENABLE_HYPERLINKS;
     config.dwCommonButtons = TDCBF_CLOSE_BUTTON;
-    config.hMainIcon = Context->IconLargeHandle;
+    config.hMainIcon = PhGetApplicationIcon(FALSE);
 
     config.pszWindowTitle = PhaFormatString(L"Uploading %s...", PhGetStringOrEmpty(Context->BaseFileName))->Buffer;
     config.pszMainInstruction = PhaFormatString(L"Error uploading %s...", PhGetStringOrEmpty(Context->BaseFileName))->Buffer;

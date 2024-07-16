@@ -12,9 +12,11 @@ extern "C" {
 
 typedef struct _PH_TREENEW_CREATEPARAMS
 {
+    ULONG Size;
     COLORREF TextColor;
     COLORREF FocusColor;
     COLORREF SelectionColor;
+    ULONG RowHeight;
     // Add new fields here.
 } PH_TREENEW_CREATEPARAMS, *PPH_TREENEW_CREATEPARAMS;
 
@@ -111,6 +113,7 @@ typedef struct _PH_TREENEW_NODE
 #define TN_STYLE_NO_COLUMN_HEADER 0x80
 #define TN_STYLE_CUSTOM_COLORS 0x100
 #define TN_STYLE_ALWAYS_SHOW_SELECTION 0x200
+#define TN_STYLE_CUSTOM_HEADERDRAW 0x400
 
 // Extended flags
 #define TN_FLAG_ITEM_DRAG_SELECT 0x1
@@ -216,6 +219,7 @@ typedef enum _PH_TREENEW_MESSAGE
     TreeNewKeyDown, // PPH_TREENEW_KEY_EVENT Parameter1
     TreeNewLeftClick, // PPH_TREENEW_MOUSE_EVENT Parameter1
     TreeNewRightClick, // PPH_TREENEW_MOUSE_EVENT Parameter1
+    TreeNewMiddleClick, // PPH_TREENEW_MOUSE_EVENT Parameter1
     TreeNewLeftDoubleClick, // PPH_TREENEW_MOUSE_EVENT Parameter1
     TreeNewRightDoubleClick, // PPH_TREENEW_MOUSE_EVENT Parameter1
     TreeNewContextMenu, // PPH_TREENEW_CONTEXT_MENU Parameter1
@@ -228,6 +232,8 @@ typedef enum _PH_TREENEW_MESSAGE
 
     TreeNewDestroying,
     TreeNewGetDialogCode, // ULONG Parameter1, PULONG Parameter2
+
+    TreeNewGetHeaderText,
 
     MaxTreeNewMessage
 } PH_TREENEW_MESSAGE;
@@ -360,6 +366,23 @@ typedef struct _PH_TREENEW_SEARCH_EVENT
     PH_STRINGREF String;
 } PH_TREENEW_SEARCH_EVENT, *PPH_TREENEW_SEARCH_EVENT;
 
+#define PH_TREENEW_HEADER_TEXT_SIZE_MAX 0x40
+
+typedef struct _PH_TREENEW_GET_HEADER_TEXT
+{
+    PPH_TREENEW_COLUMN Column;
+    PH_STRINGREF Text;
+    PWSTR TextCache;
+    ULONG TextCacheSize;
+} PH_TREENEW_GET_HEADER_TEXT, *PPH_TREENEW_GET_HEADER_TEXT;
+
+typedef struct _PH_TREENEW_SET_HEADER_CACHE
+{
+    ULONG HeaderTreeColumnMax;
+    PVOID HeaderTreeColumnStringCache;
+    PVOID HeaderTreeColumnTextCache;
+} PH_TREENEW_SET_HEADER_CACHE, *PPH_TREENEW_SET_HEADER_CACHE;
+
 #define TNM_FIRST (WM_USER + 1)
 #define TNM_SETCALLBACK (WM_USER + 1)
 #define TNM_NODESADDED (WM_USER + 2) // unimplemented
@@ -407,7 +430,12 @@ typedef struct _PH_TREENEW_SEARCH_EVENT
 #define TNM_SETROWHEIGHT (WM_USER + 44)
 #define TNM_ISFLATNODEVALID (WM_USER + 45)
 #define TNM_THEMESUPPORT (WM_USER + 46)
-#define TNM_LAST (WM_USER + 47)
+#define TNM_SETIMAGELIST (WM_USER + 47)
+#define TNM_SETCOLUMNTEXTCACHE (WM_USER + 48)
+#define TNM_ENSUREVISIBLEINDEX (WM_USER + 49)
+#define TNM_GETVISIBLECOLUMN (WM_USER + 50)
+#define TNM_GETVISIBLECOLUMNARRAY (WM_USER + 51)
+#define TNM_LAST (WM_USER + 52)
 
 #define TreeNew_SetCallback(hWnd, Callback, Context) \
     SendMessage((hWnd), TNM_SETCALLBACK, (WPARAM)(Context), (LPARAM)(Callback))
@@ -539,7 +567,22 @@ typedef struct _PH_TREENEW_SEARCH_EVENT
     ((BOOLEAN)SendMessage((hWnd), TNM_ISFLATNODEVALID, 0, 0))
 
 #define TreeNew_ThemeSupport(hWnd, Enable) \
-    SendMessage((hWnd), TNM_THEMESUPPORT, (WPARAM)(Enable), 0);
+    SendMessage((hWnd), TNM_THEMESUPPORT, (WPARAM)(Enable), 0)
+
+#define TreeNew_SetImageList(hWnd, ImageListHandle) \
+    SendMessage((hWnd), TNM_SETIMAGELIST, (WPARAM)(ImageListHandle), 0)
+
+#define TreeNew_SetColumnTextCache(hWnd, Cache) \
+    SendMessage((hWnd), TNM_SETCOLUMNTEXTCACHE, (WPARAM)(Cache), 0)
+
+#define TreeNew_EnsureVisibleIndex(hWnd, Index) \
+    SendMessage((hWnd), TNM_ENSUREVISIBLEINDEX, 0, (LPARAM)(Index))
+
+#define TreeNew_GetVisibleColumn(hWnd, Index, Column) \
+    SendMessage((hWnd), TNM_GETVISIBLECOLUMN, (WPARAM)(Index), (LPARAM)(Column))
+
+#define TreeNew_GetVisibleColumnArray(hWnd, Count, ColumnArray) \
+    ((BOOLEAN)SendMessage((hWnd), TNM_GETVISIBLECOLUMNARRAY, (WPARAM)(Count), (LPARAM)(ColumnArray)))
 
 typedef struct _PH_TREENEW_VIEW_PARTS
 {

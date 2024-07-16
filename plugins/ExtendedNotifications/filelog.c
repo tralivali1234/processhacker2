@@ -1,23 +1,13 @@
 /*
- * Process Hacker Extended Notifications -
- *   file logging
+ * Copyright (c) 2022 Winsider Seminars & Solutions, Inc.  All rights reserved.
  *
- * Copyright (C) 2010 wj32
+ * This file is part of System Informer.
  *
- * This file is part of Process Hacker.
+ * Authors:
  *
- * Process Hacker is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
+ *     wj32    2010
+ *     dmex    2021-2023
  *
- * Process Hacker is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with Process Hacker.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include <phdk.h>
@@ -39,13 +29,20 @@ VOID FileLogInitialization(
     NTSTATUS status;
     PPH_STRING fileName;
 
-    fileName = PhaGetStringSetting(SETTING_NAME_LOG_FILENAME);
+    fileName = PhGetStringSetting(SETTING_NAME_LOG_FILENAME);
 
     if (!PhIsNullOrEmptyString(fileName))
     {
+        PhMoveReference(&fileName, PhExpandEnvironmentStrings(&fileName->sr));
+
+        if (PhDetermineDosPathNameType(&fileName->sr) == RtlPathTypeRelative)
+        {
+            PhMoveReference(&fileName, PhGetApplicationDirectoryFileName(&fileName->sr, FALSE));
+        }
+
         status = PhCreateFileStream(
             &LogFileStream,
-            fileName->Buffer,
+            PhGetString(fileName),
             FILE_GENERIC_WRITE,
             FILE_SHARE_READ,
             FILE_OPEN_IF,
@@ -62,6 +59,8 @@ VOID FileLogInitialization(
                 );
         }
     }
+
+    PhClearReference(&fileName);
 }
 
 VOID NTAPI LoggedCallback(
@@ -71,10 +70,40 @@ VOID NTAPI LoggedCallback(
 {
     PPH_LOG_ENTRY logEntry = Parameter;
 
-    PhWriteStringFormatAsUtf8FileStream(
-        LogFileStream,
-        L"%s: %s\r\n",
-        PhaFormatDateTime(NULL)->Buffer,
-        PH_AUTO_T(PH_STRING, PhFormatLogEntry(logEntry))->Buffer
-        );
+    if (logEntry)
+    {
+        PPH_STRING datetimeString;
+        PPH_STRING messageString;
+        SIZE_T returnLength;
+        PH_FORMAT format[4];
+        WCHAR formatBuffer[0x100];
+
+        datetimeString = PhaFormatDateTime(NULL);
+        messageString = PH_AUTO_T(PH_STRING, PhFormatLogEntry(logEntry));
+
+        // %s: %s\r\n
+        PhInitFormatSR(&format[0], datetimeString->sr);
+        PhInitFormatS(&format[1], L": ");
+        PhInitFormatSR(&format[2], messageString->sr);
+        PhInitFormatS(&format[3], L"\r\n");
+
+        if (PhFormatToBuffer(format, RTL_NUMBER_OF(format), formatBuffer, sizeof(formatBuffer), &returnLength))
+        {
+            PH_STRINGREF messageSr;
+
+            messageSr.Buffer = formatBuffer;
+            messageSr.Length = returnLength - sizeof(UNICODE_NULL);
+
+            PhWriteStringAsUtf8FileStream(LogFileStream, &messageSr);
+        }
+        else
+        {
+            PhWriteStringFormatAsUtf8FileStream(
+                LogFileStream,
+                L"%s: %s\r\n",
+                PhGetString(datetimeString),
+                PhGetString(messageString)
+                );
+        }
+    }
 }

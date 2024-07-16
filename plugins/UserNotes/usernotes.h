@@ -1,24 +1,13 @@
 /*
- * Process Hacker User Notes -
- *   UserNotes Header
+ * Copyright (c) 2022 Winsider Seminars & Solutions, Inc.  All rights reserved.
  *
- * Copyright (C) 2011-2015 wj32
- * Copyright (C) 2016 dmex
+ * This file is part of System Informer.
  *
- * This file is part of Process Hacker.
+ * Authors:
  *
- * Process Hacker is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
+ *     wj32    2011-2015
+ *     dmex    2016-2024
  *
- * Process Hacker is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with Process Hacker.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #ifndef _USERNOTES_H_
@@ -27,8 +16,6 @@
 #include <phdk.h>
 #include <phappresource.h>
 #include <settings.h>
-#include <mxml.h>
-#include <shlobj.h>
 
 #include "db.h"
 #include "resource.h"
@@ -39,27 +26,61 @@
 #define INTENT_PROCESS_HIGHLIGHT 0x8
 #define INTENT_PROCESS_COLLAPSE 0x10
 #define INTENT_PROCESS_AFFINITY 0x20
+#define INTENT_PROCESS_PAGEPRIORITY 0x40
+#define INTENT_PROCESS_BOOST 0x80
+#define INTENT_PROCESS_EFFICIENCY 0x100
 
 typedef enum _USERNOTES_COMMAND_ID
 {
     PROCESS_PRIORITY_SAVE_ID = 1,
     PROCESS_PRIORITY_SAVE_FOR_THIS_COMMAND_LINE_ID,
+    PROCESS_PRIORITY_SAVE_IFEO,
     PROCESS_IO_PRIORITY_SAVE_ID,
     PROCESS_IO_PRIORITY_SAVE_FOR_THIS_COMMAND_LINE_ID,
+    PROCESS_IO_PRIORITY_SAVE_IFEO,
     PROCESS_HIGHLIGHT_ID,
     PROCESS_COLLAPSE_ID,
+    PROCESS_AFFINITY_ID,
     PROCESS_AFFINITY_SAVE_ID,
     PROCESS_AFFINITY_SAVE_FOR_THIS_COMMAND_LINE_ID,
+    PROCESS_PAGE_PRIORITY_SAVE_ID,
+    PROCESS_PAGE_PRIORITY_SAVE_FOR_THIS_COMMAND_LINE_ID,
+    PROCESS_PAGE_PRIORITY_SAVE_IFEO,
+    PROCESS_BOOST_PRIORITY_ID,
+    PROCESS_BOOST_PRIORITY_SAVE_ID,
+    PROCESS_BOOST_PRIORITY_SAVE_FOR_THIS_COMMAND_LINE_ID,
+    PROCESS_EFFICIENCY_ID,
+    PROCESS_EFFICIENCY_SAVE_ID,
+    PROCESS_EFFICIENCY_SAVE_FOR_THIS_COMMAND_LINE_ID,
+    FILE_PRIORITY_SAVE_IFEO,
+    FILE_IO_PRIORITY_SAVE_IFEO,
+    FILE_PAGE_PRIORITY_SAVE_IFEO,
 } USERNOTES_COMMAND_ID;
 
 #define COMMENT_COLUMN_ID 1
+#define AFFINITY_COLUMN_ID 2
 
 typedef struct _PROCESS_EXTENSION
 {
     LIST_ENTRY ListEntry;
     PPH_PROCESS_ITEM ProcessItem;
-    BOOLEAN Valid;
     PPH_STRING Comment;
+    PPH_STRING Affinity;
+    union
+    {
+        BOOLEAN Flags;
+        struct
+        {
+            BOOLEAN Valid : 1;
+            BOOLEAN SkipAffinity : 1;
+            BOOLEAN SkipPriority : 1;
+            BOOLEAN SkipPagePriority : 1;
+            BOOLEAN SkipIoPriority : 1;
+            BOOLEAN SkipBoostPriority : 1;
+            BOOLEAN SkipEfficiency : 1;
+            BOOLEAN ValidAffinity : 1;
+        };
+    };
 } PROCESS_EXTENSION, *PPROCESS_EXTENSION;
 
 typedef struct _PROCESS_COMMENT_PAGE_CONTEXT
@@ -83,9 +104,35 @@ typedef struct _SERVICE_COMMENT_PAGE_CONTEXT
     PH_LAYOUT_MANAGER LayoutManager;
 } SERVICE_COMMENT_PAGE_CONTEXT, *PSERVICE_COMMENT_PAGE_CONTEXT;
 
+PDB_OBJECT FindDbObjectForProcess(
+    _In_ PPH_PROCESS_ITEM ProcessItem,
+    _In_ ULONG Intent
+    );
+
+VOID DeleteDbObjectForProcessIfUnused(
+    _In_ PDB_OBJECT Object
+    );
+
+VOID InvalidateProcessComments(
+    VOID
+    );
+
+VOID InvalidateServiceComments(
+    VOID
+    );
+
+VOID InvalidateProcessAffinity(
+    VOID
+    );
+
+VOID SearchChangedHandler(
+    _In_opt_ PVOID Parameter,
+    _In_opt_ PVOID Context
+    );
+
 INT_PTR CALLBACK OptionsDlgProc(
-    _In_ HWND hwndDlg,
-    _In_ UINT uMsg,
+    _In_ HWND WindowHandle,
+    _In_ UINT WindowMessage,
     _In_ WPARAM wParam,
     _In_ LPARAM lParam
     );

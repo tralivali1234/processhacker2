@@ -1,23 +1,12 @@
 /*
- * Process Hacker Plugins -
- *   Update Checker Plugin
+ * Copyright (c) 2022 Winsider Seminars & Solutions, Inc.  All rights reserved.
  *
- * Copyright (C) 2011-2019 dmex
+ * This file is part of System Informer.
  *
- * This file is part of Process Hacker.
+ * Authors:
  *
- * Process Hacker is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
+ *     dmex    2011-2023
  *
- * Process Hacker is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with Process Hacker.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include "updater.h"
@@ -33,6 +22,21 @@ VOID NTAPI MainWindowShowingCallback(
     _In_opt_ PVOID Context
     )
 {
+    if (PhGetIntegerSetting(SETTING_NAME_UPDATE_MODE) && PhGetIntegerSetting(SETTING_NAME_UPDATE_AVAILABLE))
+    {
+        PPH_STRING setting;
+
+        if (setting = PhGetStringSetting(SETTING_NAME_UPDATE_DATA))
+        {
+            ShowStartupUpdateDialog();
+
+            PhSetIntegerSetting(SETTING_NAME_UPDATE_AVAILABLE, FALSE);
+            PhSetStringSetting(SETTING_NAME_UPDATE_DATA, L"");
+
+            PhDereferenceObject(setting);
+        }
+    }
+
     // Check if the user want's us to auto-check for updates.
     if (PhGetIntegerSetting(SETTING_NAME_AUTO_CHECK))
     {
@@ -42,41 +46,93 @@ VOID NTAPI MainWindowShowingCallback(
 }
 
 VOID NTAPI MainMenuInitializingCallback(
-    _In_opt_ PVOID Parameter,
-    _In_opt_ PVOID Context
+    _In_ PVOID Parameter,
+    _In_ PVOID Context
     )
 {
     PPH_PLUGIN_MENU_INFORMATION menuInfo = Parameter;
+    //PPH_EMENU_ITEM channelMenuItem;
+    //PPH_EMENU_ITEM releaseMenuItem;
+    //PPH_EMENU_ITEM previewMenuItem;
+    //PPH_EMENU_ITEM canaryMenuItem;
+    //PPH_EMENU_ITEM developerMenuItem;
 
     // Check this menu is the Help menu
-    if (!menuInfo || menuInfo->u.MainMenu.SubMenuIndex != PH_MENU_ITEM_LOCATION_HELP)
+    if (menuInfo->u.MainMenu.SubMenuIndex != PH_MENU_ITEM_LOCATION_HELP)
         return;
 
-    PhInsertEMenuItem(menuInfo->Menu, PhPluginCreateEMenuItem(PluginInstance, 0, UPDATE_MENUITEM, L"Check for &updates", NULL), 0);
+    //channelMenuItem = PhPluginCreateEMenuItem(PluginInstance, 0, UPDATE_MENUITEM_SWITCH, L"Switch update &channel", NULL);
+    //PhInsertEMenuItem(channelMenuItem, releaseMenuItem = PhPluginCreateEMenuItem(PluginInstance, 0, UPDATE_SWITCH_RELEASE, L"Release", NULL), ULONG_MAX);
+    ////PhInsertEMenuItem(channelMenuItem, previewMenuItem = PhPluginCreateEMenuItem(PluginInstance, 0, UPDATE_SWITCH_PREVIEW, L"Preview", NULL), ULONG_MAX);
+    //PhInsertEMenuItem(channelMenuItem, canaryMenuItem = PhPluginCreateEMenuItem(PluginInstance, 0, UPDATE_SWITCH_CANARY, L"Canary", NULL), ULONG_MAX);
+    ////PhInsertEMenuItem(channelMenuItem, developerMenuItem = PhPluginCreateEMenuItem(PluginInstance, 0, UPDATE_SWITCH_DEVELOPER, L"Developer", NULL), ULONG_MAX);
+    //PhInsertEMenuItem(menuInfo->Menu, channelMenuItem, 0);
+    PhInsertEMenuItem(menuInfo->Menu, PhPluginCreateEMenuItem(PluginInstance, 0, UPDATE_MENUITEM_UPDATE, L"Check for &updates", NULL), 0);
+
+    //switch (PhGetPhReleaseChannel())
+    //{
+    //case PhReleaseChannel:
+    //    releaseMenuItem->Flags |= (PH_EMENU_CHECKED | PH_EMENU_RADIOCHECK);
+    //    break;
+    ////case PhPreviewChannel:
+    ////    previewMenuItem->Flags |= (PH_EMENU_CHECKED | PH_EMENU_RADIOCHECK);
+    ////    break;
+    //case PhCanaryChannel:
+    //    canaryMenuItem->Flags |= (PH_EMENU_CHECKED | PH_EMENU_RADIOCHECK);
+    //    break;
+    ////case PhDeveloperChannel:
+    ////    developerMenuItem->Flags |= (PH_EMENU_CHECKED | PH_EMENU_RADIOCHECK);
+    ////    break;
+    //default:
+    //    break;
+    //}
 }
 
 VOID NTAPI MenuItemCallback(
-    _In_opt_ PVOID Parameter,
-    _In_opt_ PVOID Context
+    _In_ PVOID Parameter,
+    _In_ PVOID Context
     )
 {
     PPH_PLUGIN_MENU_ITEM menuItem = Parameter;
+    PH_RELEASE_CHANNEL channel;
+    PPH_UPDATER_CONTEXT context;
 
-    if (menuItem && menuItem->Id == UPDATE_MENUITEM)
+    switch (menuItem->Id)
     {
+    case UPDATE_MENUITEM_UPDATE:
         ShowUpdateDialog(NULL);
+        return;
+    case UPDATE_SWITCH_RELEASE:
+        channel = PhReleaseChannel;
+        break;
+    //case UPDATE_SWITCH_PREVIEW:
+    //    channel = PhPreviewChannel;
+    //    break;
+    case UPDATE_SWITCH_CANARY:
+        channel = PhCanaryChannel;
+        break;
+    //case UPDATE_SWITCH_DEVELOPER:
+    //    channel = PhDeveloperChannel;
+    //    break;
+    default:
+        return;
+    }
+
+    if (PhGetPhReleaseChannel() != channel)
+    {
+        context = CreateUpdateContext(FALSE);
+        context->Channel = channel;
+        context->SwitchingChannel = TRUE;
+        ShowUpdateDialog(context);
     }
 }
 
 VOID NTAPI ShowOptionsCallback(
-    _In_opt_ PVOID Parameter,
-    _In_opt_ PVOID Context
+    _In_ PVOID Parameter,
+    _In_ PVOID Context
     )
 {
     PPH_PLUGIN_OPTIONS_POINTERS optionsEntry = (PPH_PLUGIN_OPTIONS_POINTERS)Parameter;
-
-    if (!optionsEntry)
-        return;
 
     optionsEntry->CreateSection(
         L"Updater",
@@ -106,6 +162,10 @@ LOGICAL DllMain(
                 { ScalableIntegerPairSettingType, SETTING_NAME_CHANGELOG_WINDOW_SIZE, L"@96|420,250" },
                 { StringSettingType, SETTING_NAME_CHANGELOG_COLUMNS, L"" },
                 { StringSettingType, SETTING_NAME_CHANGELOG_SORTCOLUMN, L"" },
+                { IntegerSettingType, SETTING_NAME_UPDATE_MODE, L"0" },
+                { IntegerSettingType, SETTING_NAME_UPDATE_AVAILABLE, L"0" },
+                { StringSettingType, SETTING_NAME_UPDATE_DATA, L"" },
+                { IntegerSettingType, SETTING_NAME_AUTO_CHECK_PAGE, L"0" }
             };
 
             PluginInstance = PhRegisterPlugin(PLUGIN_NAME, Instance, &info);
@@ -115,8 +175,7 @@ LOGICAL DllMain(
 
             info->DisplayName = L"Update Checker";
             info->Author = L"dmex";
-            info->Description = L"Plugin for checking new Process Hacker releases via the Help menu.";
-            info->Url = L"https://wj32.org/processhacker/forums/viewtopic.php?t=1121";
+            info->Description = L"Plugin for checking new System Informer releases via the Help menu.";
 
             PhRegisterCallback(
                 PhGetGeneralCallback(GeneralCallbackMainWindowShowing),
@@ -143,7 +202,7 @@ LOGICAL DllMain(
                 &PluginShowOptionsCallbackRegistration
                 );
 
-            PhAddSettings(settings, RTL_NUMBER_OF(settings));
+            PhAddSettings(settings, ARRAYSIZE(settings));
         }
         break;
     }

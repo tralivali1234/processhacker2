@@ -1,27 +1,24 @@
 /*
- * Process Hacker -
- *   PE viewer
+ * Copyright (c) 2022 Winsider Seminars & Solutions, Inc.  All rights reserved.
  *
- * Copyright (C) 2010-2011 wj32
- * Copyright (C) 2017-2019 dmex
+ * This file is part of System Informer.
  *
- * This file is part of Process Hacker.
+ * Authors:
  *
- * Process Hacker is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
+ *     wj32    2010-2011
+ *     dmex    2017-2022
  *
- * Process Hacker is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with Process Hacker.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include <peview.h>
+
+typedef struct _PV_PE_LOADCONFIG_CONTEXT
+{
+    HWND WindowHandle;
+    HWND ListViewHandle;
+    PH_LAYOUT_MANAGER LayoutManager;
+    PPV_PROPPAGECONTEXT PropSheetContext;
+} PV_PE_LOADCONFIG_CONTEXT, *PPV_PE_LOADCONFIG_CONTEXT;
 
 #define ADD_VALUE(Name, Value) \
 { \
@@ -35,6 +32,10 @@ PPH_STRING PvpGetPeGuardFlagsText(
     )
 {
     PH_STRING_BUILDER stringBuilder;
+    WCHAR pointer[PH_PTR_STR_LEN_1];
+
+    if (GuardFlags == 0)
+        return PhCreateString(L"0x0");
 
     PhInitializeStringBuilder(&stringBuilder, 10);
 
@@ -51,16 +52,77 @@ PPH_STRING PvpGetPeGuardFlagsText(
     if (GuardFlags & IMAGE_GUARD_DELAYLOAD_IAT_IN_ITS_OWN_SECTION)
         PhAppendStringBuilder2(&stringBuilder, L"Delay-load private section, ");
     if (GuardFlags & IMAGE_GUARD_CF_ENABLE_EXPORT_SUPPRESSION)
-        PhAppendStringBuilder2(&stringBuilder, L"Export supression, ");
+        PhAppendStringBuilder2(&stringBuilder, L"Export suppression, ");
     if (GuardFlags & IMAGE_GUARD_CF_EXPORT_SUPPRESSION_INFO_PRESENT)
-        PhAppendStringBuilder2(&stringBuilder, L"Export information supression, ");
+        PhAppendStringBuilder2(&stringBuilder, L"Export information suppression, ");
     if (GuardFlags & IMAGE_GUARD_CF_LONGJUMP_TABLE_PRESENT)
         PhAppendStringBuilder2(&stringBuilder, L"Longjump table, ");
     if (GuardFlags & IMAGE_GUARD_RETPOLINE_PRESENT)
         PhAppendStringBuilder2(&stringBuilder, L"Retpoline present, ");
+    if (GuardFlags & IMAGE_GUARD_EH_CONTINUATION_TABLE_PRESENT_V1 || GuardFlags & IMAGE_GUARD_EH_CONTINUATION_TABLE_PRESENT_V2)
+        PhAppendStringBuilder2(&stringBuilder, L"EH continuation table, ");
+    if (GuardFlags & IMAGE_GUARD_XFG_ENABLED)
+        PhAppendStringBuilder2(&stringBuilder, L"XFG, ");
 
     if (PhEndsWithString2(stringBuilder.String, L", ", FALSE))
         PhRemoveEndStringBuilder(&stringBuilder, 2);
+
+    PhPrintPointer(pointer, UlongToPtr(GuardFlags));
+    PhAppendFormatStringBuilder(&stringBuilder, L" (%s)", pointer);
+
+    return PhFinalStringBuilderString(&stringBuilder);
+}
+
+PPH_STRING PvpGetPeDependentLoadFlagsText(
+    _In_ ULONG DependentLoadFlags
+    )
+{
+    PH_STRING_BUILDER stringBuilder;
+    WCHAR pointer[PH_PTR_STR_LEN_1];
+
+    if (DependentLoadFlags == 0)
+        return PhCreateString(L"0x0");
+
+    PhInitializeStringBuilder(&stringBuilder, 10);
+
+    if (DependentLoadFlags & DONT_RESOLVE_DLL_REFERENCES)
+        PhAppendStringBuilder2(&stringBuilder, L"Ignore dll references, ");
+    if (DependentLoadFlags & LOAD_LIBRARY_AS_DATAFILE)
+        PhAppendStringBuilder2(&stringBuilder, L"Datafile, ");
+    if (DependentLoadFlags & 0x00000004) // LOAD_PACKAGED_LIBRARY
+        PhAppendStringBuilder2(&stringBuilder, L"Packaged_library, ");
+    if (DependentLoadFlags & LOAD_WITH_ALTERED_SEARCH_PATH)
+        PhAppendStringBuilder2(&stringBuilder, L"Altered search path, ");
+    if (DependentLoadFlags & LOAD_IGNORE_CODE_AUTHZ_LEVEL)
+        PhAppendStringBuilder2(&stringBuilder, L"Ignore authz level, ");
+    if (DependentLoadFlags & LOAD_LIBRARY_AS_IMAGE_RESOURCE)
+        PhAppendStringBuilder2(&stringBuilder, L"Image resource, ");
+    if (DependentLoadFlags & LOAD_LIBRARY_AS_DATAFILE_EXCLUSIVE)
+        PhAppendStringBuilder2(&stringBuilder, L"Datafile (Exclusive), ");
+    if (DependentLoadFlags & LOAD_LIBRARY_REQUIRE_SIGNED_TARGET)
+        PhAppendStringBuilder2(&stringBuilder, L"Signed target required, ");
+    if (DependentLoadFlags & LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR)
+        PhAppendStringBuilder2(&stringBuilder, L"Search DLL load directory, ");
+    if (DependentLoadFlags & LOAD_LIBRARY_SEARCH_APPLICATION_DIR)
+        PhAppendStringBuilder2(&stringBuilder, L"Search application directory, ");
+    if (DependentLoadFlags & LOAD_LIBRARY_SEARCH_USER_DIRS)
+        PhAppendStringBuilder2(&stringBuilder, L"Search user directory, ");
+    if (DependentLoadFlags & LOAD_LIBRARY_SEARCH_SYSTEM32)
+        PhAppendStringBuilder2(&stringBuilder, L"Search system32, ");
+    if (DependentLoadFlags & LOAD_LIBRARY_SEARCH_DEFAULT_DIRS)
+        PhAppendStringBuilder2(&stringBuilder, L"Search default directory, ");
+    if (DependentLoadFlags & LOAD_LIBRARY_SAFE_CURRENT_DIRS)
+        PhAppendStringBuilder2(&stringBuilder, L"Search safe current directory, ");
+    if (DependentLoadFlags & LOAD_LIBRARY_SEARCH_SYSTEM32_NO_FORWARDER)
+        PhAppendStringBuilder2(&stringBuilder, L"Search system32 (No forwarders), ");
+    if (DependentLoadFlags & LOAD_LIBRARY_OS_INTEGRITY_CONTINUITY)
+        PhAppendStringBuilder2(&stringBuilder, L"OS integrity continuity, ");
+
+    if (PhEndsWithString2(stringBuilder.String, L", ", FALSE))
+        PhRemoveEndStringBuilder(&stringBuilder, 2);
+
+    PhPrintPointer(pointer, UlongToPtr(DependentLoadFlags));
+    PhAppendFormatStringBuilder(&stringBuilder, L" (%s)", pointer);
 
     return PhFinalStringBuilderString(&stringBuilder);
 }
@@ -89,7 +151,7 @@ PPH_STRING PvpGetPeEnclaveImportsText(
         {
             PSTR importName;
 
-            if (enclaveImports->ImportName == USHRT_MAX)
+            if (!enclaveImports || enclaveImports->ImportName == USHRT_MAX)
                 break;
 
             if (importName = PhMappedImageRvaToVa(
@@ -119,7 +181,7 @@ PPH_STRING PvpGetPeEnclaveImportsText(
         {
             PSTR importName;
 
-            if (enclaveImports->ImportName == USHRT_MAX)
+            if (!enclaveImports || enclaveImports->ImportName == USHRT_MAX)
                 break;
 
             if (importName = PhMappedImageRvaToVa(
@@ -204,41 +266,62 @@ VOID PvpAddPeEnclaveConfig(
     }
 }
 
-INT_PTR CALLBACK PvpPeLoadConfigDlgProc(
+INT_PTR CALLBACK PvPeLoadConfigDlgProc(
     _In_ HWND hwndDlg,
     _In_ UINT uMsg,
     _In_ WPARAM wParam,
     _In_ LPARAM lParam
     )
 {
-    LPPROPSHEETPAGE propSheetPage;
-    PPV_PROPPAGECONTEXT propPageContext;
+    PPV_PE_LOADCONFIG_CONTEXT context;
 
-    if (!PvPropPageDlgProcHeader(hwndDlg, uMsg, lParam, &propSheetPage, &propPageContext))
+    if (uMsg == WM_INITDIALOG)
+    {
+        context = PhAllocateZero(sizeof(PV_PE_LOADCONFIG_CONTEXT));
+        PhSetWindowContext(hwndDlg, PH_WINDOW_CONTEXT_DEFAULT, context);
+
+        if (lParam)
+        {
+            LPPROPSHEETPAGE propSheetPage = (LPPROPSHEETPAGE)lParam;
+            context->PropSheetContext = (PPV_PROPPAGECONTEXT)propSheetPage->lParam;
+        }
+    }
+    else
+    {
+        context = PhGetWindowContext(hwndDlg, PH_WINDOW_CONTEXT_DEFAULT);
+    }
+
+    if (!context)
         return FALSE;
 
     switch (uMsg)
     {
     case WM_INITDIALOG:
         {
-            HWND lvHandle;
             PIMAGE_LOAD_CONFIG_DIRECTORY32 config32;
             PIMAGE_LOAD_CONFIG_DIRECTORY64 config64;
+            HWND lvHandle;
 
-            lvHandle = GetDlgItem(hwndDlg, IDC_LIST);
-            PhSetListViewStyle(lvHandle, TRUE, TRUE);
-            PhSetControlTheme(lvHandle, L"explorer");
-            PhAddListViewColumn(lvHandle, 0, 0, 0, LVCFMT_LEFT, 220, L"Name");
-            PhAddListViewColumn(lvHandle, 1, 1, 1, LVCFMT_LEFT, 170, L"Value");
-            PhSetExtendedListView(lvHandle);
-            PhLoadListViewColumnsFromSetting(L"ImageLoadCfgListViewColumns", lvHandle);
+            context->WindowHandle = hwndDlg;
+            context->ListViewHandle = lvHandle = GetDlgItem(hwndDlg, IDC_LIST);
+
+            PhSetListViewStyle(context->ListViewHandle, TRUE, TRUE);
+            PhSetControlTheme(context->ListViewHandle, L"explorer");
+            PhAddListViewColumn(context->ListViewHandle, 0, 0, 0, LVCFMT_LEFT, 220, L"Name");
+            PhAddListViewColumn(context->ListViewHandle, 1, 1, 1, LVCFMT_LEFT, 170, L"Value");
+            PhSetExtendedListView(context->ListViewHandle);
+            PhLoadListViewColumnsFromSetting(L"ImageLoadCfgListViewColumns", context->ListViewHandle);
+            PvConfigTreeBorders(context->ListViewHandle);
+
+            PhInitializeLayoutManager(&context->LayoutManager, hwndDlg);
+            PhAddLayoutItem(&context->LayoutManager, context->ListViewHandle, NULL, PH_ANCHOR_ALL);
 
             #define ADD_VALUES(Type, Config) \
             { \
                 LARGE_INTEGER time; \
                 SYSTEMTIME systemTime; \
                 \
-                RtlSecondsSince1970ToTime((Config)->TimeDateStamp, &time); \
+                PhSecondsSince1970ToTime((Config)->TimeDateStamp, &time); \
                 PhLargeIntegerToLocalSystemTime(&systemTime, &time); \
                 \
                 ADD_VALUE(L"Time stamp", (Config)->TimeDateStamp ? PhaFormatDateTime(&systemTime)->Buffer : L"0"); \
@@ -248,13 +331,13 @@ INT_PTR CALLBACK PvpPeLoadConfigDlgProc(
                 ADD_VALUE(L"Critical section default timeout", PhaFormatUInt64((Config)->CriticalSectionDefaultTimeout, TRUE)->Buffer); \
                 ADD_VALUE(L"De-commit free block threshold", PhaFormatUInt64((Config)->DeCommitFreeBlockThreshold, TRUE)->Buffer); \
                 ADD_VALUE(L"De-commit total free threshold", PhaFormatUInt64((Config)->DeCommitTotalFreeThreshold, TRUE)->Buffer); \
-                ADD_VALUE(L"LOCK prefix table", PhaFormatString(L"0x%Ix", (Config)->LockPrefixTable)->Buffer); \
+                ADD_VALUE(L"Lock prefix table", PhaFormatString(L"0x%x", (Config)->LockPrefixTable)->Buffer); \
                 ADD_VALUE(L"Maximum allocation size", PhaFormatString(L"0x%Ix", (Config)->MaximumAllocationSize)->Buffer); \
                 ADD_VALUE(L"Virtual memory threshold", PhaFormatString(L"0x%Ix", (Config)->VirtualMemoryThreshold)->Buffer); \
-                ADD_VALUE(L"Process affinity mask", PhaFormatString(L"0x%Ix", (Config)->ProcessAffinityMask)->Buffer); \
                 ADD_VALUE(L"Process heap flags", PhaFormatString(L"0x%Ix", (Config)->ProcessHeapFlags)->Buffer); \
+                ADD_VALUE(L"Process affinity mask", PhaFormatString(L"0x%Ix", (Config)->ProcessAffinityMask)->Buffer); \
                 ADD_VALUE(L"CSD version", PhaFormatString(L"%u", (Config)->CSDVersion)->Buffer); \
-                ADD_VALUE(L"Dependent load flags", PhaFormatString(L"0x%x", (Config)->DependentLoadFlags)->Buffer); \
+                ADD_VALUE(L"Dependent load flags", PH_AUTO_T(PH_STRING, PvpGetPeDependentLoadFlagsText((Config)->DependentLoadFlags))->Buffer); \
                 ADD_VALUE(L"Edit list", PhaFormatString(L"0x%Ix", (Config)->EditList)->Buffer); \
                 ADD_VALUE(L"Security cookie", PhaFormatString(L"0x%Ix", (Config)->SecurityCookie)->Buffer); \
                 ADD_VALUE(L"SEH handler table", PhaFormatString(L"0x%Ix", (Config)->SEHandlerTable)->Buffer); \
@@ -262,11 +345,11 @@ INT_PTR CALLBACK PvpPeLoadConfigDlgProc(
                 \
                 if (RTL_CONTAINS_FIELD((Config), (Config)->Size, GuardCFCheckFunctionPointer)) \
                 { \
-                    ADD_VALUE(L"CFG GuardFlags", PhaFormatString(L"%s (0x%x)", PH_AUTO_T(PH_STRING, PvpGetPeGuardFlagsText((Config)->GuardFlags))->Buffer, (Config)->GuardFlags)->Buffer); \
-                    ADD_VALUE(L"CFG Check Function pointer", PhaFormatString(L"0x%Ix", (Config)->GuardCFCheckFunctionPointer)->Buffer); \
-                    ADD_VALUE(L"CFG Check Dispatch pointer", PhaFormatString(L"0x%Ix", (Config)->GuardCFDispatchFunctionPointer)->Buffer); \
-                    ADD_VALUE(L"CFG Function table", PhaFormatString(L"0x%Ix", (Config)->GuardCFFunctionTable)->Buffer); \
-                    ADD_VALUE(L"CFG Function table entry count", PhaFormatUInt64((Config)->GuardCFFunctionCount, TRUE)->Buffer); \
+                    ADD_VALUE(L"CFG guard flags", PH_AUTO_T(PH_STRING, PvpGetPeGuardFlagsText((Config)->GuardFlags))->Buffer); \
+                    ADD_VALUE(L"CFG check-function pointer", PhaFormatString(L"0x%Ix", (Config)->GuardCFCheckFunctionPointer)->Buffer); \
+                    ADD_VALUE(L"CFG dispatch-function pointer", PhaFormatString(L"0x%Ix", (Config)->GuardCFDispatchFunctionPointer)->Buffer); \
+                    ADD_VALUE(L"CFG function table", PhaFormatString(L"0x%Ix", (Config)->GuardCFFunctionTable)->Buffer); \
+                    ADD_VALUE(L"CFG function table count", PhaFormatUInt64((Config)->GuardCFFunctionCount, TRUE)->Buffer); \
                     if (RTL_CONTAINS_FIELD((Config), (Config)->Size, GuardAddressTakenIatEntryTable)) \
                     { \
                         ADD_VALUE(L"CFG IatEntry table", PhaFormatString(L"0x%Ix", (Config)->GuardAddressTakenIatEntryTable)->Buffer); \
@@ -288,24 +371,51 @@ INT_PTR CALLBACK PvpPeLoadConfigDlgProc(
                 \
                 if (RTL_CONTAINS_FIELD((Config), (Config)->Size, DynamicValueRelocTable)) \
                 { \
-                    ADD_VALUE(L"DynamicValueRelocTable", PhaFormatString(L"0x%Ix", (Config)->DynamicValueRelocTable)->Buffer); \
-                    ADD_VALUE(L"CHPEMetadataPointer", PhaFormatString(L"0x%Ix", (Config)->CHPEMetadataPointer)->Buffer); \
-                    ADD_VALUE(L"GuardRFFailureRoutine", PhaFormatString(L"0x%Ix", (Config)->GuardRFFailureRoutine)->Buffer); \
-                    ADD_VALUE(L"GuardRFFailureRoutineFunctionPointer", PhaFormatString(L"0x%Ix", (Config)->GuardRFFailureRoutineFunctionPointer)->Buffer); \
+                    ADD_VALUE(L"DynamicValue relocation table", PhaFormatString(L"0x%Ix", (Config)->DynamicValueRelocTable)->Buffer); \
+                    ADD_VALUE(L"Hybrid metadata pointer", PhaFormatString(L"0x%Ix", (Config)->CHPEMetadataPointer)->Buffer); \
+                    ADD_VALUE(L"GuardRF failure-function routine", PhaFormatString(L"0x%Ix", (Config)->GuardRFFailureRoutine)->Buffer); \
+                    ADD_VALUE(L"GuardRF failure-function pointer", PhaFormatString(L"0x%Ix", (Config)->GuardRFFailureRoutineFunctionPointer)->Buffer); \
                 } \
                 \
                 if (RTL_CONTAINS_FIELD((Config), (Config)->Size, DynamicValueRelocTableOffset)) \
                 { \
-                    ADD_VALUE(L"DynamicValueRelocTableOffset", PhaFormatString(L"0x%Ix", (Config)->DynamicValueRelocTableOffset)->Buffer); \
-                    ADD_VALUE(L"DynamicValueRelocTableSection", PhaFormatString(L"0x%Ix", (Config)->DynamicValueRelocTableSection)->Buffer); \
-                    ADD_VALUE(L"GuardRFVerifyStackPointerFunctionPointer", PhaFormatString(L"0x%Ix", (Config)->GuardRFVerifyStackPointerFunctionPointer)->Buffer); \
-                    ADD_VALUE(L"HotPatchTableOffset", PhaFormatString(L"0x%Ix", (Config)->HotPatchTableOffset)->Buffer); \
-                    ADD_VALUE(L"EnclaveConfigurationPointer", PhaFormatString(L"0x%Ix", (Config)->EnclaveConfigurationPointer)->Buffer); \
+                    ADD_VALUE(L"DynamicValue relocation table offset", PhaFormatString(L"0x%Ix", (Config)->DynamicValueRelocTableOffset)->Buffer); \
+                    ADD_VALUE(L"DynamicValue relocation section", PhaFormatString(L"%u", (Config)->DynamicValueRelocTableSection)->Buffer); \
+                    ADD_VALUE(L"GuardRF verify-stack pointer", PhaFormatString(L"0x%Ix", (Config)->GuardRFVerifyStackPointerFunctionPointer)->Buffer); \
+                    ADD_VALUE(L"Hot patching table offset", PhaFormatString(L"0x%Ix", (Config)->HotPatchTableOffset)->Buffer); \
+                    ADD_VALUE(L"Enclave configuration pointer", PhaFormatString(L"0x%Ix", (Config)->EnclaveConfigurationPointer)->Buffer); \
                 } \
                 \
                 if (RTL_CONTAINS_FIELD((Config), (Config)->Size, VolatileMetadataPointer)) \
                 { \
-                    ADD_VALUE(L"VolatileMetadataPointer", PhaFormatString(L"0x%Ix", (Config)->VolatileMetadataPointer)->Buffer); \
+                    ADD_VALUE(L"Volatile metadata pointer", PhaFormatString(L"0x%Ix", (Config)->VolatileMetadataPointer)->Buffer); \
+                } \
+                if (RTL_CONTAINS_FIELD((Config), (Config)->Size, GuardEHContinuationTable)) \
+                { \
+                    ADD_VALUE(L"Guard EH Continuation table", PhaFormatString(L"0x%Ix", (Config)->GuardEHContinuationTable)->Buffer); \
+                    ADD_VALUE(L"Guard EH Continuation table entry count", PhaFormatUInt64((Config)->GuardEHContinuationCount, TRUE)->Buffer); \
+                } \
+            }
+
+            #define ADD_VALUES2(Type, Config) \
+            { \
+                if (RTL_CONTAINS_FIELD((Config), (Config)->Size, GuardXFGCheckFunctionPointer)) \
+                { \
+                    ADD_VALUE(L"XFG check-function pointer", PhaFormatString(L"0x%Ix", (Config)->GuardXFGCheckFunctionPointer)->Buffer); \
+                    ADD_VALUE(L"XFG dispatch-function pointer", PhaFormatString(L"0x%Ix", (Config)->GuardXFGDispatchFunctionPointer)->Buffer); \
+                    ADD_VALUE(L"XFG table dispatch-function pointer", PhaFormatString(L"0x%Ix", (Config)->GuardXFGTableDispatchFunctionPointer)->Buffer); \
+                } \
+                if (RTL_CONTAINS_FIELD((Config), (Config)->Size, CastGuardOsDeterminedFailureMode)) \
+                { \
+                    ADD_VALUE(L"Cast guard failure mode", PhaFormatString(L"0x%Ix", (Config)->CastGuardOsDeterminedFailureMode)->Buffer); \
+                } \
+            }
+
+            #define ADD_VALUES3(Type, Config) \
+            { \
+                if (RTL_CONTAINS_FIELD((Config), (Config)->Size, GuardMemcpyFunctionPointer)) \
+                { \
+                    ADD_VALUE(L"Guard memcpy function pointer", PhaFormatString(L"0x%Ix", (Config)->GuardMemcpyFunctionPointer)->Buffer); \
                 } \
             }
 
@@ -314,7 +424,13 @@ INT_PTR CALLBACK PvpPeLoadConfigDlgProc(
                 if (NT_SUCCESS(PhGetMappedImageLoadConfig32(&PvMappedImage, &config32)))
                 {
                     ADD_VALUES(IMAGE_LOAD_CONFIG_DIRECTORY32, config32);
-                    PvpAddPeEnclaveConfig(config32, lvHandle);
+                #if defined(NTDDI_WIN10_CO) && (NTDDI_VERSION >= NTDDI_WIN10_CO)
+                    ADD_VALUES2(IMAGE_LOAD_CONFIG_DIRECTORY32, config32);
+                #endif
+                #if defined(NTDDI_WIN10_NI) && (NTDDI_VERSION >= NTDDI_WIN10_NI)
+                    ADD_VALUES3(IMAGE_LOAD_CONFIG_DIRECTORY32, config32);
+                #endif
+                    PvpAddPeEnclaveConfig(config32, context->ListViewHandle);
                 }
             }
             else
@@ -322,41 +438,61 @@ INT_PTR CALLBACK PvpPeLoadConfigDlgProc(
                 if (NT_SUCCESS(PhGetMappedImageLoadConfig64(&PvMappedImage, &config64)))
                 {
                     ADD_VALUES(IMAGE_LOAD_CONFIG_DIRECTORY64, config64);
-                    PvpAddPeEnclaveConfig(config64, lvHandle);
+                #if defined(NTDDI_WIN10_CO) && (NTDDI_VERSION >= NTDDI_WIN10_CO)
+                    ADD_VALUES2(IMAGE_LOAD_CONFIG_DIRECTORY64, config64);
+                #endif
+                #if defined(NTDDI_WIN10_NI) && (NTDDI_VERSION >= NTDDI_WIN10_NI)
+                    ADD_VALUES3(IMAGE_LOAD_CONFIG_DIRECTORY64, config64);
+                #endif
+                    PvpAddPeEnclaveConfig(config64, context->ListViewHandle);
                 }
             }
 
-            EnableThemeDialogTexture(hwndDlg, ETDT_ENABLETAB);
+            PhInitializeWindowTheme(hwndDlg, PhEnableThemeSupport);
         }
         break;
     case WM_DESTROY:
         {
-            PhSaveListViewColumnsToSetting(L"ImageLoadCfgListViewColumns", GetDlgItem(hwndDlg, IDC_LIST));
+            PhSaveListViewColumnsToSetting(L"ImageLoadCfgListViewColumns", context->ListViewHandle);
+            PhRemoveWindowContext(hwndDlg, PH_WINDOW_CONTEXT_DEFAULT);
+            PhFree(context);
         }
         break;
     case WM_SHOWWINDOW:
         {
-            if (!propPageContext->LayoutInitialized)
+            if (context->PropSheetContext && !context->PropSheetContext->LayoutInitialized)
             {
-                PPH_LAYOUT_ITEM dialogItem;
-
-                dialogItem = PvAddPropPageLayoutItem(hwndDlg, hwndDlg, PH_PROP_PAGE_TAB_CONTROL_PARENT, PH_ANCHOR_ALL);
-                PvAddPropPageLayoutItem(hwndDlg, GetDlgItem(hwndDlg, IDC_LIST), dialogItem, PH_ANCHOR_ALL);
-
+                PvAddPropPageLayoutItem(hwndDlg, hwndDlg, PH_PROP_PAGE_TAB_CONTROL_PARENT, PH_ANCHOR_ALL);
                 PvDoPropPageLayout(hwndDlg);
 
-                propPageContext->LayoutInitialized = TRUE;
+                context->PropSheetContext->LayoutInitialized = TRUE;
             }
+        }
+        break;
+    case WM_SIZE:
+        {
+            PhLayoutManagerLayout(&context->LayoutManager);
         }
         break;
     case WM_NOTIFY:
         {
-            PvHandleListViewNotifyForCopy(lParam, GetDlgItem(hwndDlg, IDC_LIST));
+            PvHandleListViewNotifyForCopy(lParam, context->ListViewHandle);
         }
         break;
     case WM_CONTEXTMENU:
         {
-            PvHandleListViewCommandCopy(hwndDlg, lParam, wParam, GetDlgItem(hwndDlg, IDC_LIST));
+            PvHandleListViewCommandCopy(hwndDlg, lParam, wParam, context->ListViewHandle);
+        }
+        break;
+    case WM_CTLCOLORBTN:
+    case WM_CTLCOLORDLG:
+    case WM_CTLCOLORSTATIC:
+    case WM_CTLCOLORLISTBOX:
+        {
+            SetBkMode((HDC)wParam, TRANSPARENT);
+            SetTextColor((HDC)wParam, RGB(0, 0, 0));
+            SetDCBrushColor((HDC)wParam, RGB(255, 255, 255));
+            return (INT_PTR)GetStockBrush(DC_BRUSH);
         }
         break;
     }
